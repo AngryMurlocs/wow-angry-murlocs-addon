@@ -5,12 +5,23 @@ local Comm = GR.Comm
 local Wanted = GR:NewModule("Wanted")
 
 local frame
+local scrollChild
 local rows = {}
 local minimapBtn
-local NUM_ROWS = 12
+local NUM_ROWS = 40
 local ROW_H = 18
+local STALE_SEC = 30 * 60
+local SEND_CD = 60
+local ALERT_CD = 20
+
+local sendCd = {}   -- targetKey -> GetTime
+local alertCd = {}  -- targetKey -> GetTime
 
 local function EnsureDB()
+  local scope = U.GetScopeDB()
+  if scope then
+    return scope.wanted
+  end
   GR.db.wanted = GR.db.wanted or {}
   return GR.db.wanted
 end
@@ -18,6 +29,20 @@ end
 local function NormalizeKiller(name)
   if not name or name == "" then return nil end
   return U.NormalizeName(name)
+end
+
+local function PlayerZone()
+  local z = GetZoneText and GetZoneText() or ""
+  if z == "" and GetRealZoneText then
+    z = GetRealZoneText() or ""
+  end
+  return U.SanitizeText(z, 48)
+end
+
+local function IsStale(entry)
+  local t = entry and entry.lastSeenTime or 0
+  if not t or t <= 0 then return false end
+  return (U.WallTime() - t) > STALE_SEC
 end
 
 function Wanted:AddKill(killer, victim, zone, fromSelf)
@@ -32,11 +57,35 @@ function Wanted:AddKill(killer, victim, zone, fromSelf)
   entry.count = (entry.count or 0) + 1
   entry.lastVictim = U.ShortName(victim or "")
   entry.lastZone = zone or ""
-  entry.lastTime = time and time() or 0
+  entry.lastTime = U.WallTime()
   GR:SendMessage("WANTED_CHANGED")
   if frame and frame:IsShown() then
     Wanted:Refresh()
   end
+end
+
+function Wanted:ApplySighting(target, zone, reporter, ts, fromRemote)
+  local key = NormalizeKiller(target)
+  if not key then return end
+  local db = EnsureDB()
+  local entry = db[key]
+  if not entry then
+    -- Sightings only for existing Wanted entries
+    return false
+  end
+  ts = tonumber(ts) or U.WallTime()
+  -- Prefer newer wall timestamps; ignore clearly older
+  if entry.lastSeenTime and entry.lastSeenTime > ts then
+    return false
+  end
+  entry.lastSeenTime = ts
+  entry.lastSeenZone = zone or ""
+  entry.lastSeenBy = U.NormalizeName(reporter or "")
+  GR:SendMessage("WANTED_CHANGED")
+  if frame and frame:IsShown() then
+    Wanted:Refresh()
+  end
+  return true
 end
 
 function Wanted:Clear(killer, broadcast)
@@ -49,7 +98,6 @@ function Wanted:Clear(killer, broadcast)
     end
   else
     wipe(db)
-    -- Never broadcast clear|* (remote wipe-all rejected by peers)
   end
   GR:SendMessage("WANTED_CHANGED")
   Wanted:Refresh()
@@ -59,7 +107,17 @@ function Wanted:GetSorted()
   local db = EnsureDB()
   local list = {}
   for name, e in pairs(db) do
-    list[#list + 1] = { name = name, count = e.count or 0, lastVictim = e.lastVictim, lastZone = e.lastZone, lastTime = e.lastTime }
+    list[#list + 1] = {
+      name = name,
+      count = e.count or 0,
+      lastVictim = e.lastVictim,
+      lastZone = e.lastZone,
+      lastTime = e.lastTime,
+      lastSeenTime = e.lastSeenTime,
+      lastSeenZone = e.lastSeenZone,
+      lastSeenBy = e.lastSeenBy,
+      stale = IsStale(e),
+    }
   end
   table.sort(list, function(a, b)
     if a.count == b.count then
@@ -70,11 +128,24 @@ function Wanted:GetSorted()
   return list
 end
 
+local function FormatSeenAge(ts)
+  if not ts or ts <= 0 then return "-" end
+  local age = U.WallTime() - ts
+  if age < 0 then age = 0 end
+  if age < 60 then
+    return string.format(U.L("AGO"), math.floor(age))
+  elseif age < 3600 then
+    return string.format(U.L("AGO_MIN"), math.floor(age / 60))
+  else
+    return string.format(U.L("AGO_HR"), math.floor(age / 3600))
+  end
+end
+
 local function EnsureFrame()
   if frame then return frame end
 
   frame = CreateFrame("Frame", "AngryMurlocsWantedFrame", UIParent, "BasicFrameTemplateWithInset")
-  frame:SetSize(460, 340)
+  frame:SetSize(640, 420)
   GR.db.frames = GR.db.frames or {}
   GR.db.frames.wanted = GR.db.frames.wanted or {}
   U.MakeMovable(frame, {
@@ -93,24 +164,51 @@ local function EnsureFrame()
 
   local header = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   header:SetPoint("TOPLEFT", 16, -52)
-  header:SetText(string.format("%-16s  %5s  %-14s  %s", U.L("WANTED_COL_KILLER"), U.L("WANTED_COL_KILLS"), U.L("WANTED_COL_VICTIM"), U.L("ZONE")))
+  header:SetText(string.format(
+    "%-14s %5s %-10s %-12s %-12s %s",
+    U.L("WANTED_COL_KILLER"),
+    U.L("WANTED_COL_KILLS"),
+    U.L("WANTED_COL_SEEN"),
+    U.L("WANTED_COL_SEEN_ZONE"),
+    U.L("WANTED_COL_SEEN_BY"),
+    U.L("WANTED_COL_VICTIM")
+  ))
+
+  local scroll = CreateFrame("ScrollFrame", "AngryMurlocsWantedScroll", frame, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 12, -72)
+  scroll:SetPoint("BOTTOMRIGHT", -32, 40)
+
+  scrollChild = CreateFrame("Frame", nil, scroll)
+  scrollChild:SetSize(580, NUM_ROWS * ROW_H)
+  scroll:SetScrollChild(scrollChild)
 
   for i = 1, NUM_ROWS do
-    local row = CreateFrame("Button", nil, frame)
-    row:SetSize(420, ROW_H)
-    row:SetPoint("TOPLEFT", 16, -56 - i * ROW_H)
+    local row = CreateFrame("Button", nil, scrollChild)
+    row:SetSize(560, ROW_H)
+    row:SetPoint("TOPLEFT", 4, -((i - 1) * ROW_H))
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.text:SetAllPoints()
     row.text:SetJustifyH("LEFT")
+    row:RegisterForClicks("LeftButtonUp")
     row:SetScript("OnClick", function(self)
-      if self.killer then
+      if not self.killer then return end
+      if IsShiftKeyDown and IsShiftKeyDown() then
         Wanted:Clear(self.killer, true)
       end
     end)
     row:SetScript("OnEnter", function(self)
       if not self.killer then return end
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-      GameTooltip:AddLine(U.ShortName(self.killer), 1, 0.2, 0.2)
+      GameTooltip:AddLine(self.killer, 1, 0.2, 0.2)
+      if self.seenBy and self.seenBy ~= "" then
+        GameTooltip:AddLine(U.L("WANTED_COL_SEEN_BY") .. ": " .. self.seenBy, 0.9, 0.9, 0.9)
+      end
+      if self.seenZone and self.seenZone ~= "" then
+        GameTooltip:AddLine(U.L("ZONE") .. ": " .. self.seenZone, 0.8, 0.8, 0.8)
+      end
+      if self.stale then
+        GameTooltip:AddLine(U.L("WANTED_STALE"), 1, 0.6, 0.2)
+      end
       GameTooltip:AddLine(U.L("WANTED_CLICK_CLEAR"), 0.7, 0.7, 0.7)
       GameTooltip:Show()
     end)
@@ -136,17 +234,32 @@ end
 function Wanted:Refresh()
   if not frame or not frame:IsShown() then return end
   local list = Wanted:GetSorted()
+  scrollChild:SetHeight(math.max(#list, 1) * ROW_H)
   for i = 1, NUM_ROWS do
     local e = list[i]
     if e then
       rows[i].killer = e.name
+      rows[i].seenBy = e.lastSeenBy
+      rows[i].seenZone = e.lastSeenZone
+      rows[i].stale = e.stale
+      local seen = FormatSeenAge(e.lastSeenTime)
+      if e.stale and e.lastSeenTime and e.lastSeenTime > 0 then
+        seen = seen .. "*"
+      end
       rows[i].text:SetText(string.format(
-        "%-16s  %5d  %-14s  %s",
-        U.ShortName(e.name):sub(1, 16),
+        "%-14s %5d %-10s %-12s %-12s %s",
+        U.ShortName(e.name):sub(1, 14),
         e.count,
-        (e.lastVictim or "-"):sub(1, 14),
-        (e.lastZone or "-"):sub(1, 18)
+        seen:sub(1, 10),
+        (e.lastSeenZone or "-"):sub(1, 12),
+        U.ShortName(e.lastSeenBy or "-"):sub(1, 12),
+        (e.lastVictim or "-"):sub(1, 12)
       ))
+      if e.stale then
+        rows[i].text:SetTextColor(0.7, 0.55, 0.35)
+      else
+        rows[i].text:SetTextColor(1, 1, 1)
+      end
       rows[i]:Show()
     else
       rows[i].killer = nil
@@ -163,6 +276,72 @@ function Wanted:Toggle()
     frame:Show()
     Wanted:Refresh()
   end
+end
+
+local function MaybeAlert(targetKey, zone, reporter)
+  local ui = GR.db.wantedUI
+  if ui and ui.showSightAlerts == false then return end
+  local now = U.Now()
+  local last = alertCd[targetKey] or 0
+  if (now - last) < ALERT_CD then return end
+  alertCd[targetKey] = now
+  U.Print(string.format(
+    U.L("WANTED_SIGHT_ALERT"),
+    U.ShortName(targetKey),
+    zone or "?",
+    U.ShortName(reporter or "?")
+  ))
+end
+
+local function OnTargetChanged()
+  if not UnitExists or not UnitExists("target") then return end
+  if not UnitIsPlayer or not UnitIsPlayer("target") then return end
+
+  local name, realm = UnitName("target")
+  if not name or name == "" then return end
+  if UnitFullName then
+    local n, r = UnitFullName("target")
+    if n then
+      name = n
+      realm = r
+    end
+  end
+  local full
+  if realm and realm ~= "" then
+    full = name .. "-" .. realm
+  else
+    full = U.NormalizeName(name)
+  end
+  local key = NormalizeKiller(full)
+  if not key then return end
+
+  local db = EnsureDB()
+  if not db[key] then return end
+
+  local zone = PlayerZone()
+  local me = U.NormalizeName(U.PlayerName())
+  local nowSession = U.Now()
+  local wall = U.WallTime()
+
+  -- Local apply (does not bump kill count)
+  Wanted:ApplySighting(key, zone, me, wall, false)
+
+  local lastSend = sendCd[key] or 0
+  local canSend = (nowSession - lastSend) >= SEND_CD
+  local share = GR.db.privacy and GR.db.privacy.shareSightings ~= false
+
+  if canSend and share and IsInGuild and IsInGuild() then
+    sendCd[key] = nowSession
+    local payload = string.format(
+      "SIGHT|%s|%s|%d",
+      U.SanitizeText(key, 48),
+      U.SanitizeText(zone, 48),
+      wall
+    )
+    Comm:Send(payload)
+  end
+
+  MaybeAlert(key, zone, me)
 end
 
 local pendingMinimapUpdate = false
@@ -182,7 +361,6 @@ local function UpdateMinimapButton()
   local angle = (GR.db.minimap and GR.db.minimap.angle) or 200
   local rad = math.rad(angle)
   local r = MinimapRadius()
-  -- Only SetPoint — never SetParent/Strata/Level here (Forbidden on Forever)
   minimapBtn:ClearAllPoints()
   minimapBtn:SetPoint("CENTER", Minimap, "CENTER", math.cos(rad) * r, math.sin(rad) * r)
 end
@@ -197,7 +375,6 @@ local function EnsureMinimapButton()
     return
   end
 
-  -- Parent once: Backdrop preferred, else UIParent (avoid Minimap secure reparent)
   local parent = (MinimapBackdrop and MinimapBackdrop) or UIParent
   minimapBtn = CreateFrame("Button", "AngryMurlocsWantedMinimapButton", parent)
   minimapBtn:SetSize(31, 31)
@@ -207,7 +384,6 @@ local function EnsureMinimapButton()
   minimapBtn:RegisterForDrag("LeftButton")
   minimapBtn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
-  -- LibDBIcon layout: icon inset + TrackingBorder at TOPLEFT (0,0)
   local icon = minimapBtn:CreateTexture(nil, "ARTWORK")
   icon:SetSize(20, 20)
   icon:SetPoint("TOPLEFT", 7, -5)
@@ -249,7 +425,6 @@ local function EnsureMinimapButton()
 
   UpdateMinimapButton()
   minimapBtn:Show()
-
   C_Timer.After(2, UpdateMinimapButton)
 end
 
@@ -262,6 +437,14 @@ function Wanted:OnEnable()
   combat:SetScript("OnEvent", function()
     if pendingMinimapUpdate then
       UpdateMinimapButton()
+    end
+  end)
+
+  local targetFrame = CreateFrame("Frame")
+  U.SafeRegisterEvent(targetFrame, "PLAYER_TARGET_CHANGED")
+  targetFrame:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_TARGET_CHANGED" then
+      OnTargetChanged()
     end
   end)
 
@@ -278,7 +461,23 @@ function Wanted:OnEnable()
     end
   end)
 
+  GR:RegisterMessage("SIGHT_UPDATE", function(_, sender, data)
+    if not data or not data.target then return end
+    -- Never rebroadcast received sightings
+    local ok = Wanted:ApplySighting(data.target, data.zone, sender, data.ts, true)
+    if ok then
+      MaybeAlert(data.target, data.zone, sender)
+    end
+  end)
+
   GR:RegisterMessage("WANTED_CHANGED", function()
+    if frame and frame:IsShown() then
+      Wanted:Refresh()
+    end
+  end)
+
+  GR:RegisterMessage("GUILD_UPDATE", function()
+    -- Scope switches with guild; refresh UI
     if frame and frame:IsShown() then
       Wanted:Refresh()
     end

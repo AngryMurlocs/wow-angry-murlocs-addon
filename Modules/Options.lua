@@ -157,6 +157,17 @@ function Options:OnEnable()
   end, function(v)
     GR.db.privacy.shareLevelUp = v and true or false
   end)
+  Check("OPT_SHARE_SIGHT", function()
+    return GR.db.privacy.shareSightings ~= false
+  end, function(v)
+    GR.db.privacy.shareSightings = v and true or false
+  end)
+  Check("OPT_SHOW_SIGHT_ALERT", function()
+    return not GR.db.wantedUI or GR.db.wantedUI.showSightAlerts ~= false
+  end, function(v)
+    GR.db.wantedUI = GR.db.wantedUI or {}
+    GR.db.wantedUI.showSightAlerts = v and true or false
+  end)
 
   Header("OPT_SEC_MAP")
   Check("OPT_SHOW_PINS", function()
@@ -239,8 +250,12 @@ function Options:OnEnable()
     GR.db.frames = GR.db.frames or {}
     GR.db.frames.professions = GR.db.frames.professions or {}
     GR.db.frames.wanted = GR.db.frames.wanted or {}
+    GR.db.frames.craft = GR.db.frames.craft or {}
+    GR.db.frames.main = GR.db.frames.main or {}
     GR.db.frames.professions.point = nil
     GR.db.frames.wanted.point = nil
+    GR.db.frames.craft.point = nil
+    GR.db.frames.main.point = nil
     if AngryMurlocsFrame then
       U.ApplyPoint(AngryMurlocsFrame, nil, function(f)
         f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -251,10 +266,20 @@ function Options:OnEnable()
         f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
       end)
     end
+    if AngryMurlocsCraftFrame then
+      U.ApplyPoint(AngryMurlocsCraftFrame, nil, function(f)
+        f:SetPoint("CENTER", UIParent, "CENTER", -40, 20)
+      end)
+    end
+    if AngryMurlocsMainFrame then
+      U.ApplyPoint(AngryMurlocsMainFrame, nil, function(f)
+        f:SetPoint("CENTER", UIParent, "CENTER", 80, 40)
+      end)
+    end
     U.Print(U.L("OPT_RESET_DONE"))
   end, 180)
 
-  content:SetHeight(math.abs(y) + 40)
+  content:SetHeight(math.abs(y) + 80)
 
   if Settings and Settings.RegisterCanvasLayoutCategory then
     local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)

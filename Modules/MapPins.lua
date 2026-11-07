@@ -54,6 +54,13 @@ local function AcquirePin()
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     local r, g, b = U.ClassColor(d.classFile)
     GameTooltip:AddLine(U.ShortName(self.member), r, g, b)
+    local mains = GR:GetModule("Mains")
+    if mains then
+      local main = mains:GetMain(self.member)
+      if main then
+        GameTooltip:AddLine(string.format(U.L("MAIN_TOOLTIP"), U.ShortName(self.member), main), 0.6, 0.9, 1)
+      end
+    end
 
     local className = d.classFile or "?"
     if LOCALIZED_CLASS_NAMES_MALE and d.classFile and LOCALIZED_CLASS_NAMES_MALE[d.classFile] then

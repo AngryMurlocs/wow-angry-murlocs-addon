@@ -1,9 +1,9 @@
 ## Interface: 16001
 ## Title: AngryMurlocs
-## Notes: Angry Murlocs guild helper — map pins, professions, Wanted, level-ups
-## Notes-deDE: Angry Murlocs Gilden-Helfer — Pins, Berufe, Wanted (Fahndung), Level-Ups
+## Notes: Angry Murlocs guild helper — map pins, professions, Wanted sightings, mains, craft requests
+## Notes-deDE: Angry Murlocs Gilden-Helfer — Pins, Berufe, Wanted-Sichtungen, Main/Twink, Handwerksanfragen
 ## Author: Angry Murlocs
-## Version: 0.4.0
+## Version: 0.5.0
 ## SavedVariables: AngryMurlocsDB
 
 Localization\enUS.lua
@@ -17,6 +17,8 @@ Modules\MapPins.lua
 Modules\Professions.lua
 Modules\Death.lua
 Modules\Wanted.lua
+Modules\Mains.lua
+Modules\Craft.lua
 Modules\LevelUp.lua
 Modules\UI.lua
 Modules\Options.lua

@@ -11,12 +11,22 @@ local registered = false
 
 local RATE_WINDOW = 10
 local RATE_MAX = 24
+local MAX_SEND = 250
+local MAX_RECV = 255
+local FRAG_TTL = 30
 local rateBuckets = {}
+local fragBuf = {}
+local fragSeq = 0
 
 local VALID_CLASS = {
   WARRIOR = true, PALADIN = true, HUNTER = true, ROGUE = true, PRIEST = true,
   DEATHKNIGHT = true, SHAMAN = true, MAGE = true, WARLOCK = true, MONK = true,
   DRUID = true, DEMONHUNTER = true, EVOKER = true,
+}
+
+local VALID_CRAFT_ACTION = {
+  create = true, claim = true, unclaim = true,
+  assign = true, done = true, reopen = true, cancel = true,
 }
 
 local function AllowSender(sender)
@@ -31,6 +41,15 @@ local function AllowSender(sender)
   return b.n <= RATE_MAX
 end
 
+local function RawSend(payload)
+  if not IsInGuild() then return false end
+  if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then return false end
+  if type(payload) ~= "string" or payload == "" then return false end
+  if #payload > MAX_SEND then return false end
+  C_ChatInfo.SendAddonMessage(GR.PREFIX, payload, "GUILD")
+  return true
+end
+
 function Comm:Register()
   if registered then return end
   if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
@@ -40,30 +59,51 @@ function Comm:Register()
   end
 end
 
-function Comm:Send(payload)
-  if not IsInGuild() then return end
-  if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then return end
-  if type(payload) ~= "string" or payload == "" then return end
-  if #payload > 250 then
-    payload = payload:sub(1, 250)
+-- Safe send: never silently truncates. Fragments when needed.
+function Comm:SendFull(payload)
+  if not IsInGuild() then return false end
+  if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then return false end
+  if type(payload) ~= "string" or payload == "" then return false end
+
+  if #payload <= MAX_SEND then
+    return RawSend(payload)
   end
-  C_ChatInfo.SendAddonMessage(GR.PREFIX, payload, "GUILD")
+
+  fragSeq = fragSeq + 1
+  local id = string.format("%s%d", string.sub(U.ShortName(U.PlayerName()) or "x", 1, 6), fragSeq % 100000)
+  -- FRAG|id|i|n|chunk  — reserve header room
+  local headerBase = "FRAG|" .. id .. "|"
+  -- worst case: FRAG|id|99|99|  (~20+ chars); use 40 to be safe
+  local chunkSize = MAX_SEND - (#headerBase + 10)
+  if chunkSize < 32 then chunkSize = 32 end
+
+  local chunks = {}
+  local pos = 1
+  while pos <= #payload do
+    chunks[#chunks + 1] = payload:sub(pos, pos + chunkSize - 1)
+    pos = pos + chunkSize
+  end
+  local n = #chunks
+  if n > 99 then
+    return false
+  end
+  for i = 1, n do
+    local msg = string.format("FRAG|%s|%d|%d|%s", id, i, n, chunks[i])
+    if #msg > MAX_SEND then
+      return false
+    end
+    if not RawSend(msg) then
+      return false
+    end
+  end
+  return true
 end
 
-function Comm:OnAddonMessage(prefix, message, channel, sender)
-  if prefix ~= GR.PREFIX and prefix ~= GR.PREFIX_NEW then return end
-  if channel ~= "GUILD" then return end
-  if type(message) ~= "string" or message == "" or #message > 255 then return end
+function Comm:Send(payload)
+  return Comm:SendFull(payload)
+end
 
-  sender = U.NormalizeName(sender)
-  if U.IsSelfName(sender) then return end
-  if not AllowSender(sender) then return end
-
-  local tag, rest = message:match("^([^|]+)|?(.*)$")
-  if not tag then return end
-  tag = tag:upper()
-  if #tag > 12 then return end
-
+local function DispatchParsed(tag, rest, sender)
   if tag == "POS" then
     local parts = U.Split(rest, "|")
     local mapId = tonumber(parts[1])
@@ -112,12 +152,10 @@ function Comm:OnAddonMessage(prefix, message, channel, sender)
     local action = (parts[1] or ""):lower()
     if action ~= "add" and action ~= "clear" then return end
     local killer = U.SanitizeText(parts[2] or "", 48)
-    -- Remote wipe-all is an abuse vector — ignore clear|*
     if action == "clear" and (killer == "*" or killer == "") then return end
     local victim = U.SanitizeText(parts[3] or sender, 48)
     if action == "add" then
       if killer == "" then return end
-      -- Only the victim may report themselves
       if string.lower(U.ShortName(victim)) ~= string.lower(U.ShortName(sender)) then return end
     end
     GR:SendMessage("WANTED_UPDATE", sender, {
@@ -131,5 +169,143 @@ function Comm:OnAddonMessage(prefix, message, channel, sender)
     if level and level >= 1 and level <= 80 then
       GR:SendMessage("LVL_UPDATE", sender, level)
     end
+  elseif tag == "SIGHT" then
+    local parts = U.SplitKeepEmpty(rest, "|")
+    local target = U.NormalizeName(U.SanitizeText(parts[1] or "", 48))
+    local zone = U.SanitizeText(parts[2] or "", 48)
+    local ts = tonumber(parts[3]) or 0
+    if not target or target == "" then return end
+    if ts < 0 then return end
+    GR:SendMessage("SIGHT_UPDATE", sender, {
+      target = target,
+      zone = zone,
+      ts = ts,
+      fromRemote = true,
+    })
+  elseif tag == "MAIN" then
+    local parts = U.SplitKeepEmpty(rest, "|")
+    local action = (parts[1] or ""):lower()
+    if action ~= "set" and action ~= "clear" then return end
+    local mainName = ""
+    local ver, ts
+    if action == "set" then
+      mainName = U.NormalizeName(U.SanitizeText(parts[2] or "", 48))
+      ver = tonumber(parts[3]) or 0
+      ts = tonumber(parts[4]) or 0
+      if not mainName or mainName == "" then return end
+    else
+      ver = tonumber(parts[2]) or 0
+      ts = tonumber(parts[3]) or 0
+    end
+    if ver < 1 then return end
+    GR:SendMessage("MAIN_UPDATE", sender, {
+      action = action,
+      char = sender,
+      main = mainName,
+      ver = ver,
+      ts = ts,
+    })
+  elseif tag == "CRAFT" then
+    local parts = U.SplitKeepEmpty(rest, "|")
+    local action = (parts[1] or ""):lower()
+    if not VALID_CRAFT_ACTION[action] then return end
+    local id = U.SanitizeText(parts[2] or "", 64)
+    local ver = tonumber(parts[3]) or 0
+    if id == "" or ver < 1 then return end
+    local data = {
+      action = action,
+      id = id,
+      ver = ver,
+      ts = tonumber(parts[4]) or 0,
+      owner = U.NormalizeName(U.SanitizeText(parts[5] or "", 48)),
+      itemId = tonumber(parts[6]) or 0,
+      itemName = U.SanitizeText(parts[7] or "", 64),
+      itemLinkEsc = tostring(parts[8] or ""),
+      qty = tonumber(parts[9]) or 1,
+      mats = tonumber(parts[10]) == 1,
+      note = U.SanitizeText(parts[11] or "", 80),
+      status = U.SanitizeText(parts[12] or "open", 16),
+      assignee = U.NormalizeName(U.SanitizeText(parts[13] or "", 48)),
+      claimant = U.NormalizeName(U.SanitizeText(parts[14] or "", 48)),
+    }
+    if data.qty < 1 then data.qty = 1 end
+    if data.qty > 999 then data.qty = 999 end
+    local st = data.status
+    if st ~= "open" and st ~= "taken" and st ~= "done" and st ~= "cancelled" then
+      data.status = "open"
+    end
+    GR:SendMessage("CRAFT_UPDATE", sender, data)
+  elseif tag == "SYNCREQ" then
+    local kind = (rest or ""):lower()
+    kind = U.SanitizeText(kind, 16)
+    if kind == "main" or kind == "craft" or kind == "wanted" then
+      GR:SendMessage("SYNCREQ_UPDATE", sender, kind)
+    end
   end
+  -- Unknown tags ignored for older/newer mixed clients
+end
+
+local function HandleMessage(message, sender)
+  local tag, rest = message:match("^([^|]+)|?(.*)$")
+  if not tag then return end
+  tag = tag:upper()
+  if #tag > 12 then return end
+
+  if tag == "FRAG" then
+    local parts = U.SplitKeepEmpty(rest, "|")
+    local id = parts[1] or ""
+    local i = tonumber(parts[2])
+    local n = tonumber(parts[3])
+    -- chunk may contain pipes: rejoin remaining
+    local chunk
+    if i and n and id ~= "" then
+      local prefix = id .. "|" .. tostring(i) .. "|" .. tostring(n) .. "|"
+      local idx = rest:find(prefix, 1, true)
+      if idx == 1 then
+        chunk = rest:sub(#prefix + 1)
+      else
+        chunk = parts[4] or ""
+      end
+    end
+    if not i or not n or id == "" or n < 1 or n > 99 or i < 1 or i > n then return end
+    local now = U.Now()
+    local key = sender .. "::" .. id
+    local buf = fragBuf[key]
+    if not buf or buf.n ~= n or (now - buf.t) > FRAG_TTL then
+      buf = { n = n, t = now, parts = {}, count = 0 }
+      fragBuf[key] = buf
+    end
+    if not buf.parts[i] then
+      buf.parts[i] = chunk or ""
+      buf.count = buf.count + 1
+    end
+    if buf.count >= n then
+      local full = {}
+      for k = 1, n do
+        if not buf.parts[k] then
+          fragBuf[key] = nil
+          return
+        end
+        full[k] = buf.parts[k]
+      end
+      fragBuf[key] = nil
+      local assembled = table.concat(full)
+      HandleMessage(assembled, sender)
+    end
+    return
+  end
+
+  DispatchParsed(tag, rest or "", sender)
+end
+
+function Comm:OnAddonMessage(prefix, message, channel, sender)
+  if prefix ~= GR.PREFIX and prefix ~= GR.PREFIX_NEW then return end
+  if channel ~= "GUILD" then return end
+  if type(message) ~= "string" or message == "" or #message > MAX_RECV then return end
+
+  sender = U.NormalizeName(sender)
+  if U.IsSelfName(sender) then return end
+  if not AllowSender(sender) then return end
+
+  HandleMessage(message, sender)
 end

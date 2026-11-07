@@ -78,6 +78,10 @@ function U.Now()
   return GetTime()
 end
 
+function U.WallTime()
+  return (time and time()) or 0
+end
+
 function U.Round(n, places)
   local m = 10 ^ (places or 0)
   return math.floor(n * m + 0.5) / m
@@ -92,12 +96,81 @@ function U.Split(str, sep)
   return t
 end
 
+-- Keep empty fields (unlike U.Split).
+function U.SplitKeepEmpty(str, sep)
+  local t = {}
+  if str == nil then return t end
+  sep = sep or "|"
+  str = tostring(str)
+  local start = 1
+  while true do
+    local i = str:find(sep, start, true)
+    if not i then
+      t[#t + 1] = str:sub(start)
+      break
+    end
+    t[#t + 1] = str:sub(start, i - 1)
+    start = i + #sep
+  end
+  return t
+end
+
 function U.SanitizeText(s, maxLen)
   s = tostring(s or ""):gsub("|", ""):gsub("[%c]", "")
   if maxLen and #s > maxLen then
     s = s:sub(1, maxLen)
   end
   return s
+end
+
+-- Escape pipe as literal \124 so item links survive TAG|field protocol.
+function U.EscapeField(s, maxLen)
+  s = tostring(s or ""):gsub("[%c]", "")
+  s = s:gsub("|", "\\124")
+  if maxLen and #s > maxLen then
+    s = s:sub(1, maxLen)
+  end
+  return s
+end
+
+function U.UnescapeField(s)
+  return tostring(s or ""):gsub("\\124", "|")
+end
+
+function U.RealmKey()
+  local realm = GetNormalizedRealmName and GetNormalizedRealmName() or (GetRealmName and GetRealmName()) or "Unknown"
+  return tostring(realm):gsub("%s", "")
+end
+
+function U.GuildScopeKey()
+  local guild = GetGuildInfo and GetGuildInfo("player")
+  if not guild or guild == "" then
+    return nil
+  end
+  return U.RealmKey() .. "::" .. tostring(guild)
+end
+
+function U.EnsureScopeTable(scope)
+  scope.wanted = scope.wanted or {}
+  scope.mains = scope.mains or {}
+  scope.craft = scope.craft or {}
+  return scope
+end
+
+function U.GetScopeDB()
+  if not GR.db then return nil end
+  GR.db.scopes = GR.db.scopes or {}
+  local key = U.GuildScopeKey()
+  if not key then
+    -- Offline / no guild: ephemeral bucket (not persisted across guild joins meaningfully)
+    key = U.RealmKey() .. "::__none__"
+  end
+  local scope = GR.db.scopes[key]
+  if not scope then
+    scope = {}
+    GR.db.scopes[key] = scope
+  end
+  return U.EnsureScopeTable(scope)
 end
 
 -- Forever may block some RegisterEvent calls (ADDON_ACTION_FORBIDDEN).
