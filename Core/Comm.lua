@@ -24,11 +24,6 @@ local VALID_CLASS = {
   DRUID = true, DEMONHUNTER = true, EVOKER = true,
 }
 
-local VALID_CRAFT_ACTION = {
-  create = true, claim = true, unclaim = true,
-  assign = true, done = true, reopen = true, cancel = true,
-}
-
 local function AllowSender(sender)
   if not sender then return false end
   local now = GetTime and GetTime() or 0
@@ -38,18 +33,7 @@ local function AllowSender(sender)
     return true
   end
   b.n = b.n + 1
-  local ok = b.n <= RATE_MAX
-  -- #region agent log
-  if not ok then
-    U.AgentLog("H2", "Comm.lua:AllowSender", "rate_limit_drop", {
-      sender = U.ShortName(sender),
-      n = b.n,
-      max = RATE_MAX,
-      window = RATE_WINDOW,
-    })
-  end
-  -- #endregion
-  return ok
+  return b.n <= RATE_MAX
 end
 
 local function RawSend(payload)
@@ -115,23 +99,6 @@ function Comm:Send(payload)
 end
 
 local function DispatchParsed(tag, rest, sender)
-  -- #region agent log
-  local pipeCount = 0
-  if rest then
-    for _ in string.gmatch(rest, "|") do pipeCount = pipeCount + 1 end
-  end
-  local sanitizedWould = U.SanitizeText(rest or "", 200)
-  local sanitizeKillsPipes = (pipeCount > 0) and (not sanitizedWould:find("|", 1, true))
-  if tag ~= "POS" then
-    U.AgentLog("H1", "Comm.lua:DispatchParsed", "dispatch_enter", {
-      tag = tag,
-      restLen = #(rest or ""),
-      pipeCount = pipeCount,
-      sanitizeKillsPipes = sanitizeKillsPipes and true or false,
-      sender = U.ShortName(sender),
-    })
-  end
-  -- #endregion
   if tag == "POS" then
     local parts = U.Split(rest, "|")
     local mapId = tonumber(parts[1])
@@ -157,18 +124,9 @@ local function DispatchParsed(tag, rest, sender)
       time = U.Now(),
     })
   elseif tag == "PROF" then
-    -- Keep | delimiters (key:skill|key:skill); SanitizeText would strip them
+    -- Keep payload separators (+ or legacy |); do not SanitizeText the whole rest
     local cleaned = tostring(rest or ""):gsub("[%c]", "")
     if #cleaned > 200 then cleaned = cleaned:sub(1, 200) end
-    -- #region agent log
-    local cleanedPipes = 0
-    for _ in string.gmatch(cleaned, "|") do cleanedPipes = cleanedPipes + 1 end
-    U.AgentLog("H6", "Comm.lua:PROF", "prof_cleaned", {
-      cleanedLen = #cleaned,
-      cleanedPipes = cleanedPipes,
-      sender = U.ShortName(sender),
-    })
-    -- #endregion
     GR:SendMessage("PROF_UPDATE", sender, cleaned)
   elseif tag == "PROFREQ" then
     GR:SendMessage("PROF_REQUEST", sender)
@@ -178,13 +136,6 @@ local function DispatchParsed(tag, rest, sender)
     if cause ~= "player" and cause ~= "mob" and cause ~= "env" then
       cause = (tonumber(parts[2]) == 1) and "player" or "mob"
     end
-    -- #region agent log
-    U.AgentLog("H1", "Comm.lua:DEATH", "death_dispatch_ok", {
-      partCount = #parts,
-      cause = tostring(cause or ""),
-      sender = U.ShortName(sender),
-    })
-    -- #endregion
     GR:SendMessage("DEATH_UPDATE", sender, {
       killer = U.SanitizeText(parts[1] or "?", 48),
       isPlayer = tonumber(parts[2]) == 1 or cause == "player",
@@ -195,8 +146,25 @@ local function DispatchParsed(tag, rest, sender)
       time = U.Now(),
     })
   elseif tag == "WANTED" then
-    local parts = U.Split(rest, "|")
+    -- Split first; never SanitizeText(whole rest) — guardrail
+    local parts = U.SplitKeepEmpty(rest, "|")
     local action = (parts[1] or ""):lower()
+    if action == "sync" then
+      local killer = U.NormalizeName(U.SanitizeText(parts[2] or "", 48))
+      if not killer or killer == "" then return end
+      GR:SendMessage("WANTED_UPDATE", sender, {
+        action = "sync",
+        killer = killer,
+        count = tonumber(parts[3]) or 0,
+        victim = U.SanitizeText(parts[4] or "", 48),
+        zone = U.SanitizeText(parts[5] or "", 48),
+        lastTime = tonumber(parts[6]) or 0,
+        lastSeenTime = tonumber(parts[7]) or 0,
+        lastSeenZone = U.SanitizeText(parts[8] or "", 48),
+        lastSeenBy = U.NormalizeName(U.SanitizeText(parts[9] or "", 48)),
+      })
+      return
+    end
     if action ~= "add" and action ~= "clear" then return end
     local killer = U.SanitizeText(parts[2] or "", 48)
     if action == "clear" and (killer == "*" or killer == "") then return end
@@ -213,14 +181,6 @@ local function DispatchParsed(tag, rest, sender)
     })
   elseif tag == "LVL" then
     local level = tonumber(rest)
-    -- #region agent log
-    U.AgentLog("H1", "Comm.lua:LVL", "lvl_parse", {
-      rest = tostring(rest or ""),
-      level = level or -1,
-      ok = (level and level >= 1 and level <= 80) and true or false,
-      sender = U.ShortName(sender),
-    })
-    -- #endregion
     if level and level >= 1 and level <= 80 then
       GR:SendMessage("LVL_UPDATE", sender, level)
     end
@@ -237,67 +197,14 @@ local function DispatchParsed(tag, rest, sender)
       ts = ts,
       fromRemote = true,
     })
-  elseif tag == "MAIN" then
-    local parts = U.SplitKeepEmpty(rest, "|")
-    local action = (parts[1] or ""):lower()
-    if action ~= "set" and action ~= "clear" then return end
-    local mainName = ""
-    local ver, ts
-    if action == "set" then
-      mainName = U.NormalizeName(U.SanitizeText(parts[2] or "", 48))
-      ver = tonumber(parts[3]) or 0
-      ts = tonumber(parts[4]) or 0
-      if not mainName or mainName == "" then return end
-    else
-      ver = tonumber(parts[2]) or 0
-      ts = tonumber(parts[3]) or 0
-    end
-    if ver < 1 then return end
-    GR:SendMessage("MAIN_UPDATE", sender, {
-      action = action,
-      char = sender,
-      main = mainName,
-      ver = ver,
-      ts = ts,
-    })
-  elseif tag == "CRAFT" then
-    local parts = U.SplitKeepEmpty(rest, "|")
-    local action = (parts[1] or ""):lower()
-    if not VALID_CRAFT_ACTION[action] then return end
-    local id = U.SanitizeText(parts[2] or "", 64)
-    local ver = tonumber(parts[3]) or 0
-    if id == "" or ver < 1 then return end
-    local data = {
-      action = action,
-      id = id,
-      ver = ver,
-      ts = tonumber(parts[4]) or 0,
-      owner = U.NormalizeName(U.SanitizeText(parts[5] or "", 48)),
-      itemId = tonumber(parts[6]) or 0,
-      itemName = U.SanitizeText(parts[7] or "", 64),
-      itemLinkEsc = tostring(parts[8] or ""),
-      qty = tonumber(parts[9]) or 1,
-      mats = tonumber(parts[10]) == 1,
-      note = U.SanitizeText(parts[11] or "", 80),
-      status = U.SanitizeText(parts[12] or "open", 16),
-      assignee = U.NormalizeName(U.SanitizeText(parts[13] or "", 48)),
-      claimant = U.NormalizeName(U.SanitizeText(parts[14] or "", 48)),
-    }
-    if data.qty < 1 then data.qty = 1 end
-    if data.qty > 999 then data.qty = 999 end
-    local st = data.status
-    if st ~= "open" and st ~= "taken" and st ~= "done" and st ~= "cancelled" then
-      data.status = "open"
-    end
-    GR:SendMessage("CRAFT_UPDATE", sender, data)
   elseif tag == "SYNCREQ" then
     local kind = (rest or ""):lower()
     kind = U.SanitizeText(kind, 16)
-    if kind == "main" or kind == "craft" or kind == "wanted" then
+    if kind == "wanted" then
       GR:SendMessage("SYNCREQ_UPDATE", sender, kind)
     end
   end
-  -- Unknown tags ignored for older/newer mixed clients
+  -- Unknown tags (incl. legacy MAIN/CRAFT) ignored for mixed clients
 end
 
 local function HandleMessage(message, sender)

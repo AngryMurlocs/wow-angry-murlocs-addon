@@ -86,7 +86,7 @@ local function DisplayName(key)
   return NAME_BY_KEY[key] or key
 end
 
-local function KeyFromSkillName(name)
+local function FoldSkillName(name)
   if not name then return nil end
   local s = tostring(name)
   -- strip UI escape sequences
@@ -101,10 +101,22 @@ local function KeyFromSkillName(name)
     :gsub("\195\159", "ss")
   -- NBSP -> space, collapse whitespace
   lower = lower:gsub("\194\160", " "):gsub("%s+", " ")
+  return lower
+end
+
+local function KeyFromSkillName(name)
+  local lower = FoldSkillName(name)
+  if not lower then return nil end
   local hit = KEY_BY_NAME[lower]
   if hit then return hit end
   -- also try without spaces (Erstehilfe / FirstAid)
-  return KEY_BY_NAME[lower:gsub("%s+", "")]
+  hit = KEY_BY_NAME[lower:gsub("%s+", "")]
+  if hit then return hit end
+  -- Forever unknown skill name: still transmit via compact fallback key
+  local slug = lower:gsub("%s+", ""):gsub("[^%w]", "")
+  if slug == "" then return nil end
+  if #slug > 12 then slug = slug:sub(1, 12) end
+  return slug
 end
 
 local function MergeProf(byKey, key, skill, name)
@@ -152,19 +164,23 @@ local function CollectLocal()
   return list
 end
 
+-- Field separator is '+' (not '|') so payloads survive SanitizeText / tag splits.
+-- Decode still accepts legacy '|' from older clients.
 local function Encode(list)
   local parts = {}
   for i = 1, #list do
     parts[#parts + 1] = list[i].key .. ":" .. tostring(list[i].skill)
   end
-  return table.concat(parts, "|")
+  return table.concat(parts, "+")
 end
 
 local function Decode(rest)
   local out = {}
   if not rest or rest == "" then return out end
-  for piece in string.gmatch(rest, "([^|]+)") do
-    local key, skill = piece:match("^([^:]+):(%d+)$")
+  -- Normalize legacy pipe payloads to '+'
+  rest = tostring(rest):gsub("|", "+")
+  for piece in string.gmatch(rest, "([^+]+)") do
+    local key, skill = piece:match("^([%w_]+):(%d+)$")
     if key and skill then
       out[#out + 1] = {
         key = key,
@@ -181,6 +197,48 @@ function Professions:GetAll()
   return (db and db.prof and db.prof.cache) or {}
 end
 
+-- Drop remote stubs with empty lists (no classFile = not self) so Sync can refill cleanly.
+function Professions:ClearEmptyRemoteStubs()
+  local db = GR.db
+  if not db or not db.prof or not db.prof.cache then return end
+  local me = U.NormalizeName(U.PlayerName())
+  for name, entry in pairs(db.prof.cache) do
+    if name ~= me and entry and not entry.classFile then
+      local list = entry.list
+      if not list or #list == 0 then
+        db.prof.cache[name] = nil
+      end
+    end
+  end
+  Professions:PruneSelfDuplicates()
+end
+
+-- Forever: local key Ingoo-Endstation vs wire Ingoo Endstation-Realm → one self row.
+function Professions:PruneSelfDuplicates()
+  local db = GR.db
+  if not db or not db.prof or not db.prof.cache then return end
+  local me = U.NormalizeName(U.PlayerName())
+  local canon = db.prof.cache[me]
+  local toRemove = {}
+  for name, entry in pairs(db.prof.cache) do
+    if name ~= me and U.IsSelfName(name) then
+      if (not canon or not canon.list or #canon.list == 0) and entry and entry.list and #entry.list > 0 then
+        db.prof.cache[me] = {
+          list = entry.list,
+          classFile = entry.classFile or U.PlayerClassFile(),
+          time = entry.time or U.Now(),
+          raw = entry.raw,
+        }
+        canon = db.prof.cache[me]
+      end
+      toRemove[#toRemove + 1] = name
+    end
+  end
+  for i = 1, #toRemove do
+    db.prof.cache[toRemove[i]] = nil
+  end
+end
+
 local lastProfReqSend = 0
 local lastProfReqReply = 0
 local PROFREQ_SEND_CD = 30
@@ -190,6 +248,7 @@ function Professions:Broadcast(force)
   local db = GR.db
   if not db or not db.privacy.shareProfessions then return end
   if not IsInGuild() then return end
+  Professions:PruneSelfDuplicates()
   local list = CollectLocal()
   local encoded = Encode(list)
   -- Always store self
@@ -212,20 +271,34 @@ function Professions:RequestAll()
 end
 
 function Professions:OnEnable()
+  C_Timer.After(2, function()
+    Professions:PruneSelfDuplicates()
+  end)
+
   GR:RegisterMessage("PROF_UPDATE", function(_, sender, rest)
-    local list = Decode(rest)
-    -- #region agent log
-    local pipes = 0
-    if rest then for _ in string.gmatch(rest, "|") do pipes = pipes + 1 end end
-    U.AgentLog("H6", "Professions.lua:PROF_UPDATE", "prof_decoded", {
-      sender = U.ShortName(sender),
-      restLen = #(rest or ""),
-      pipes = pipes,
-      decodedCount = #list,
-    })
-    -- #endregion
+    if U.IsSelfName(sender) then
+      Professions:PruneSelfDuplicates()
+      return
+    end
+    local raw = tostring(rest or "")
+    if #raw > 200 then raw = raw:sub(1, 200) end
+    local list = Decode(raw)
+    local prev = GR.db.prof.cache[sender]
+    if #list == 0 then
+      if raw ~= "" then
+        GR.db.prof._decodeMiss = (GR.db.prof._decodeMiss or 0) + 1
+      end
+      -- Never replace a good cache entry with an empty decode
+      if prev and prev.list and #prev.list > 0 then
+        prev.raw = raw
+        prev.time = U.Now()
+        GR:SendMessage("PROF_CACHE_CHANGED", sender)
+        return
+      end
+    end
     GR.db.prof.cache[sender] = {
       list = list,
+      raw = raw,
       time = U.Now(),
     }
     GR:SendMessage("PROF_CACHE_CHANGED", sender)
@@ -233,9 +306,7 @@ function Professions:OnEnable()
 
   GR:RegisterMessage("PROF_REQUEST", function()
     local now = U.Now()
-    -- 30s global reply gate (anti amplification); 15s min between forced replies
-    local cd = math.max(PROFREQ_SEND_CD, PROFREQ_REPLY_CD)
-    if (now - lastProfReqReply) < cd then return end
+    if (now - lastProfReqReply) < PROFREQ_REPLY_CD then return end
     lastProfReqReply = now
     Professions:Broadcast(true)
   end)
@@ -257,7 +328,14 @@ function Professions:OnEnable()
   U.SafeRegisterEvent(f, "PLAYER_ENTERING_WORLD")
   f:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_ENTERING_WORLD" then
+      -- Forever: skill lines often ready later than +5s
       C_Timer.After(5, function()
+        Professions:Broadcast(true)
+      end)
+      C_Timer.After(20, function()
+        Professions:Broadcast(true)
+      end)
+      C_Timer.After(45, function()
         Professions:Broadcast(true)
       end)
     else
@@ -274,3 +352,4 @@ end
 
 Professions.DisplayName = DisplayName
 Professions.Decode = Decode
+Professions.Encode = Encode

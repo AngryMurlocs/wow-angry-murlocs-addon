@@ -1,5 +1,22 @@
 # AngryMurlocs Changelog
 
+## 0.6.0
+
+- Remove Main/Twink and Craft (Handwerk) modules, tabs, slash commands, and wire handlers
+- Fix empty remote profession lists: keep PROF pipe delimiters; harden empty-cache overwrite; delayed rebroadcast
+- Pixel-aligned list columns (professions + Wanted) for proportional fonts
+- Fix self appearing twice in profession list (Forever name-fold / compact match)
+- Wanted: full guild sync + scope recovery so the list survives reloads/updates; remove clear-all button
+- Auto guild sync (professions + Wanted) after loading screens (`PLAYER_ENTERING_WORLD`, debounced)
+- Exclusive Berufe / Wanted windows (no stacked overlay at CENTER)
+- `/am config` (also `options` / `settings`); Settings nav; minimap LMB Wanted / RMB main (from 0.5.8)
+
+## 0.5.8
+
+- `/am config` (also `options` / `settings`) opens addon settings
+- Settings nav button in main window
+- Minimap: left-click Wanted, right-click main window
+
 ## 0.5.7
 
 - Fix invisible guild pins: re-export Media/Pins TGAs in WoW-compatible format (match circle.tga)

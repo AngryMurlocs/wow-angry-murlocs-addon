@@ -128,36 +128,16 @@ local function DisplayToast(name, level)
 end
 
 function ShowNext()
-  -- #region agent log
-  if UnitAffectingCombat("player") then
-    U.AgentLog("H4", "LevelUp.lua:ShowNext", "skip_combat", { queue = #queue })
-    return
-  end
+  if UnitAffectingCombat("player") then return end
   if #queue == 0 then return end
-  if toast and toast:IsShown() and toast:GetAlpha() > 0.1 then
-    U.AgentLog("H4", "LevelUp.lua:ShowNext", "skip_toast_busy", { queue = #queue })
-    return
-  end
-  -- #endregion
+  if toast and toast:IsShown() and toast:GetAlpha() > 0.1 then return end
 
   local item = table.remove(queue, 1)
-  -- #region agent log
-  U.AgentLog("H4", "LevelUp.lua:ShowNext", "show_toast", { name = item.name, level = item.level, remaining = #queue })
-  -- #endregion
   DisplayToast(item.name, item.level)
 end
 
 local function Enqueue(name, level)
   local cfg = Cfg()
-  -- #region agent log
-  U.AgentLog("H3", "LevelUp.lua:Enqueue", "enqueue", {
-    name = U.ShortName(name),
-    level = level,
-    showToasts = cfg.showToasts and true or false,
-    inCombat = UnitAffectingCombat("player") and true or false,
-    queueBefore = #queue,
-  })
-  -- #endregion
   if not cfg.showToasts then return end
   queue[#queue + 1] = { name = U.ShortName(name), level = level }
   if not UnitAffectingCombat("player") then
@@ -198,20 +178,8 @@ function LevelUp:OnEnable()
       local level = ...
       level = tonumber(level) or UnitLevel("player")
       Enqueue(U.PlayerName(), level)
-      local share = GR.db and GR.db.privacy and GR.db.privacy.shareLevelUp
-      local inGuild = IsInGuild and IsInGuild()
-      -- #region agent log
-      U.AgentLog("H5", "LevelUp.lua:PLAYER_LEVEL_UP", "local_level_up", {
-        level = level,
-        shareLevelUp = share and true or false,
-        inGuild = inGuild and true or false,
-      })
-      -- #endregion
-      if share and inGuild then
-        local sent = Comm:Send("LVL|" .. tostring(level))
-        -- #region agent log
-        U.AgentLog("H5", "LevelUp.lua:PLAYER_LEVEL_UP", "lvl_send", { sent = sent and true or false, level = level })
-        -- #endregion
+      if GR.db and GR.db.privacy and GR.db.privacy.shareLevelUp and IsInGuild and IsInGuild() then
+        Comm:Send("LVL|" .. tostring(level))
       end
     elseif event == "PLAYER_REGEN_ENABLED" then
       ShowNext()

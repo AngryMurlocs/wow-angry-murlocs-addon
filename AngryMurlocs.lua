@@ -1,9 +1,38 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.5.7"
+GR.VERSION = "0.6.0"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
+
+local lastGuildSyncAt = 0
+local GUILD_SYNC_DEBOUNCE = 50
+local guildSyncPending = false
+
+local function RunGuildSync(force)
+  if not IsInGuild or not IsInGuild() then return end
+  local now = (GetTime and GetTime()) or 0
+  if not force and (now - lastGuildSyncAt) < GUILD_SYNC_DEBOUNCE then return end
+  lastGuildSyncAt = now
+  if U.RecoverWantedScopes then U.RecoverWantedScopes() end
+  local prof = GR:GetModule("Professions")
+  if prof then
+    if prof.ClearEmptyRemoteStubs then prof:ClearEmptyRemoteStubs() end
+    if prof.RequestAll then prof:RequestAll() end
+    if prof.Broadcast then prof:Broadcast(true) end
+  end
+  local wanted = GR:GetModule("Wanted")
+  if wanted and wanted.RequestSync then wanted:RequestSync() end
+end
+
+local function ScheduleGuildSync(delay, force)
+  if guildSyncPending and not force then return end
+  guildSyncPending = true
+  C_Timer.After(delay or 4, function()
+    guildSyncPending = false
+    RunGuildSync(force)
+  end)
+end
 
 local defaults = {
   map = {
@@ -33,8 +62,6 @@ local defaults = {
   frames = {
     professions = { point = nil },
     wanted = { point = nil },
-    craft = { point = nil },
-    main = { point = nil },
   },
   levelUp = {
     showToasts = true,
@@ -126,6 +153,7 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("CHAT_MSG_ADDON")
 frame:RegisterEvent("PLAYER_GUILD_UPDATE")
 
@@ -168,11 +196,17 @@ frame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "PLAYER_LOGIN" then
     GR:EnableModules()
     U.Print(string.format(U.L("LOADED"), GR.VERSION))
+  elseif event == "PLAYER_ENTERING_WORLD" then
+    -- Every loading screen: debounced guild data sync
+    ScheduleGuildSync(4, false)
   elseif event == "CHAT_MSG_ADDON" then
     GR.Comm:OnAddonMessage(...)
   elseif event == "PLAYER_GUILD_UPDATE" then
     MigrateLegacyToScope()
+    if U.RecoverWantedScopes then U.RecoverWantedScopes() end
     GR:SendMessage("GUILD_UPDATE")
+    lastGuildSyncAt = 0
+    ScheduleGuildSync(2, true)
   end
 end)
 
@@ -203,94 +237,18 @@ SlashCmdList["ANGRYMURLOCS"] = function(msg)
     return
   end
 
-  -- #region agent log
-  if lower == "dbgprobe" then
-    local priv = db.privacy or {}
-    local wrote = U.AgentLog("H3", "AngryMurlocs.lua:dbgprobe", "privacy_snapshot", {
-      shareLevelUp = priv.shareLevelUp and true or false,
-      shareDeath = priv.shareDeath and true or false,
-      shareProfessions = priv.shareProfessions and true or false,
-      sharePosition = priv.sharePosition and true or false,
-      showLvlToasts = (db.levelUp and db.levelUp.showToasts) and true or false,
-      showDeathToasts = (db.death and db.death.showToasts) and true or false,
-      inGuild = (IsInGuild and IsInGuild()) and true or false,
-      ioOpen = (io and io.open) and true or false,
-    })
-    -- Simulated wire samples: would SanitizeText on whole rest kill pipes?
-    local samples = {
-      { tag = "LVL", rest = "42" },
-      { tag = "PROF", rest = "alch:15|herb:28|cook:9" },
-      { tag = "DEATH", rest = "Boar|0|Elwynn|1429|mob|Claw" },
-      { tag = "MAIN", rest = "set|Ingoo|1|123" },
-      { tag = "CRAFT", rest = "create|id1|1|0|Owner|0|Sword|esc|1|0|note|open||" },
-    }
-    for i = 1, #samples do
-      local s = samples[i]
-      local sanitized = U.SanitizeText(s.rest, 200)
-      local hadPipe = s.rest:find("|", 1, true) and true or false
-      local stillPipe = sanitized:find("|", 1, true) and true or false
-      U.AgentLog("H1", "AngryMurlocs.lua:dbgprobe", "sanitize_sample", {
-        tag = s.tag,
-        hadPipe = hadPipe,
-        sanitizeKillsPipes = (hadPipe and not stillPipe) and true or false,
-        usesWholeRestSanitize = (s.tag == "PROF") and true or false,
-      })
+  if lower == "config" or lower == "options" or lower == "settings" then
+    local options = GR:GetModule("Options")
+    if options and options.Open then
+      options:Open()
     end
-    -- Inject fake guild messages (not self) through real Comm path
-    local fake = "AMDbgProbe-TestRealm"
-    if GR.Comm and GR.Comm.OnAddonMessage then
-      GR.Comm:OnAddonMessage(GR.PREFIX, "LVL|42", "GUILD", fake)
-      GR.Comm:OnAddonMessage(GR.PREFIX, "PROF|alch:15|herb:28|cook:9", "GUILD", fake)
-      GR.Comm:OnAddonMessage(GR.PREFIX, "DEATH|Boar|0|Elwynn|1429|mob|Claw", "GUILD", fake)
-    end
-    local lvl = GR:GetModule("LevelUp")
-    if lvl and lvl.Preview then lvl:Preview() end
-    local probeCache = db.prof and db.prof.cache and db.prof.cache["AMDbgProbe-TestRealm"]
-    local decoded = probeCache and probeCache.list and #probeCache.list or -1
-    U.Print("dbgprobe done file=" .. tostring(wrote) .. " AMDbgProbeProfs=" .. tostring(decoded) .. " — dann /reload damit Logs in SV landen.")
     return
   end
-  -- #endregion
 
   if lower == "wanted" then
     local wanted = GR:GetModule("Wanted")
     if wanted and wanted.Toggle then
       wanted:Toggle()
-    end
-    return
-  end
-
-  if lower == "craft" then
-    local craft = GR:GetModule("Craft")
-    if craft and craft.Toggle then
-      craft:Toggle()
-    end
-    return
-  end
-
-  if lower == "main" or lower:match("^main%s+") then
-    local mains = GR:GetModule("Mains")
-    if not mains then return end
-    if lower == "main clear" or lower == "main off" then
-      mains:ClearLocal(true)
-      return
-    end
-    if lower == "main" then
-      if mains.Toggle then
-        mains:Toggle()
-      else
-        mains:PrintStatus()
-      end
-      return
-    end
-    local nameArg = msg:match("^[Mm][Aa][Ii][Nn]%s+(.+)$")
-    if nameArg then
-      nameArg = nameArg:gsub("^%s+", ""):gsub("%s+$", "")
-      if nameArg:lower() == "clear" or nameArg:lower() == "off" then
-        mains:ClearLocal(true)
-      else
-        mains:SetLocal(nameArg, true)
-      end
     end
     return
   end

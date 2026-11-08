@@ -16,6 +16,16 @@ local ALERT_CD = 20
 
 local sendCd = {}   -- targetKey -> GetTime
 local alertCd = {}  -- targetKey -> GetTime
+local syncBusy = false
+
+local WANTED_COLS = {
+  { key = "WANTED_COL_KILLER", x = 4, w = 100 },
+  { key = "WANTED_COL_KILLS", x = 108, w = 40, justify = "RIGHT" },
+  { key = "WANTED_COL_SEEN", x = 152, w = 90 },
+  { key = "WANTED_COL_SEEN_ZONE", x = 246, w = 110 },
+  { key = "WANTED_COL_SEEN_BY", x = 360, w = 90 },
+  { key = "WANTED_COL_VICTIM", x = 454, w = 110 },
+}
 
 local function EnsureDB()
   local scope = U.GetScopeDB()
@@ -103,6 +113,78 @@ function Wanted:Clear(killer, broadcast)
   Wanted:Refresh()
 end
 
+local function MergeSyncEntry(data)
+  if not data or not data.killer or data.killer == "" then return end
+  local key = NormalizeKiller(data.killer)
+  if not key then return end
+  local db = EnsureDB()
+  local src = {
+    count = tonumber(data.count) or 0,
+    lastVictim = data.victim or "",
+    lastZone = data.zone or "",
+    lastTime = tonumber(data.lastTime) or 0,
+    lastSeenTime = tonumber(data.lastSeenTime) or 0,
+    lastSeenZone = data.lastSeenZone or "",
+    lastSeenBy = data.lastSeenBy or "",
+  }
+  if U.MergeWantedMaps then
+    local tmp = { [key] = src }
+    U.MergeWantedMaps(db, tmp)
+  else
+    local entry = db[key]
+    if not entry then
+      db[key] = src
+    else
+      if src.count > (entry.count or 0) then entry.count = src.count end
+      if src.lastTime >= (entry.lastTime or 0) then
+        if src.lastVictim ~= "" then entry.lastVictim = src.lastVictim end
+        if src.lastZone ~= "" then entry.lastZone = src.lastZone end
+        entry.lastTime = src.lastTime
+      end
+      if src.lastSeenTime >= (entry.lastSeenTime or 0) then
+        entry.lastSeenTime = src.lastSeenTime
+        if src.lastSeenZone ~= "" then entry.lastSeenZone = src.lastSeenZone end
+        if src.lastSeenBy ~= "" then entry.lastSeenBy = src.lastSeenBy end
+      end
+    end
+  end
+end
+
+function Wanted:BroadcastAll()
+  if not IsInGuild or not IsInGuild() then return end
+  local list = Wanted:GetSorted()
+  local delay = 0
+  for i = 1, math.min(#list, 40) do
+    local e = list[i]
+    delay = delay + 0.35
+    C_Timer.After(delay, function()
+      Comm:Send(string.format(
+        "WANTED|sync|%s|%d|%s|%s|%d|%d|%s|%s",
+        U.SanitizeText(e.name, 48),
+        e.count or 0,
+        U.SanitizeText(e.lastVictim or "", 48),
+        U.SanitizeText(e.lastZone or "", 48),
+        e.lastTime or 0,
+        e.lastSeenTime or 0,
+        U.SanitizeText(e.lastSeenZone or "", 48),
+        U.SanitizeText(e.lastSeenBy or "", 48)
+      ))
+    end)
+  end
+end
+
+function Wanted:RequestSync()
+  if syncBusy then return end
+  if not IsInGuild or not IsInGuild() then return end
+  syncBusy = true
+  if U.RecoverWantedScopes then U.RecoverWantedScopes() end
+  Comm:Send("SYNCREQ|wanted")
+  C_Timer.After(2 + math.random() * 2, function()
+    Wanted:BroadcastAll()
+    syncBusy = false
+  end)
+end
+
 function Wanted:GetSorted()
   local db = EnsureDB()
   local list = {}
@@ -162,17 +244,7 @@ local function EnsureFrame()
   sub:SetPoint("TOPLEFT", 16, -32)
   sub:SetText(U.L("WANTED_SUB"))
 
-  local header = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  header:SetPoint("TOPLEFT", 16, -52)
-  header:SetText(string.format(
-    "%-14s %5s %-10s %-12s %-12s %s",
-    U.L("WANTED_COL_KILLER"),
-    U.L("WANTED_COL_KILLS"),
-    U.L("WANTED_COL_SEEN"),
-    U.L("WANTED_COL_SEEN_ZONE"),
-    U.L("WANTED_COL_SEEN_BY"),
-    U.L("WANTED_COL_VICTIM")
-  ))
+  U.BuildColHeaders(frame, WANTED_COLS, 12, -52, ROW_H)
 
   local scroll = CreateFrame("ScrollFrame", "AngryMurlocsWantedScroll", frame, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 12, -72)
@@ -184,11 +256,9 @@ local function EnsureFrame()
 
   for i = 1, NUM_ROWS do
     local row = CreateFrame("Button", nil, scrollChild)
-    row:SetSize(560, ROW_H)
-    row:SetPoint("TOPLEFT", 4, -((i - 1) * ROW_H))
-    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.text:SetAllPoints()
-    row.text:SetJustifyH("LEFT")
+    row:SetSize(580, ROW_H)
+    row:SetPoint("TOPLEFT", 0, -((i - 1) * ROW_H))
+    U.BuildColRow(row, WANTED_COLS, ROW_H)
     row:RegisterForClicks("LeftButtonUp")
     row:SetScript("OnClick", function(self)
       if not self.killer then return end
@@ -216,14 +286,6 @@ local function EnsureFrame()
     rows[i] = row
   end
 
-  local clearBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  clearBtn:SetSize(120, 22)
-  clearBtn:SetPoint("BOTTOMLEFT", 12, 12)
-  clearBtn:SetText(U.L("WANTED_CLEAR_ALL"))
-  clearBtn:SetScript("OnClick", function()
-    Wanted:Clear(nil, true)
-  end)
-
   local closeHint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   closeHint:SetPoint("BOTTOMRIGHT", -16, 16)
   closeHint:SetText(U.L("WANTED_HINT"))
@@ -246,20 +308,16 @@ function Wanted:Refresh()
       if e.stale and e.lastSeenTime and e.lastSeenTime > 0 then
         seen = seen .. "*"
       end
-      rows[i].text:SetText(string.format(
-        "%-14s %5d %-10s %-12s %-12s %s",
-        U.ShortName(e.name):sub(1, 14),
-        e.count,
-        seen:sub(1, 10),
-        (e.lastSeenZone or "-"):sub(1, 12),
-        U.ShortName(e.lastSeenBy or "-"):sub(1, 12),
-        (e.lastVictim or "-"):sub(1, 12)
-      ))
-      if e.stale then
-        rows[i].text:SetTextColor(0.7, 0.55, 0.35)
-      else
-        rows[i].text:SetTextColor(1, 1, 1)
-      end
+      local r, g, b = 1, 1, 1
+      if e.stale then r, g, b = 0.7, 0.55, 0.35 end
+      U.SetColTexts(rows[i].cols, {
+        U.ShortName(e.name),
+        tostring(e.count or 0),
+        seen,
+        e.lastSeenZone or "-",
+        U.ShortName(e.lastSeenBy or "-"),
+        e.lastVictim or "-",
+      }, r, g, b)
       rows[i]:Show()
     else
       rows[i].killer = nil
@@ -268,13 +326,19 @@ function Wanted:Refresh()
   end
 end
 
+function Wanted:ShowWindow()
+  EnsureFrame()
+  if AngryMurlocsFrame then AngryMurlocsFrame:Hide() end
+  frame:Show()
+  Wanted:Refresh()
+end
+
 function Wanted:Toggle()
   EnsureFrame()
   if frame:IsShown() then
     frame:Hide()
   else
-    frame:Show()
-    Wanted:Refresh()
+    Wanted:ShowWindow()
   end
 end
 
@@ -396,12 +460,21 @@ local function EnsureMinimapButton()
   border:SetPoint("TOPLEFT")
   border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
-  minimapBtn:SetScript("OnClick", function()
-    Wanted:Toggle()
+  minimapBtn:SetScript("OnClick", function(_, button)
+    if button == "RightButton" then
+      local ui = GR:GetModule("UI")
+      if ui and ui.Toggle then
+        ui:Toggle()
+      end
+    else
+      Wanted:Toggle()
+    end
   end)
   minimapBtn:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine(U.L("WANTED_MINIMAP_TIP"), 1, 0.2, 0.2)
+    GameTooltip:AddLine(U.L("MINIMAP_TIP_LMB"), 0.9, 0.9, 0.9)
+    GameTooltip:AddLine(U.L("MINIMAP_TIP_RMB"), 0.9, 0.9, 0.9)
     GameTooltip:Show()
   end)
   minimapBtn:SetScript("OnLeave", GameTooltip_Hide)
@@ -450,6 +523,12 @@ function Wanted:OnEnable()
 
   GR:RegisterMessage("WANTED_UPDATE", function(_, sender, data)
     if not data then return end
+    if data.action == "sync" then
+      MergeSyncEntry(data)
+      GR:SendMessage("WANTED_CHANGED")
+      if frame and frame:IsShown() then Wanted:Refresh() end
+      return
+    end
     if data.action == "add" and data.killer and data.killer ~= "" then
       local victim = data.victim or sender
       if not sender or string.lower(U.ShortName(victim)) ~= string.lower(U.ShortName(sender)) then
@@ -459,6 +538,13 @@ function Wanted:OnEnable()
     elseif data.action == "clear" and data.killer and data.killer ~= "" and data.killer ~= "*" then
       Wanted:Clear(data.killer, false)
     end
+  end)
+
+  GR:RegisterMessage("SYNCREQ_UPDATE", function(_, sender, kind)
+    if kind ~= "wanted" then return end
+    C_Timer.After(0.5 + math.random() * 2.5, function()
+      Wanted:BroadcastAll()
+    end)
   end)
 
   GR:RegisterMessage("SIGHT_UPDATE", function(_, sender, data)

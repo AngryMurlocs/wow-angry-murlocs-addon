@@ -3,6 +3,9 @@ local U = GR.Util
 
 local Options = GR:NewModule("Options")
 
+local optionsPanel
+local optionsCategory
+
 local function EnsureDeathCfg()
   GR.db.death = GR.db.death or {}
   local c = GR.db.death
@@ -23,9 +26,21 @@ local function EnsureLvlCfg()
   return c
 end
 
+function Options:Open()
+  if not optionsPanel then return end
+  if Settings and Settings.OpenToCategory and optionsCategory then
+    local id = optionsCategory.GetID and optionsCategory:GetID() or optionsCategory
+    Settings.OpenToCategory(id)
+  elseif InterfaceOptionsFrame_OpenToCategory then
+    InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+    InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+  end
+end
+
 function Options:OnEnable()
   local panel = CreateFrame("Frame")
   panel.name = "AngryMurlocs"
+  optionsPanel = panel
 
   local scroll = CreateFrame("ScrollFrame", "AngryMurlocsOptionsScroll", panel, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 8, -8)
@@ -250,12 +265,8 @@ function Options:OnEnable()
     GR.db.frames = GR.db.frames or {}
     GR.db.frames.professions = GR.db.frames.professions or {}
     GR.db.frames.wanted = GR.db.frames.wanted or {}
-    GR.db.frames.craft = GR.db.frames.craft or {}
-    GR.db.frames.main = GR.db.frames.main or {}
     GR.db.frames.professions.point = nil
     GR.db.frames.wanted.point = nil
-    GR.db.frames.craft.point = nil
-    GR.db.frames.main.point = nil
     if AngryMurlocsFrame then
       U.ApplyPoint(AngryMurlocsFrame, nil, function(f)
         f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -266,16 +277,6 @@ function Options:OnEnable()
         f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
       end)
     end
-    if AngryMurlocsCraftFrame then
-      U.ApplyPoint(AngryMurlocsCraftFrame, nil, function(f)
-        f:SetPoint("CENTER", UIParent, "CENTER", -40, 20)
-      end)
-    end
-    if AngryMurlocsMainFrame then
-      U.ApplyPoint(AngryMurlocsMainFrame, nil, function(f)
-        f:SetPoint("CENTER", UIParent, "CENTER", 80, 40)
-      end)
-    end
     U.Print(U.L("OPT_RESET_DONE"))
   end, 180)
 
@@ -284,6 +285,7 @@ function Options:OnEnable()
   if Settings and Settings.RegisterCanvasLayoutCategory then
     local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
     Settings.RegisterAddOnCategory(category)
+    optionsCategory = category
   elseif InterfaceOptions_AddCategory then
     InterfaceOptions_AddCategory(panel)
   end

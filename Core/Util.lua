@@ -47,17 +47,39 @@ local function FoldNameKey(name)
   return s
 end
 
+-- Strip spaces/hyphens/apostrophes for Forever name-format compares.
+local function CompactName(s)
+  if not s or s == "" then return nil end
+  return string.lower(tostring(s)):gsub("[%s%-%']", "")
+end
+
 -- Robust self check (Forever sender/realm formats vary).
+-- Handles Ingoo-Endstation (local) vs Ingoo Endstation-Realm (wire).
 function U.IsSelfName(name)
   if not name or name == "" then return false end
-  local me = U.NormalizeName(U.PlayerName())
+  local meRaw = U.PlayerName()
+  local me = U.NormalizeName(meRaw)
   if me and name == me then return true end
-  local key = FoldNameKey(name)
-  if not key then return false end
-  if me and FoldNameKey(me) == key then return true end
-  local unit = UnitName("player")
-  if unit and FoldNameKey(unit) == key then return true end
   if me and string.lower(name) == string.lower(me) then return true end
+
+  local meShort = FoldNameKey(me)
+  local themShort = FoldNameKey(name)
+  if meShort and themShort and meShort == themShort then return true end
+
+  local unit = UnitName("player")
+  if unit and FoldNameKey(unit) == themShort then return true end
+
+  local meFullC = CompactName(me)
+  local meShortC = CompactName(U.ShortName(me))
+  local themShortC = CompactName(U.ShortName(name))
+  local themFullC = CompactName(name)
+  if meFullC and themShortC and meFullC == themShortC then return true end
+  if meShortC and themShortC and meShortC == themShortC then return true end
+  if meFullC and themFullC and meFullC == themFullC then return true end
+  -- themShort is local-name+false-realm mashed (ingooendstation) matching meFullC
+  if meShortC and themShortC and themShortC:sub(1, #meShortC) == meShortC and meFullC == themShortC then
+    return true
+  end
   return false
 end
 
@@ -123,70 +145,6 @@ function U.SanitizeText(s, maxLen)
   return s
 end
 
--- #region agent log
-local AGENT_LOG_PATH = [[C:\Users\Mani\Desktop\AngryMurlocs-0.5.0-dev\AngryMurlocs\debug-4a34db.log]]
-local AGENT_SESSION = "4a34db"
-
-local function AgentJsonEscape(s)
-  return tostring(s or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\r", "\\r"):gsub("\n", "\\n"):gsub("\t", "\\t")
-end
-
-local function AgentJsonValue(v)
-  local tv = type(v)
-  if tv == "nil" then return "null" end
-  if tv == "boolean" then return v and "true" or "false" end
-  if tv == "number" then return tostring(v) end
-  if tv == "table" then
-    local parts = {}
-    local n = 0
-    for k, val in pairs(v) do
-      n = n + 1
-      if n > 24 then break end
-      parts[#parts + 1] = '"' .. AgentJsonEscape(k) .. '":' .. AgentJsonValue(val)
-    end
-    return "{" .. table.concat(parts, ",") .. "}"
-  end
-  return '"' .. AgentJsonEscape(v) .. '"'
-end
-
-function U.AgentLog(hypothesisId, location, message, data, runId)
-  local payload = string.format(
-    '{"sessionId":"%s","runId":"%s","hypothesisId":"%s","location":"%s","message":"%s","data":%s,"timestamp":%d}\n',
-    AGENT_SESSION,
-    tostring(runId or "pre"),
-    AgentJsonEscape(hypothesisId or ""),
-    AgentJsonEscape(location or ""),
-    AgentJsonEscape(message or ""),
-    AgentJsonValue(data or {}),
-    (time and time() or 0) * 1000
-  )
-  local wrote = false
-  if io and io.open then
-    local ok = pcall(function()
-      local f = io.open(AGENT_LOG_PATH, "a")
-      if f then
-        f:write(payload)
-        f:close()
-        wrote = true
-      end
-    end)
-    if not ok then wrote = false end
-  end
-  if GR.db then
-    GR.db._agentLog = GR.db._agentLog or {}
-    local ring = GR.db._agentLog
-    ring[#ring + 1] = payload
-    while #ring > 80 do
-      table.remove(ring, 1)
-    end
-  end
-  if DEFAULT_CHAT_FRAME and (hypothesisId == "H3" or hypothesisId == "H4" or hypothesisId == "H5") then
-    DEFAULT_CHAT_FRAME:AddMessage("|cff888888[AM-DBG]|r " .. tostring(message))
-  end
-  return wrote
-end
--- #endregion
-
 -- Escape pipe as literal \124 so item links survive TAG|field protocol.
 function U.EscapeField(s, maxLen)
   s = tostring(s or ""):gsub("[%c]", "")
@@ -216,9 +174,77 @@ end
 
 function U.EnsureScopeTable(scope)
   scope.wanted = scope.wanted or {}
-  scope.mains = scope.mains or {}
-  scope.craft = scope.craft or {}
   return scope
+end
+
+local function MergeWantedEntry(dst, src)
+  if not src then return end
+  if not dst then
+    return {
+      count = src.count or 0,
+      lastVictim = src.lastVictim or "",
+      lastZone = src.lastZone or "",
+      lastTime = src.lastTime or 0,
+      lastSeenTime = src.lastSeenTime or 0,
+      lastSeenZone = src.lastSeenZone or "",
+      lastSeenBy = src.lastSeenBy or "",
+    }
+  end
+  local dc = dst.count or 0
+  local sc = src.count or 0
+  if sc > dc then dst.count = sc end
+  if (src.lastTime or 0) >= (dst.lastTime or 0) then
+    if src.lastVictim and src.lastVictim ~= "" then dst.lastVictim = src.lastVictim end
+    if src.lastZone and src.lastZone ~= "" then dst.lastZone = src.lastZone end
+    dst.lastTime = src.lastTime or dst.lastTime
+  end
+  if (src.lastSeenTime or 0) >= (dst.lastSeenTime or 0) then
+    dst.lastSeenTime = src.lastSeenTime or dst.lastSeenTime
+    if src.lastSeenZone and src.lastSeenZone ~= "" then dst.lastSeenZone = src.lastSeenZone end
+    if src.lastSeenBy and src.lastSeenBy ~= "" then dst.lastSeenBy = src.lastSeenBy end
+  end
+  return dst
+end
+
+function U.MergeWantedMaps(dst, src)
+  if type(dst) ~= "table" or type(src) ~= "table" then return dst end
+  for k, v in pairs(src) do
+    dst[k] = MergeWantedEntry(dst[k], v)
+  end
+  return dst
+end
+
+-- Move __none__ + orphan guild scopes into current guild wanted (never wipe).
+function U.RecoverWantedScopes()
+  if not GR.db then return end
+  GR.db.scopes = GR.db.scopes or {}
+  local guildKey = U.GuildScopeKey()
+  if not guildKey then return end
+  local scope = GR.db.scopes[guildKey]
+  if not scope then
+    scope = {}
+    GR.db.scopes[guildKey] = scope
+  end
+  U.EnsureScopeTable(scope)
+  local realm = U.RealmKey()
+  local noneKey = realm .. "::__none__"
+  local noneScope = GR.db.scopes[noneKey]
+  if noneScope and noneScope.wanted and next(noneScope.wanted) then
+    U.MergeWantedMaps(scope.wanted, noneScope.wanted)
+    wipe(noneScope.wanted)
+  end
+  -- Orphan scopes: same guild name suffix, or any non-empty wanted on realm if current empty
+  local guildSuffix = guildKey:match("::(.+)$")
+  local currentEmpty = not next(scope.wanted)
+  for key, other in pairs(GR.db.scopes) do
+    if key ~= guildKey and type(other) == "table" and type(other.wanted) == "table" and next(other.wanted) then
+      local sameGuild = guildSuffix and key:find("::" .. guildSuffix, 1, true)
+      local sameRealm = key:sub(1, #realm + 2) == (realm .. "::")
+      if sameGuild or (currentEmpty and sameRealm) then
+        U.MergeWantedMaps(scope.wanted, other.wanted)
+      end
+    end
+  end
 end
 
 function U.GetScopeDB()
@@ -228,6 +254,8 @@ function U.GetScopeDB()
   if not key then
     -- Offline / no guild: ephemeral bucket (not persisted across guild joins meaningfully)
     key = U.RealmKey() .. "::__none__"
+  else
+    U.RecoverWantedScopes()
   end
   local scope = GR.db.scopes[key]
   if not scope then
@@ -235,6 +263,54 @@ function U.GetScopeDB()
     GR.db.scopes[key] = scope
   end
   return U.EnsureScopeTable(scope)
+end
+
+-- Pixel column helpers (proportional fonts break %-Ns padding)
+function U.MakeColFS(parent, template, x, w, y, rowH)
+  local fs = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+  fs:SetPoint("TOPLEFT", x or 0, y or 0)
+  fs:SetSize(w or 80, rowH or 20)
+  fs:SetJustifyH("LEFT")
+  fs:SetJustifyV("MIDDLE")
+  if fs.SetWordWrap then fs:SetWordWrap(false) end
+  if fs.SetNonSpaceWrap then fs:SetNonSpaceWrap(false) end
+  return fs
+end
+
+function U.BuildColHeaders(parent, cols, originX, originY, rowH)
+  local headers = {}
+  originX = originX or 0
+  originY = originY or 0
+  for i = 1, #cols do
+    local col = cols[i]
+    local fs = U.MakeColFS(parent, "GameFontNormal", originX + (col.x or 0), col.w or 80, originY, rowH or 20)
+    if col.justify then fs:SetJustifyH(col.justify) end
+    if col.key then fs:SetText(U.L(col.key)) end
+    headers[i] = fs
+  end
+  return headers
+end
+
+function U.BuildColRow(row, cols, rowH)
+  row.cols = row.cols or {}
+  for i = 1, #cols do
+    local col = cols[i]
+    local fs = U.MakeColFS(row, "GameFontHighlightSmall", col.x or 0, col.w or 80, 0, rowH or 20)
+    if col.justify then fs:SetJustifyH(col.justify) end
+    row.cols[i] = fs
+  end
+  return row.cols
+end
+
+function U.SetColTexts(rowCols, values, r, g, b)
+  if not rowCols then return end
+  for i = 1, #rowCols do
+    local fs = rowCols[i]
+    if fs then
+      fs:SetText(values and values[i] or "")
+      if r then fs:SetTextColor(r, g or r, b or r) end
+    end
+  end
 end
 
 -- Forever may block some RegisterEvent calls (ADDON_ACTION_FORBIDDEN).

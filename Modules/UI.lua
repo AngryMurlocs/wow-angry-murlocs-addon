@@ -10,6 +10,14 @@ local rows = {}
 local ROW_H = 20
 local NUM_ROWS = 40
 
+-- Pixel columns (proportional fonts break %-Ns padding)
+local COLS = {
+  { key = "COL_NAME", x = 4, w = 150 },
+  { key = "COL_PROF1", x = 158, w = 120 },
+  { key = "COL_PROF2", x = 282, w = 120 },
+  { key = "COL_SEC", x = 406, w = 150 },
+}
+
 local function EnsureFrame()
   if frame then return frame end
 
@@ -41,16 +49,13 @@ local function EnsureFrame()
     UI:ShowProf()
   end)
   NavBtn("TAB_WANTED", 96, function()
+    frame:Hide()
     local m = GR:GetModule("Wanted")
-    if m and m.Toggle then m:Toggle() end
+    if m and m.ShowWindow then m:ShowWindow() end
   end)
-  NavBtn("TAB_CRAFT", 180, function()
-    local m = GR:GetModule("Craft")
-    if m and m.Toggle then m:Toggle() end
-  end)
-  NavBtn("TAB_MAIN", 264, function()
-    local m = GR:GetModule("Mains")
-    if m and m.Toggle then m:Toggle() end
+  NavBtn("TAB_OPT", 180, function()
+    local m = GR:GetModule("Options")
+    if m and m.Open then m:Open() end
   end)
 
   local filterLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -72,25 +77,17 @@ local function EnsureFrame()
   refreshBtn:SetScript("OnClick", function()
     local prof = GR:GetModule("Professions")
     if prof then
+      if prof.ClearEmptyRemoteStubs then prof:ClearEmptyRemoteStubs() end
       prof:RequestAll()
       prof:Broadcast(true)
     end
-    local mains = GR:GetModule("Mains")
-    if mains and mains.RequestSync then mains:RequestSync() end
-    local craft = GR:GetModule("Craft")
-    if craft and craft.RequestSync then craft:RequestSync() end
+    local wanted = GR:GetModule("Wanted")
+    if wanted and wanted.RequestSync then wanted:RequestSync() end
     UI:RefreshList()
   end)
 
-  local header = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  header:SetPoint("TOPLEFT", 16, -80)
-  header:SetText(string.format(
-    "%-22s  %-16s  %-16s  %s",
-    U.L("COL_NAME"),
-    U.L("COL_PROF1"),
-    U.L("COL_PROF2"),
-    U.L("COL_SEC")
-  ))
+  -- Header columns share X offsets with row columns (scroll inset +4)
+  U.BuildColHeaders(frame, COLS, 12, -80, ROW_H)
 
   local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 12, -100)
@@ -102,18 +99,13 @@ local function EnsureFrame()
 
   for i = 1, NUM_ROWS do
     local row = CreateFrame("Button", nil, scrollChild)
-    row:SetSize(540, ROW_H)
-    row:SetPoint("TOPLEFT", 4, -((i - 1) * ROW_H))
-    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.text:SetAllPoints()
-    row.text:SetJustifyH("LEFT")
+    row:SetSize(560, ROW_H)
+    row:SetPoint("TOPLEFT", 0, -((i - 1) * ROW_H))
+    U.BuildColRow(row, COLS, ROW_H)
     row:SetScript("OnEnter", function(self)
       if not self.fullName then return end
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:AddLine(self.fullName, 1, 1, 1)
-      if self.mainLabel then
-        GameTooltip:AddLine(self.mainLabel, 0.6, 0.9, 1)
-      end
       GameTooltip:Show()
     end)
     row:SetScript("OnLeave", GameTooltip_Hide)
@@ -132,12 +124,15 @@ local function FormatProfs(list)
   if not list or #list == 0 then
     return "-", "-", "-"
   end
+  local prof = GR:GetModule("Professions")
+  local displayName = prof and prof.DisplayName
   local primary = {}
   local secondary = {}
   local secKeys = { cook = true, aid = true, fish = true }
   for i = 1, #list do
     local p = list[i]
-    local label = (p.name or p.key) .. " " .. tostring(p.skill)
+    local labelName = (displayName and p.key and displayName(p.key)) or p.name or p.key
+    local label = labelName .. " " .. tostring(p.skill)
     if secKeys[p.key] then
       secondary[#secondary + 1] = label
     else
@@ -151,11 +146,6 @@ local function MatchesFilter(name, entry, filter)
   if not filter or filter == "" then return true end
   filter = filter:lower()
   if name:lower():find(filter, 1, true) then return true end
-  local mains = GR:GetModule("Mains")
-  if mains then
-    local main = mains:GetMain(name)
-    if main and main:lower():find(filter, 1, true) then return true end
-  end
   local fKey, fSkill = filter:match("^(%S+)%s+(%d+)$")
   if fKey and fSkill then
     fSkill = tonumber(fSkill)
@@ -182,12 +172,15 @@ function UI:RefreshList()
   local prof = GR:GetModule("Professions")
   local cache = prof and prof:GetAll() or {}
   local filter = filterBox and filterBox:GetText() or ""
-  local mains = GR:GetModule("Mains")
 
+  local me = U.NormalizeName(U.PlayerName())
   local names = {}
   for name, entry in pairs(cache) do
-    if MatchesFilter(name, entry, filter) then
-      names[#names + 1] = name
+    -- Skip Forever self-echo under alternate name keys
+    if not (U.IsSelfName(name) and name ~= me) then
+      if MatchesFilter(name, entry, filter) then
+        names[#names + 1] = name
+      end
     end
   end
   table.sort(names)
@@ -206,27 +199,15 @@ function UI:RefreshList()
       local entry = cache[name]
       local p1, p2, sec = FormatProfs(entry.list)
       local short = U.ShortName(name)
-      local me = U.NormalizeName(U.PlayerName())
-      if name == me then
-        short = short .. " (" .. U.L("YOU") .. ")"
-      end
-      local mainLabel = nil
-      if mains then
-        local main = mains:GetMain(name)
-        if main then
-          mainLabel = string.format(U.L("MAIN_SUFFIX"), U.ShortName(main))
-          short = short .. " " .. mainLabel
-        end
+      if name == me or U.IsSelfName(name) then
+        short = U.ShortName(me) .. " (" .. U.L("YOU") .. ")"
       end
       local r, g, b = U.ClassColor(entry.classFile)
       rows[i].fullName = name
-      rows[i].mainLabel = mainLabel and string.format(U.L("MAIN_TOOLTIP"), U.ShortName(name), mains:GetMain(name)) or nil
-      rows[i].text:SetText(string.format("%-22s  %-16s  %-16s  %s", short:sub(1, 22), p1:sub(1, 16), p2:sub(1, 16), sec))
-      rows[i].text:SetTextColor(r, g, b)
+      U.SetColTexts(rows[i].cols, { short, p1, p2, sec }, r, g, b)
       rows[i]:Show()
     else
       rows[i].fullName = nil
-      rows[i].mainLabel = nil
       rows[i]:Hide()
     end
   end
@@ -243,9 +224,11 @@ end
 
 function UI:ShowProf()
   EnsureFrame()
+  if AngryMurlocsWantedFrame then AngryMurlocsWantedFrame:Hide() end
   frame:Show()
   local prof = GR:GetModule("Professions")
   if prof then
+    if prof.ClearEmptyRemoteStubs then prof:ClearEmptyRemoteStubs() end
     prof:Broadcast(true)
     prof:RequestAll()
   end
@@ -254,11 +237,6 @@ end
 
 function UI:OnEnable()
   GR:RegisterMessage("PROF_CACHE_CHANGED", function()
-    if frame and frame:IsShown() then
-      UI:RefreshList()
-    end
-  end)
-  GR:RegisterMessage("MAINS_CHANGED", function()
     if frame and frame:IsShown() then
       UI:RefreshList()
     end
