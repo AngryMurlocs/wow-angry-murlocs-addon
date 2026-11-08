@@ -13,15 +13,34 @@ local lastHit = {
   envType = nil,
   t = 0,
 }
+
+-- Forever (no CLEU): recent env hint from mirror timers / IsFalling
+local envHint = {
+  spell = nil,
+  t = 0,
+}
+local ENV_HINT_TTL = 5
 local toast
+local tracker
+local fallElapsed = 0
 
 local ENV_KEYS = {
   FALLING = "DEATH_ENV_FALL",
+  FALL = "DEATH_ENV_FALL",
+  ["2"] = "DEATH_ENV_FALL",
   DROWNING = "DEATH_ENV_DROWN",
+  DROWN = "DEATH_ENV_DROWN",
+  ["1"] = "DEATH_ENV_DROWN",
   FATIGUE = "DEATH_ENV_FATIGUE",
+  EXHAUSTED = "DEATH_ENV_FATIGUE",
+  EXHAUSTION = "DEATH_ENV_FATIGUE",
+  ["0"] = "DEATH_ENV_FATIGUE",
   LAVA = "DEATH_ENV_LAVA",
+  ["3"] = "DEATH_ENV_LAVA",
   SLIME = "DEATH_ENV_SLIME",
+  ["4"] = "DEATH_ENV_SLIME",
   FIRE = "DEATH_ENV_FIRE",
+  ["5"] = "DEATH_ENV_FIRE",
 }
 
 local function Cfg()
@@ -96,10 +115,23 @@ local function EnsureToast()
   return toast
 end
 
+local function SpellForCause(cause, spell)
+  if cause == "player" or cause == "mob" then
+    if type(spell) ~= "string" or spell == "" or spell == U.L("UNKNOWN_KILLER") then
+      return U.L("DEATH_MELEE")
+    end
+    return spell
+  end
+  if type(spell) ~= "string" or spell == "" then
+    return U.L("DEATH_CAUSE_ENV")
+  end
+  return spell
+end
+
 local function FormatDeathLine(victim, cause, killer, spell, zone)
   zone = (zone and zone ~= "") and zone or "?"
   killer = killer or U.L("UNKNOWN_KILLER")
-  spell = spell or U.L("UNKNOWN_KILLER")
+  spell = SpellForCause(cause, spell)
   local body
   if cause == "player" then
     body = string.format(U.L("DEATH_TOAST_PLAYER"), victim, killer, spell, zone)
@@ -148,6 +180,17 @@ local function CacheHit(name, isPlayer, cause, spell, envType)
   lastHit.t = U.Now()
 end
 
+local function CacheEnvHint(spell)
+  if type(spell) ~= "string" or spell == "" then return end
+  envHint.spell = spell
+  envHint.t = U.Now()
+end
+
+local function EnvLabelFromType(envType)
+  local key = ENV_KEYS[tostring(envType or ""):upper()]
+  return key and U.L(key) or U.L("DEATH_ENV_OTHER")
+end
+
 local function IsPlayerSource(sourceGUID, sourceFlags)
   if sourceGUID and tostring(sourceGUID):find("^Player%-") then
     return true
@@ -165,8 +208,7 @@ local function SpellFromCleu(subevent, ...)
   end
   if subevent == "ENVIRONMENTAL_DAMAGE" then
     local envType = ...
-    local key = ENV_KEYS[tostring(envType or ""):upper()]
-    return key and U.L(key) or U.L("DEATH_ENV_OTHER")
+    return EnvLabelFromType(envType)
   end
   -- SPELL_*, RANGE_*, SPELL_PERIODIC_*: spellId, spellName, spellSchool
   local spellId, spellName = ...
@@ -212,13 +254,47 @@ local function OnCombatLogLegacy(...)
   HandleCleu(args[2], args[4], args[5], args[6], args[8], unpack(args, 12))
 end
 
+local function MirrorTimerToSpell(timer)
+  local t = tostring(timer or ""):upper()
+  if t == "BREATH" then
+    return U.L("DEATH_ENV_DROWN")
+  end
+  if t == "EXHAUSTION" or t == "FATIGUE" then
+    return U.L("DEATH_ENV_FATIGUE")
+  end
+  return nil
+end
+
+local function OnMirrorTimerStart(timer)
+  local spell = MirrorTimerToSpell(timer)
+  if spell then CacheEnvHint(spell) end
+end
+
+local function PollFalling(elapsed)
+  fallElapsed = fallElapsed + (elapsed or 0)
+  if fallElapsed < 0.5 then return end
+  fallElapsed = 0
+  if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then return end
+  if IsFalling and IsFalling() then
+    CacheEnvHint(U.L("DEATH_ENV_FALL"))
+  end
+end
+
+local function FreshEnvHint()
+  if envHint.t > 0 and envHint.spell and (U.Now() - envHint.t) < ENV_HINT_TTL then
+    return envHint.spell
+  end
+  return nil
+end
+
 local function ResolveDeath()
   if lastHit.t > 0 and (U.Now() - lastHit.t) < 15 then
+    local cause = lastHit.cause or (lastHit.isPlayer and "player" or "mob")
     return {
       killer = lastHit.name or U.L("UNKNOWN_KILLER"),
       isPlayer = lastHit.isPlayer,
-      cause = lastHit.cause or (lastHit.isPlayer and "player" or "mob"),
-      spell = lastHit.spell or U.L("UNKNOWN_KILLER"),
+      cause = cause,
+      spell = SpellForCause(cause, lastHit.spell),
     }
   end
 
@@ -227,33 +303,37 @@ local function ResolveDeath()
     if UnitExists("attacking") then
       local n = UnitName("attacking")
       local p = UnitIsPlayer("attacking")
+      local cause = p and "player" or "mob"
       return {
         killer = n or U.L("UNKNOWN_KILLER"),
         isPlayer = p,
-        cause = p and "player" or "mob",
+        cause = cause,
         spell = U.L("DEATH_MELEE"),
       }
     end
     if UnitExists("target") and UnitCanAttack and UnitCanAttack("player", "target") then
       local n = UnitName("target")
       local p = UnitIsPlayer("target")
+      local cause = p and "player" or "mob"
       return {
         killer = n or U.L("UNKNOWN_KILLER"),
         isPlayer = p,
-        cause = p and "player" or "mob",
+        cause = cause,
         spell = U.L("DEATH_MELEE"),
       }
     end
-  else
+  end
+
+  local hint = FreshEnvHint()
+  if hint then
     return {
       killer = U.L("UNKNOWN_KILLER"),
       isPlayer = false,
       cause = "env",
-      spell = U.L("DEATH_CAUSE_ENV"),
+      spell = hint,
     }
   end
 
-  -- In combat but no attacking / attackable target
   return {
     killer = U.L("UNKNOWN_KILLER"),
     isPlayer = false,
@@ -271,7 +351,7 @@ function Death:BroadcastLocalDeath()
   local zone = GetZoneText and GetZoneText() or ""
   local mapId = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or 0
   local cause = info.cause or "env"
-  local spell = info.spell or U.L("UNKNOWN_KILLER")
+  local spell = SpellForCause(cause, info.spell)
   local me = U.ShortName(U.PlayerName())
 
   ShowDeathToast(me, cause, info.killer, spell, zone)
@@ -340,7 +420,7 @@ function Death:OnEnable()
       U.ShortName(victim),
       cause,
       data.killer or "?",
-      data.spell or U.L("UNKNOWN_KILLER"),
+      SpellForCause(cause, data.spell),
       data.zone or ""
     )
   end)
@@ -350,9 +430,19 @@ function Death:OnEnable()
   -- (chat: func=Frame:RegisterEvent during EnableModules, before LOADED). Skip CLEU.
   -- Forever: CLEU RegisterEvent -> ADDON_ACTION_FORBIDDEN — skip CLEU.
   U.SafeRegisterEvent(f, "PLAYER_DEAD")
+  U.SafeRegisterEvent(f, "MIRROR_TIMER_START")
   f:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_DEAD" then
       Death:BroadcastLocalDeath()
+    elseif event == "MIRROR_TIMER_START" then
+      OnMirrorTimerStart(...)
     end
   end)
+
+  if not tracker then
+    tracker = CreateFrame("Frame")
+    tracker:SetScript("OnUpdate", function(_, elapsed)
+      PollFalling(elapsed)
+    end)
+  end
 end
