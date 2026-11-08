@@ -8,7 +8,7 @@ local function EnsureDeathCfg()
   local c = GR.db.death
   if c.showToasts == nil then c.showToasts = true end
   if c.scale == nil then c.scale = 1 end
-  if c.duration == nil then c.duration = 5.5 end
+  if c.duration == nil then c.duration = 10.0 end
   if c.locked == nil then c.locked = false end
   return c
 end
@@ -18,7 +18,7 @@ local function EnsureLvlCfg()
   local c = GR.db.levelUp
   if c.showToasts == nil then c.showToasts = true end
   if c.scale == nil then c.scale = 1 end
-  if c.duration == nil then c.duration = 4.5 end
+  if c.duration == nil then c.duration = 8.0 end
   if c.locked == nil then c.locked = false end
   return c
 end
@@ -176,8 +176,8 @@ function Options:OnEnable()
     GR.db.map.showPins = v and true or false
     GR:SendMessage("MAP_SETTINGS_CHANGED")
   end)
-  Slider("OPT_PIN_SIZE", 8, 16, 1, function()
-    return GR.db.map.pinSize or 8
+  Slider("OPT_PIN_SIZE", 8, 24, 1, function()
+    return GR.db.map.pinSize or 18
   end, function(v)
     GR.db.map.pinSize = v
     GR:SendMessage("MAP_SETTINGS_CHANGED")
@@ -200,7 +200,7 @@ function Options:OnEnable()
     EnsureLvlCfg().scale = v
   end, function(v) return string.format("%.1f", v) end)
   Slider("OPT_DUR_LVL_TOAST", 1.5, 15, 0.5, function()
-    return EnsureLvlCfg().duration or 4.5
+    return EnsureLvlCfg().duration or 8.0
   end, function(v)
     EnsureLvlCfg().duration = v
   end, function(v) return string.format("%.1fs", v) end)
@@ -226,7 +226,7 @@ function Options:OnEnable()
     EnsureDeathCfg().scale = v
   end, function(v) return string.format("%.1f", v) end)
   Slider("OPT_DUR_DEATH_TOAST", 1.5, 15, 0.5, function()
-    return EnsureDeathCfg().duration or 5.5
+    return EnsureDeathCfg().duration or 10.0
   end, function(v)
     EnsureDeathCfg().duration = v
   end, function(v) return string.format("%.1fs", v) end)

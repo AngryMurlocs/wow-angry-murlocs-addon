@@ -123,6 +123,70 @@ function U.SanitizeText(s, maxLen)
   return s
 end
 
+-- #region agent log
+local AGENT_LOG_PATH = [[C:\Users\Mani\Desktop\AngryMurlocs-0.5.0-dev\AngryMurlocs\debug-4a34db.log]]
+local AGENT_SESSION = "4a34db"
+
+local function AgentJsonEscape(s)
+  return tostring(s or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\r", "\\r"):gsub("\n", "\\n"):gsub("\t", "\\t")
+end
+
+local function AgentJsonValue(v)
+  local tv = type(v)
+  if tv == "nil" then return "null" end
+  if tv == "boolean" then return v and "true" or "false" end
+  if tv == "number" then return tostring(v) end
+  if tv == "table" then
+    local parts = {}
+    local n = 0
+    for k, val in pairs(v) do
+      n = n + 1
+      if n > 24 then break end
+      parts[#parts + 1] = '"' .. AgentJsonEscape(k) .. '":' .. AgentJsonValue(val)
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+  end
+  return '"' .. AgentJsonEscape(v) .. '"'
+end
+
+function U.AgentLog(hypothesisId, location, message, data, runId)
+  local payload = string.format(
+    '{"sessionId":"%s","runId":"%s","hypothesisId":"%s","location":"%s","message":"%s","data":%s,"timestamp":%d}\n',
+    AGENT_SESSION,
+    tostring(runId or "pre"),
+    AgentJsonEscape(hypothesisId or ""),
+    AgentJsonEscape(location or ""),
+    AgentJsonEscape(message or ""),
+    AgentJsonValue(data or {}),
+    (time and time() or 0) * 1000
+  )
+  local wrote = false
+  if io and io.open then
+    local ok = pcall(function()
+      local f = io.open(AGENT_LOG_PATH, "a")
+      if f then
+        f:write(payload)
+        f:close()
+        wrote = true
+      end
+    end)
+    if not ok then wrote = false end
+  end
+  if GR.db then
+    GR.db._agentLog = GR.db._agentLog or {}
+    local ring = GR.db._agentLog
+    ring[#ring + 1] = payload
+    while #ring > 80 do
+      table.remove(ring, 1)
+    end
+  end
+  if DEFAULT_CHAT_FRAME and (hypothesisId == "H3" or hypothesisId == "H4" or hypothesisId == "H5") then
+    DEFAULT_CHAT_FRAME:AddMessage("|cff888888[AM-DBG]|r " .. tostring(message))
+  end
+  return wrote
+end
+-- #endregion
+
 -- Escape pipe as literal \124 so item links survive TAG|field protocol.
 function U.EscapeField(s, maxLen)
   s = tostring(s or ""):gsub("[%c]", "")

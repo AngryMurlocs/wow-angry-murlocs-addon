@@ -1,5 +1,35 @@
 # AngryMurlocs Changelog
 
+## 0.5.7
+
+- Fix invisible guild pins: re-export Media/Pins TGAs in WoW-compatible format (match circle.tga)
+
+## 0.5.6
+
+- Guild pin default size 18 (larger murloc icons)
+
+## 0.5.5
+
+- Guild pins: drop round circle border; square murloc only; default size 14
+
+## 0.5.4
+
+- Fix guild pin zoom: use WorldMapFrame canvas scale + OnCanvasScaleChanged (Forever)
+
+## 0.5.3
+
+- Longer default toast times: level-up 8s, death 10s (migrates old 4.5/5.5)
+
+## 0.5.2
+
+- Default guild pin size matches Blizzard party pins (11); migrates old size 8
+
+## 0.5.1
+
+- Guild map pins use per-class mini-murloc icons (Media/Pins)
+- Pin size stays fixed while zooming the world map (matches party-pin behavior)
+- Options pin-size slider range 8–24
+
 ## 0.5.0
 
 - Automatic Wanted sightings on targeting listed players (guild share, 60s send cooldown, separate alert cooldown, stale after 30 minutes)

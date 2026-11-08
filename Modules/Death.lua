@@ -29,7 +29,7 @@ local function Cfg()
   local c = GR.db.death
   if c.showToasts == nil then c.showToasts = true end
   if c.scale == nil then c.scale = 1 end
-  if c.duration == nil then c.duration = 5.5 end
+  if c.duration == nil then c.duration = 10.0 end
   if c.locked == nil then c.locked = false end
   return c
 end
@@ -47,14 +47,21 @@ local function ApplyToastLayout(f)
   end
 end
 
+local function RaiseToast(f)
+  f:SetFrameStrata("FULLSCREEN_DIALOG")
+  f:SetFrameLevel(500)
+  if f.Raise then f:Raise() end
+end
+
 local function EnsureToast()
   if toast then
     ApplyToastLayout(toast)
+    RaiseToast(toast)
     return toast
   end
   toast = CreateFrame("Frame", "AngryMurlocsDeathToast", UIParent, BackdropTemplate and "BackdropTemplate" or nil)
   toast:SetSize(520, 56)
-  toast:SetFrameStrata("HIGH")
+  RaiseToast(toast)
   if toast.SetBackdrop then
     toast:SetBackdrop({
       bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -68,6 +75,10 @@ local function EnsureToast()
   toast.text = toast:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   toast.text:SetPoint("CENTER", 0, 4)
   toast.text:SetWidth(500)
+  do
+    local path, _, flags = toast.text:GetFont()
+    if path then toast.text:SetFont(path, 20, flags) end
+  end
 
   toast.hint = toast:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   toast.hint:SetPoint("BOTTOM", 0, 6)
@@ -89,28 +100,39 @@ local function FormatDeathLine(victim, cause, killer, spell, zone)
   zone = (zone and zone ~= "") and zone or "?"
   killer = killer or U.L("UNKNOWN_KILLER")
   spell = spell or U.L("UNKNOWN_KILLER")
+  local body
   if cause == "player" then
-    return string.format(U.L("DEATH_TOAST_PLAYER"), victim, killer, spell, zone)
+    body = string.format(U.L("DEATH_TOAST_PLAYER"), victim, killer, spell, zone)
   elseif cause == "mob" then
-    return string.format(U.L("DEATH_TOAST_MOB"), victim, killer, spell, zone)
+    body = string.format(U.L("DEATH_TOAST_MOB"), victim, killer, spell, zone)
   else
-    return string.format(U.L("DEATH_TOAST_ENV"), victim, spell, zone)
+    body = string.format(U.L("DEATH_TOAST_ENV"), victim, spell, zone)
   end
+  -- Badge always from code so old locale copies still show TOT/DEAD first.
+  return string.format("|cffff3333%s|r  %s", U.L("DEATH_BADGE"), body)
 end
 
 local function ShowDeathToast(victim, cause, killer, spell, zone)
   if not Cfg().showToasts then return end
   local f = EnsureToast()
   ApplyToastLayout(f)
+  RaiseToast(f)
+  if f._hide then f._hide:Cancel() f._hide = nil end
+  if f._fadeAfter then f._fadeAfter:Cancel() f._fadeAfter = nil end
+  if UIFrameFadeRemoveFrame then
+    UIFrameFadeRemoveFrame(f)
+  end
   f.text:SetText(FormatDeathLine(victim, cause, killer, spell, zone))
   f:SetAlpha(1)
   f:Show()
-  local dur = U.Clamp(tonumber(Cfg().duration) or 5.5, 1.5, 15)
-  if f._hide then f._hide:Cancel() end
+  local dur = U.Clamp(tonumber(Cfg().duration) or 10.0, 1.5, 15)
   f._hide = C_Timer.NewTimer(dur, function()
     if UIFrameFadeOut then
       UIFrameFadeOut(f, 0.5, 1, 0)
-      C_Timer.After(0.55, function() f:Hide() end)
+      f._fadeAfter = C_Timer.NewTimer(0.55, function()
+        f._fadeAfter = nil
+        f:Hide()
+      end)
     else
       f:Hide()
     end
@@ -304,7 +326,7 @@ function Death:ResetLayout()
   local c = Cfg()
   c.point = nil
   c.scale = 1
-  c.duration = 5.5
+  c.duration = 10.0
   c.locked = false
   if toast then ApplyToastLayout(toast) end
 end

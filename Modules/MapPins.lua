@@ -7,14 +7,45 @@ local pool = {}
 local active = {}
 local canvasHooked = false
 
-local CIRCLE_TEX = "Interface\\AddOns\\AngryMurlocs\\Media\\circle"
-local DEFAULT_SIZE = 8
+local PIN_BASE = "Interface\\AddOns\\AngryMurlocs\\Media\\Pins\\"
+local DEFAULT_SIZE = 18
+local MIN_SIZE = 8
+local MAX_SIZE = 24
 local NEAR_SELF = 0.01
 
-local function TintCircle(tex, r, g, b, a)
-  tex:SetTexture(CIRCLE_TEX)
-  tex:SetTexCoord(0, 1, 0, 1)
-  tex:SetVertexColor(r, g, b, a or 1)
+local PIN_TEX = {
+  WARRIOR = PIN_BASE .. "WARRIOR",
+  PALADIN = PIN_BASE .. "PALADIN",
+  HUNTER = PIN_BASE .. "HUNTER",
+  ROGUE = PIN_BASE .. "ROGUE",
+  PRIEST = PIN_BASE .. "PRIEST",
+  DEATHKNIGHT = PIN_BASE .. "DEATHKNIGHT",
+  SHAMAN = PIN_BASE .. "SHAMAN",
+  MAGE = PIN_BASE .. "MAGE",
+  WARLOCK = PIN_BASE .. "WARLOCK",
+  MONK = PIN_BASE .. "MONK",
+  DRUID = PIN_BASE .. "DRUID",
+  DEMONHUNTER = PIN_BASE .. "DEMONHUNTER",
+  EVOKER = PIN_BASE .. "EVOKER",
+}
+PIN_TEX.FALLBACK = PIN_TEX.WARRIOR
+
+local function PinTexture(classFile)
+  if classFile and PIN_TEX[classFile] then
+    return PIN_TEX[classFile]
+  end
+  return PIN_TEX.FALLBACK
+end
+
+local function ApplyPinArt(pin, classFile, dead)
+  local a = dead and 0.45 or 1
+  local path = PinTexture(classFile)
+  if pin.border then
+    pin.border:Hide()
+  end
+  pin.tex:SetTexture(path)
+  pin.tex:SetTexCoord(0, 1, 0, 1)
+  pin.tex:SetVertexColor(1, 1, 1, a)
 end
 
 local function PlayerViewPos(viewMapId)
@@ -37,15 +68,10 @@ local function AcquirePin()
   pin:SetSize(DEFAULT_SIZE, DEFAULT_SIZE)
   pin:EnableMouse(true)
 
-  local border = pin:CreateTexture(nil, "BORDER")
-  border:SetAllPoints()
-  TintCircle(border, 0, 0, 0, 1)
-  pin.border = border
-
   local tex = pin:CreateTexture(nil, "ARTWORK")
-  tex:SetPoint("TOPLEFT", 1, -1)
-  tex:SetPoint("BOTTOMRIGHT", -1, 1)
-  TintCircle(tex, 0.8, 0.8, 0.8, 1)
+  tex:SetAllPoints()
+  tex:SetTexture(PIN_TEX.FALLBACK)
+  tex:SetVertexColor(1, 1, 1, 1)
   pin.tex = tex
 
   pin:SetScript("OnEnter", function(self)
@@ -133,6 +159,12 @@ local function MapShown()
   return WorldMapFrame and WorldMapFrame:IsShown()
 end
 
+local function GetScrollContainer()
+  if WorldMapFrame and WorldMapFrame.ScrollContainer then
+    return WorldMapFrame.ScrollContainer
+  end
+end
+
 local function GetCanvas()
   if not WorldMapFrame then return end
   if WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.Child then
@@ -141,6 +173,31 @@ local function GetCanvas()
   if WorldMapFrame.GetCanvas then
     return WorldMapFrame:GetCanvas()
   end
+end
+
+local function GetCanvasScale()
+  -- Forever / retail: scale lives on WorldMapFrame (not only ScrollContainer)
+  if WorldMapFrame and WorldMapFrame.GetCanvasScale then
+    local scale = WorldMapFrame:GetCanvasScale()
+    if scale and scale > 0 then return scale end
+  end
+  local sc = GetScrollContainer()
+  if sc and sc.GetCanvasScale then
+    local scale = sc:GetCanvasScale()
+    if scale and scale > 0 then return scale end
+  end
+  return 1
+end
+
+local function ClampPinSize(size)
+  size = tonumber(size) or DEFAULT_SIZE
+  if size < MIN_SIZE then return MIN_SIZE end
+  if size > MAX_SIZE then return MAX_SIZE end
+  return size
+end
+
+local function ScreenPinSize()
+  return ClampPinSize(GR.db and GR.db.map and GR.db.map.pinSize)
 end
 
 local function CurrentMapId()
@@ -163,6 +220,16 @@ local function ProjectToView(fromMapId, x, y, toMapId)
   return nx, ny
 end
 
+function MapPins:SyncSizes()
+  if not next(active) then return end
+  local scale = GetCanvasScale()
+  local size = ScreenPinSize() / scale
+  for _, pin in pairs(active) do
+    pin:SetScale(1)
+    pin:SetSize(size, size)
+  end
+end
+
 function MapPins:Refresh()
   if not GR.db or not GR.db.map.showPins or not MapShown() then
     ReleaseAll()
@@ -178,8 +245,8 @@ function MapPins:Refresh()
 
   PurgeSelfFromCache()
 
-  local size = GR.db.map.pinSize or DEFAULT_SIZE
-  if size > 12 then size = 12 end
+  local scale = GetCanvasScale()
+  local size = ScreenPinSize() / scale
   local cw, ch = canvas:GetWidth(), canvas:GetHeight()
   if not cw or cw == 0 then return end
 
@@ -210,14 +277,12 @@ function MapPins:Refresh()
           pin:SetParent(canvas)
           pin:SetFrameStrata("HIGH")
           pin:SetFrameLevel((canvas.GetFrameLevel and canvas:GetFrameLevel() or 0) + 100)
+          pin:SetScale(1)
           pin:SetSize(size, size)
           pin.data = data
           pin.member = name
 
-          local r, g, b = U.ClassColor(data.classFile)
-          local a = data.dead and 0.45 or 1
-          TintCircle(pin.border, 0, 0, 0, 1)
-          TintCircle(pin.tex, r, g, b, a)
+          ApplyPinArt(pin, data.classFile, data.dead)
 
           pin:ClearAllPoints()
           pin:SetPoint("CENTER", canvas, "TOPLEFT", px * cw, -py * ch)
@@ -251,6 +316,23 @@ local function HookMap()
       MapPins:Refresh()
     end)
   end
+
+  -- Forever: scale notifications are on WorldMapFrame (Leatrix/MoveAny pattern)
+  if WorldMapFrame.OnCanvasScaleChanged then
+    hooksecurefunc(WorldMapFrame, "OnCanvasScaleChanged", function()
+      MapPins:SyncSizes()
+    end)
+  end
+  WorldMapFrame:HookScript("OnSizeChanged", function()
+    MapPins:SyncSizes()
+  end)
+
+  local sc = GetScrollContainer()
+  if sc and sc.OnCanvasScaleChanged then
+    hooksecurefunc(sc, "OnCanvasScaleChanged", function()
+      MapPins:SyncSizes()
+    end)
+  end
 end
 
 function MapPins:OnEnable()
@@ -275,5 +357,5 @@ function MapPins:OnEnable()
     DiscardPool()
     MapPins:Refresh()
   end)
-  -- Refresh via OnShow / OnMapChanged / POS_* messages (no polling ticker)
+  -- Refresh via OnShow / OnMapChanged / scale / POS_* messages (no polling ticker)
 end

@@ -3,7 +3,7 @@
 ## Notes: Angry Murlocs guild helper — map pins, professions, Wanted sightings, mains, craft requests
 ## Notes-deDE: Angry Murlocs Gilden-Helfer — Pins, Berufe, Wanted-Sichtungen, Main/Twink, Handwerksanfragen
 ## Author: Angry Murlocs
-## Version: 0.5.0
+## Version: 0.5.7
 ## SavedVariables: AngryMurlocsDB
 
 Localization\enUS.lua

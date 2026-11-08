@@ -7,13 +7,14 @@ local LevelUp = GR:NewModule("LevelUp")
 local toast
 local queue = {}
 local hideTimer
+local fadeAfter
 
 local function Cfg()
   GR.db.levelUp = GR.db.levelUp or {}
   local c = GR.db.levelUp
   if c.showToasts == nil then c.showToasts = true end
   if c.scale == nil then c.scale = 1 end
-  if c.duration == nil then c.duration = 4.5 end
+  if c.duration == nil then c.duration = 8.0 end
   if c.locked == nil then c.locked = false end
   return c
 end
@@ -31,14 +32,32 @@ local function ApplyToastLayout(f)
   end
 end
 
+local function RaiseToast(f)
+  f:SetFrameStrata("FULLSCREEN_DIALOG")
+  f:SetFrameLevel(500)
+  if f.Raise then f:Raise() end
+end
+
+local function CancelToastTimers()
+  if hideTimer then
+    hideTimer:Cancel()
+    hideTimer = nil
+  end
+  if fadeAfter then
+    fadeAfter:Cancel()
+    fadeAfter = nil
+  end
+end
+
 local function EnsureToast()
   if toast then
     ApplyToastLayout(toast)
+    RaiseToast(toast)
     return toast
   end
   toast = CreateFrame("Frame", "AngryMurlocsLevelUpToast", UIParent, BackdropTemplate and "BackdropTemplate" or nil)
   toast:SetSize(360, 56)
-  toast:SetFrameStrata("HIGH")
+  RaiseToast(toast)
 
   if toast.SetBackdrop then
     toast:SetBackdrop({
@@ -54,6 +73,10 @@ local function EnsureToast()
   toast.text = toast:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   toast.text:SetPoint("CENTER", 0, 4)
   toast.text:SetWidth(340)
+  do
+    local path, _, flags = toast.text:GetFont()
+    if path then toast.text:SetFont(path, 20, flags) end
+  end
 
   toast.hint = toast:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   toast.hint:SetPoint("BOTTOM", 0, 6)
@@ -71,24 +94,29 @@ local function EnsureToast()
   return toast
 end
 
-local function ShowNext()
-  if UnitAffectingCombat("player") then return end
-  if #queue == 0 then return end
-  if toast and toast:IsShown() and toast:GetAlpha() > 0.1 then return end
+local ShowNext
 
-  local item = table.remove(queue, 1)
+local function DisplayToast(name, level)
   local f = EnsureToast()
   ApplyToastLayout(f)
-  f.text:SetText(string.format(U.L("LVL_TOAST"), item.name, item.level))
+  RaiseToast(f)
+
+  CancelToastTimers()
+  if UIFrameFadeRemoveFrame then
+    UIFrameFadeRemoveFrame(f)
+  end
+
+  local lvl = tonumber(level) or 1
+  f.text:SetText(string.format(U.L("LVL_TOAST"), name, lvl))
   f:SetAlpha(1)
   f:Show()
 
-  local dur = U.Clamp(tonumber(Cfg().duration) or 4.5, 1.5, 15)
-  if hideTimer then hideTimer:Cancel() end
+  local dur = U.Clamp(tonumber(Cfg().duration) or 8.0, 1.5, 15)
   hideTimer = C_Timer.NewTimer(dur, function()
     if UIFrameFadeOut then
       UIFrameFadeOut(f, 0.4, 1, 0)
-      C_Timer.After(0.45, function()
+      fadeAfter = C_Timer.NewTimer(0.45, function()
+        fadeAfter = nil
         f:Hide()
         ShowNext()
       end)
@@ -99,8 +127,38 @@ local function ShowNext()
   end)
 end
 
+function ShowNext()
+  -- #region agent log
+  if UnitAffectingCombat("player") then
+    U.AgentLog("H4", "LevelUp.lua:ShowNext", "skip_combat", { queue = #queue })
+    return
+  end
+  if #queue == 0 then return end
+  if toast and toast:IsShown() and toast:GetAlpha() > 0.1 then
+    U.AgentLog("H4", "LevelUp.lua:ShowNext", "skip_toast_busy", { queue = #queue })
+    return
+  end
+  -- #endregion
+
+  local item = table.remove(queue, 1)
+  -- #region agent log
+  U.AgentLog("H4", "LevelUp.lua:ShowNext", "show_toast", { name = item.name, level = item.level, remaining = #queue })
+  -- #endregion
+  DisplayToast(item.name, item.level)
+end
+
 local function Enqueue(name, level)
-  if not Cfg().showToasts then return end
+  local cfg = Cfg()
+  -- #region agent log
+  U.AgentLog("H3", "LevelUp.lua:Enqueue", "enqueue", {
+    name = U.ShortName(name),
+    level = level,
+    showToasts = cfg.showToasts and true or false,
+    inCombat = UnitAffectingCombat("player") and true or false,
+    queueBefore = #queue,
+  })
+  -- #endregion
+  if not cfg.showToasts then return end
   queue[#queue + 1] = { name = U.ShortName(name), level = level }
   if not UnitAffectingCombat("player") then
     ShowNext()
@@ -109,14 +167,18 @@ end
 
 function LevelUp:Preview()
   Cfg().showToasts = true
-  Enqueue(U.PlayerName(), UnitLevel("player") or 1)
+  Cfg().point = nil -- force default; saved off-screen kills preview
+  DisplayToast(U.ShortName(U.PlayerName()), UnitLevel("player") or 1)
+  if toast and toast.ClampToScreen then
+    toast:ClampToScreen()
+  end
 end
 
 function LevelUp:ResetLayout()
   local c = Cfg()
   c.point = nil
   c.scale = 1
-  c.duration = 4.5
+  c.duration = 8.0
   c.locked = false
   if toast then ApplyToastLayout(toast) end
 end
@@ -136,8 +198,20 @@ function LevelUp:OnEnable()
       local level = ...
       level = tonumber(level) or UnitLevel("player")
       Enqueue(U.PlayerName(), level)
-      if GR.db.privacy.shareLevelUp and IsInGuild() then
-        Comm:Send("LVL|" .. tostring(level))
+      local share = GR.db and GR.db.privacy and GR.db.privacy.shareLevelUp
+      local inGuild = IsInGuild and IsInGuild()
+      -- #region agent log
+      U.AgentLog("H5", "LevelUp.lua:PLAYER_LEVEL_UP", "local_level_up", {
+        level = level,
+        shareLevelUp = share and true or false,
+        inGuild = inGuild and true or false,
+      })
+      -- #endregion
+      if share and inGuild then
+        local sent = Comm:Send("LVL|" .. tostring(level))
+        -- #region agent log
+        U.AgentLog("H5", "LevelUp.lua:PLAYER_LEVEL_UP", "lvl_send", { sent = sent and true or false, level = level })
+        -- #endregion
       end
     elseif event == "PLAYER_REGEN_ENABLED" then
       ShowNext()

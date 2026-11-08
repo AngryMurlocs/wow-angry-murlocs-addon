@@ -214,6 +214,16 @@ end
 function Professions:OnEnable()
   GR:RegisterMessage("PROF_UPDATE", function(_, sender, rest)
     local list = Decode(rest)
+    -- #region agent log
+    local pipes = 0
+    if rest then for _ in string.gmatch(rest, "|") do pipes = pipes + 1 end end
+    U.AgentLog("H6", "Professions.lua:PROF_UPDATE", "prof_decoded", {
+      sender = U.ShortName(sender),
+      restLen = #(rest or ""),
+      pipes = pipes,
+      decodedCount = #list,
+    })
+    -- #endregion
     GR.db.prof.cache[sender] = {
       list = list,
       time = U.Now(),

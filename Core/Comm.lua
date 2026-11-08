@@ -38,7 +38,18 @@ local function AllowSender(sender)
     return true
   end
   b.n = b.n + 1
-  return b.n <= RATE_MAX
+  local ok = b.n <= RATE_MAX
+  -- #region agent log
+  if not ok then
+    U.AgentLog("H2", "Comm.lua:AllowSender", "rate_limit_drop", {
+      sender = U.ShortName(sender),
+      n = b.n,
+      max = RATE_MAX,
+      window = RATE_WINDOW,
+    })
+  end
+  -- #endregion
+  return ok
 end
 
 local function RawSend(payload)
@@ -104,6 +115,23 @@ function Comm:Send(payload)
 end
 
 local function DispatchParsed(tag, rest, sender)
+  -- #region agent log
+  local pipeCount = 0
+  if rest then
+    for _ in string.gmatch(rest, "|") do pipeCount = pipeCount + 1 end
+  end
+  local sanitizedWould = U.SanitizeText(rest or "", 200)
+  local sanitizeKillsPipes = (pipeCount > 0) and (not sanitizedWould:find("|", 1, true))
+  if tag ~= "POS" then
+    U.AgentLog("H1", "Comm.lua:DispatchParsed", "dispatch_enter", {
+      tag = tag,
+      restLen = #(rest or ""),
+      pipeCount = pipeCount,
+      sanitizeKillsPipes = sanitizeKillsPipes and true or false,
+      sender = U.ShortName(sender),
+    })
+  end
+  -- #endregion
   if tag == "POS" then
     local parts = U.Split(rest, "|")
     local mapId = tonumber(parts[1])
@@ -129,7 +157,19 @@ local function DispatchParsed(tag, rest, sender)
       time = U.Now(),
     })
   elseif tag == "PROF" then
-    GR:SendMessage("PROF_UPDATE", sender, U.SanitizeText(rest, 200))
+    -- Keep | delimiters (key:skill|key:skill); SanitizeText would strip them
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    if #cleaned > 200 then cleaned = cleaned:sub(1, 200) end
+    -- #region agent log
+    local cleanedPipes = 0
+    for _ in string.gmatch(cleaned, "|") do cleanedPipes = cleanedPipes + 1 end
+    U.AgentLog("H6", "Comm.lua:PROF", "prof_cleaned", {
+      cleanedLen = #cleaned,
+      cleanedPipes = cleanedPipes,
+      sender = U.ShortName(sender),
+    })
+    -- #endregion
+    GR:SendMessage("PROF_UPDATE", sender, cleaned)
   elseif tag == "PROFREQ" then
     GR:SendMessage("PROF_REQUEST", sender)
   elseif tag == "DEATH" then
@@ -138,6 +178,13 @@ local function DispatchParsed(tag, rest, sender)
     if cause ~= "player" and cause ~= "mob" and cause ~= "env" then
       cause = (tonumber(parts[2]) == 1) and "player" or "mob"
     end
+    -- #region agent log
+    U.AgentLog("H1", "Comm.lua:DEATH", "death_dispatch_ok", {
+      partCount = #parts,
+      cause = tostring(cause or ""),
+      sender = U.ShortName(sender),
+    })
+    -- #endregion
     GR:SendMessage("DEATH_UPDATE", sender, {
       killer = U.SanitizeText(parts[1] or "?", 48),
       isPlayer = tonumber(parts[2]) == 1 or cause == "player",
@@ -166,6 +213,14 @@ local function DispatchParsed(tag, rest, sender)
     })
   elseif tag == "LVL" then
     local level = tonumber(rest)
+    -- #region agent log
+    U.AgentLog("H1", "Comm.lua:LVL", "lvl_parse", {
+      rest = tostring(rest or ""),
+      level = level or -1,
+      ok = (level and level >= 1 and level <= 80) and true or false,
+      sender = U.ShortName(sender),
+    })
+    -- #endregion
     if level and level >= 1 and level <= 80 then
       GR:SendMessage("LVL_UPDATE", sender, level)
     end

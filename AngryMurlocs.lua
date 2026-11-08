@@ -1,14 +1,14 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.5.0"
+GR.VERSION = "0.5.7"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
 
 local defaults = {
   map = {
     showPins = true,
-    pinSize = 8,
+    pinSize = 18,
   },
   privacy = {
     sharePosition = true,
@@ -40,14 +40,14 @@ local defaults = {
     showToasts = true,
     point = nil,
     scale = 1,
-    duration = 4.5,
+    duration = 8.0,
     locked = false,
   },
   death = {
     showToasts = true,
     point = nil,
     scale = 1,
-    duration = 5.5,
+    duration = 10.0,
     locked = false,
   },
 }
@@ -144,8 +144,25 @@ frame:SetScript("OnEvent", function(_, event, ...)
     CopyDefaults(defaults, AngryMurlocsDB)
     GR.db = AngryMurlocsDB
     GR.db._agentDebug = nil
-    if GR.db.map and (not GR.db.map.pinSize or GR.db.map.pinSize > 12) then
-      GR.db.map.pinSize = 8
+    if GR.db.map then
+      local ps = tonumber(GR.db.map.pinSize)
+      -- Migrate prior defaults (≤14) / invalid → 18
+      if not ps or ps <= 14 or ps > 24 then
+        GR.db.map.pinSize = 18
+      end
+    end
+    -- Migrate old toast duration defaults → longer defaults
+    if GR.db.levelUp then
+      local d = tonumber(GR.db.levelUp.duration)
+      if not d or d == 4.5 then
+        GR.db.levelUp.duration = 8.0
+      end
+    end
+    if GR.db.death then
+      local d = tonumber(GR.db.death.duration)
+      if not d or d == 5.5 then
+        GR.db.death.duration = 10.0
+      end
     end
     GR.Comm:Register()
   elseif event == "PLAYER_LOGIN" then
@@ -185,6 +202,55 @@ SlashCmdList["ANGRYMURLOCS"] = function(msg)
     U.Print(U.L("HELP"))
     return
   end
+
+  -- #region agent log
+  if lower == "dbgprobe" then
+    local priv = db.privacy or {}
+    local wrote = U.AgentLog("H3", "AngryMurlocs.lua:dbgprobe", "privacy_snapshot", {
+      shareLevelUp = priv.shareLevelUp and true or false,
+      shareDeath = priv.shareDeath and true or false,
+      shareProfessions = priv.shareProfessions and true or false,
+      sharePosition = priv.sharePosition and true or false,
+      showLvlToasts = (db.levelUp and db.levelUp.showToasts) and true or false,
+      showDeathToasts = (db.death and db.death.showToasts) and true or false,
+      inGuild = (IsInGuild and IsInGuild()) and true or false,
+      ioOpen = (io and io.open) and true or false,
+    })
+    -- Simulated wire samples: would SanitizeText on whole rest kill pipes?
+    local samples = {
+      { tag = "LVL", rest = "42" },
+      { tag = "PROF", rest = "alch:15|herb:28|cook:9" },
+      { tag = "DEATH", rest = "Boar|0|Elwynn|1429|mob|Claw" },
+      { tag = "MAIN", rest = "set|Ingoo|1|123" },
+      { tag = "CRAFT", rest = "create|id1|1|0|Owner|0|Sword|esc|1|0|note|open||" },
+    }
+    for i = 1, #samples do
+      local s = samples[i]
+      local sanitized = U.SanitizeText(s.rest, 200)
+      local hadPipe = s.rest:find("|", 1, true) and true or false
+      local stillPipe = sanitized:find("|", 1, true) and true or false
+      U.AgentLog("H1", "AngryMurlocs.lua:dbgprobe", "sanitize_sample", {
+        tag = s.tag,
+        hadPipe = hadPipe,
+        sanitizeKillsPipes = (hadPipe and not stillPipe) and true or false,
+        usesWholeRestSanitize = (s.tag == "PROF") and true or false,
+      })
+    end
+    -- Inject fake guild messages (not self) through real Comm path
+    local fake = "AMDbgProbe-TestRealm"
+    if GR.Comm and GR.Comm.OnAddonMessage then
+      GR.Comm:OnAddonMessage(GR.PREFIX, "LVL|42", "GUILD", fake)
+      GR.Comm:OnAddonMessage(GR.PREFIX, "PROF|alch:15|herb:28|cook:9", "GUILD", fake)
+      GR.Comm:OnAddonMessage(GR.PREFIX, "DEATH|Boar|0|Elwynn|1429|mob|Claw", "GUILD", fake)
+    end
+    local lvl = GR:GetModule("LevelUp")
+    if lvl and lvl.Preview then lvl:Preview() end
+    local probeCache = db.prof and db.prof.cache and db.prof.cache["AMDbgProbe-TestRealm"]
+    local decoded = probeCache and probeCache.list and #probeCache.list or -1
+    U.Print("dbgprobe done file=" .. tostring(wrote) .. " AMDbgProbeProfs=" .. tostring(decoded) .. " — dann /reload damit Logs in SV landen.")
+    return
+  end
+  -- #endregion
 
   if lower == "wanted" then
     local wanted = GR:GetModule("Wanted")
