@@ -3,7 +3,8 @@
 Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
 
 **Version:** 0.8.0  
-**Projekt:** https://gitlab.ngit.ovh/murlocs/addon-angrymurlocs
+**Projekt:** https://gitlab.ngit.ovh/murlocs/addon-angrymurlocs  
+**Clone (SSH):** `git@gitlab.ngit.ovh:murlocs/addon-angrymurlocs.git`
 
 ## Features
 
