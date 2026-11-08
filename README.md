@@ -20,7 +20,7 @@ Kommunikation über den Gilden-Addonkanal (Prefix `GildenRadar` für Kompatibili
 
 ## Installation
 
-1. Release-ZIP entpacken (oder dieses Repo klonen).
+1. Release-ZIP entpacken.
 2. Ordner `AngryMurlocs` nach  
    `World of Warcraft\_forever_\Interface\AddOns\` kopieren.
 3. Spiel neu starten bzw. Addons neu laden (`/reload`).
