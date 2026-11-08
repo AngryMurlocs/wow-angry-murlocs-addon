@@ -1,0 +1,28 @@
+# Local backups / dumps
+*.bak
+*.bak-*
+*.zip
+*.7z
+*.rar
+
+# WoW client / SavedVariables (never commit)
+WTF/
+Interface/
+Cache/
+Logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local tooling (portable Lua etc.)
+tools/
+*.exe
+
+# Cursor / agent scratch
+.cursor/
