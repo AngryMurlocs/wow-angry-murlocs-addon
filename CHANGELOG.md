@@ -2,8 +2,6 @@
 
 ## 0.8.0
 
-GitLab release baseline (P0 Wanted/Sync + P1 freshness/UI).
-
 ### Freshness / UI
 
 - Wanted sightings: three tiers — fresh (&lt;60 s), warm (&lt;5 min), stale (5+ min). List colour/suffix and tooltip label update while the panel is open.
