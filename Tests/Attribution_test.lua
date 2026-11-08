@@ -1,5 +1,5 @@
 -- Death attribution with the real Death/Wanted/Comm code and stubbed unit APIs.
--- Forever has no combat log, so only the unit-token path can run here.
+-- Forever: no CLEU; unit tokens never blame players; Death Recap can attribute.
 -- From repo root: luajit Tests/Attribution_test.lua
 local Sim = dofile("Tests/sim.lua")
 
@@ -171,6 +171,81 @@ do
   sim:Run(3)
   check("shareDeath off: no DEATH on wire", sim:Count("DEATH") == 0)
   check("shareDeath off: Bob saw nothing", #bob.deaths == 0)
+end
+
+-- 9) Recap event mapping (pure): Creature -> mob toast, Player -> reliable Wanted.
+do
+  local _, alice = NewPair(9)
+  local Map = Death(alice).AttributionFromRecapEvents
+  local mob = Map({
+    { event = "SWING_DAMAGE", sourceName = "Trash", sourceGUID = "Creature-0-1-0-0-1-0", amount = 10 },
+    { event = "SPELL_PERIODIC_DAMAGE", sourceName = "Fleischfressendes Unkraut",
+      sourceGUID = "Creature-0-1-0-0-123-0", amount = 34, spellName = "Absorb" },
+  })
+  check("recap map: last creature is mob", mob and mob.cause == "mob" and mob.reliable == false
+    and mob.killer == "Fleischfressendes Unkraut", mob and mob.killer)
+  check("recap map: mob spell from event", mob and mob.spell == "Absorb", mob and mob.spell)
+
+  local pvp = Map({
+    { event = "SPELL_DAMAGE", sourceName = "Ganker", sourceGUID = "Player-1-ABCDEF",
+      spellName = "Eviscerate", overkill = 5 },
+  })
+  check("recap map: player reliable", pvp and pvp.cause == "player" and pvp.reliable == true
+    and pvp.killer == "Ganker" and pvp.isPlayer == true)
+
+  local env = Map({
+    { event = "ENVIRONMENTAL_DAMAGE", environmentalType = "FALLING", amount = 50 },
+  })
+  check("recap map: env fall", env and env.cause == "env" and env.reliable == false)
+
+  check("recap map: empty", Map({}) == nil)
+  check("recap map: nil", Map(nil) == nil)
+end
+
+-- 10) ResolveDeath uses injected C_DeathRecap (Forever path).
+do
+  local sim, alice, bob = NewPair(10)
+  SetWorld(alice, { combat = true, units = { target = { name = "WrongGuy", realm = "Realm", player = true, hostile = true } } })
+  alice.env.C_DeathRecap = {
+    GetRecapEvents = function()
+      return {
+        { event = "SPELL_DAMAGE", sourceName = "RealKiller", sourceGUID = "Player-1-DEADBEEF",
+          spellName = "Sinister Strike", overkill = 12 },
+      }
+    end,
+    HasRecapEvents = function() return true end,
+  }
+  local info = Death(alice).ResolveDeath()
+  check("recap resolve: player not target", info.cause == "player" and info.killer == "RealKiller"
+    and info.reliable == true and info.source == "recap", info and info.killer)
+  Death(alice):BroadcastLocalDeath()
+  sim:Run(5)
+  check("recap resolve: Wanted counted", Sim.Entries(alice) >= 1)
+  check("recap resolve: WK sent", sim:Count("WK") >= 1)
+  local d = bob.deaths[1]
+  check("recap resolve: guild toast player", d and d.data.cause == "player" and d.data.isPlayer == true
+    and tostring(d.data.killer):find("RealKiller"), d and d.data.killer)
+end
+
+-- 11) Recap mob: toast mob, no Wanted — even with hostile player targeted.
+do
+  local sim, alice, bob = NewPair(11)
+  SetWorld(alice, { combat = true, units = { target = { name = "Ganker", realm = "Realm", player = true, hostile = true } } })
+  alice.env.C_DeathRecap = {
+    GetRecapEvents = function()
+      return {
+        { event = "SPELL_PERIODIC_DAMAGE", sourceName = "Fleischfressendes Unkraut",
+          sourceGUID = "Creature-0-1-0-0-99-0", amount = 34 },
+      }
+    end,
+  }
+  local info = Death(alice).ResolveDeath()
+  check("recap mob: not player target", info.cause == "mob" and info.killer == "Fleischfressendes Unkraut"
+    and info.reliable == false)
+  Death(alice):BroadcastLocalDeath()
+  sim:Run(3)
+  check("recap mob: no Wanted", Sim.Entries(alice) == 0)
+  check("recap mob: guild toast mob", bob.deaths[1] and bob.deaths[1].data.cause == "mob")
 end
 
 print(string.format("\n%d failures", fails))

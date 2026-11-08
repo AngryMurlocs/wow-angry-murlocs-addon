@@ -1,5 +1,12 @@
 # AngryMurlocs Changelog
 
+## 0.8.1
+
+- Death Recap fallback when CLEU is silent (Forever)
+- Player-* GUID from Recap counts Wanted + toast
+- Mob/env Recap toasts without Wanted credit
+- Shorter death toast strings (en/de)
+
 ## 0.8.0
 
 ### Freshness / UI

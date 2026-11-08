@@ -54,8 +54,9 @@ Ziel: herausfinden, ob Forever eine verlässliche Täterquelle bietet. Bis dahin
 2. Kontrolliert sterben: (a) durch einen feindlichen Spieler in der offenen Welt, (b) durch einen NPC, während ein feindlicher Spieler im Ziel ist, (c) durch Fallschaden, (d) im Duell.
 3. Nach jedem Tod `/am diag death` und den Ausdruck sichern.
 4. Auswerten:
-   - Zeile `apis:` — ist `C_DeathInfo` oder `GetDeathRecapLink` `true`?
+   - Zeile `apis:` — ist `C_DeathInfo`, `C_DeathRecap` oder `GetDeathRecapLink` `true`?
+   - Zeilen `recap:` / `recap[n]:` — nach PvP-Tod (a): steht ein Tätername (`source=…`, `guid=Player`)? Bei NPC+falsches Ziel (b): darf **nicht** der Spieler im Ziel als Recap-Source erscheinen.
    - Zeile `registered:` — welche Events ließen sich registrieren?
    - Zeilen `-x.xs EVENT ...` — enthält eines bei (a) den Täternamen und bei (b) **nicht** den Spieler im Ziel?
-   - Erwartet für alle Fälle in 0.7.0: `-> unclear_killer`, `-> no_player` oder `-> excluded_duel`; kein neuer Wanted-Eintrag.
+   - Erwartet für alle Fälle in 0.7.0+: `-> unclear_killer`, `-> no_player` oder `-> excluded_duel`; kein neuer Wanted-Eintrag (Recap-Dump zählt noch nicht).
 5. Ergebnis an die Entwicklung geben. Nur eine Quelle, die (a) richtig und (b) nicht falsch zuordnet, darf später `reliable = true` setzen.

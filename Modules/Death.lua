@@ -328,7 +328,143 @@ local function UnitKillerName(unit)
   return U.NormalizeName(name)
 end
 
--- reliable = the killer comes from a damage source record (CLEU killing blow).
+-- Fetch Death Recap event tables (Forever: CLEU off, Recap often still works).
+local function FetchRecapEvents()
+  local events, src
+  if C_DeathRecap and type(C_DeathRecap.GetRecapEvents) == "function" then
+    local ok, res = pcall(function() return C_DeathRecap.GetRecapEvents() end)
+    if ok and res ~= nil then
+      events, src = res, "C_DeathRecap.GetRecapEvents"
+    end
+    if events == nil then
+      local ok2, res2 = pcall(function() return C_DeathRecap.GetRecapEvents(1) end)
+      if ok2 and res2 ~= nil then
+        events, src = res2, "C_DeathRecap.GetRecapEvents(1)"
+      end
+    end
+  end
+  if events == nil and type(DeathRecap_GetEvents) == "function" then
+    local ok, res = pcall(function() return DeathRecap_GetEvents() end)
+    if ok and res ~= nil then
+      events, src = res, "DeathRecap_GetEvents"
+    end
+    if events == nil then
+      local ok2, res2 = pcall(function() return DeathRecap_GetEvents(1) end)
+      if ok2 and res2 ~= nil then
+        events, src = res2, "DeathRecap_GetEvents(1)"
+      end
+    end
+  end
+  return events, src
+end
+
+local function RecapEventFields(ev)
+  return {
+    event = ev.event or ev[2],
+    sourceName = ev.sourceName or ev[5],
+    sourceGUID = ev.sourceGUID or ev[4],
+    spellName = ev.spellName,
+    environmentalType = ev.environmentalType or ev.envType,
+  }
+end
+
+local function IsRecapDamageEvent(evName)
+  evName = tostring(evName or "")
+  if evName == "" then return false end
+  if evName == "ENVIRONMENTAL_DAMAGE" then return true end
+  return evName:find("DAMAGE", 1, true) ~= nil or evName:find("MISSED", 1, true) ~= nil
+end
+
+local function SpellFromRecap(f)
+  if type(f.spellName) == "string" and f.spellName ~= "" then
+    return f.spellName
+  end
+  local evName = tostring(f.event or "")
+  if evName == "ENVIRONMENTAL_DAMAGE" then
+    return EnvLabelFromType(f.environmentalType)
+  end
+  return U.L("DEATH_MELEE")
+end
+
+-- Pure mapping: Recap event list -> attribution (testable without WoW APIs).
+-- Player-* GUID is reliable (Wanted + toast). Creature/Vehicle/Pet = mob toast only.
+local function AttributionFromRecapEvents(events)
+  if type(events) ~= "table" then return nil end
+  local pick
+  for i = #events, 1, -1 do
+    local ev = events[i]
+    if type(ev) == "table" then
+      local f = RecapEventFields(ev)
+      local name = f.sourceName
+      if type(name) == "string" then
+        name = name:match("^%s*(.-)%s*$")
+        if name == "" then name = nil end
+      else
+        name = nil
+      end
+      f.sourceName = name
+      if IsRecapDamageEvent(f.event) or name then
+        pick = f
+        if IsRecapDamageEvent(f.event) then break end
+      end
+    end
+  end
+  if not pick then return nil end
+
+  local guid = tostring(pick.sourceGUID or "")
+  local name = pick.sourceName
+  local spell = SpellFromRecap(pick)
+
+  if guid:find("^Player%-") and name then
+    return {
+      killer = name,
+      isPlayer = true,
+      cause = "player",
+      spell = SpellForCause("player", spell),
+      reliable = true,
+      source = "recap",
+    }
+  end
+
+  if guid:find("^Creature%-") or guid:find("^Vehicle%-") or guid:find("^Pet%-") then
+    return {
+      killer = name or U.L("UNKNOWN_KILLER"),
+      isPlayer = false,
+      cause = "mob",
+      spell = SpellForCause("mob", spell),
+      reliable = false,
+      source = "recap",
+    }
+  end
+
+  local evName = tostring(pick.event or "")
+  if evName == "ENVIRONMENTAL_DAMAGE" or not name then
+    return {
+      killer = U.L("UNKNOWN_KILLER"),
+      isPlayer = false,
+      cause = "env",
+      spell = spell,
+      reliable = false,
+      source = "recap",
+    }
+  end
+
+  -- Named source, unclear GUID: toast as mob, never Wanted.
+  return {
+    killer = name,
+    isPlayer = false,
+    cause = "mob",
+    spell = SpellForCause("mob", spell),
+    reliable = false,
+    source = "recap",
+  }
+end
+
+local function ReadRecapAttribution()
+  return AttributionFromRecapEvents(FetchRecapEvents())
+end
+
+-- reliable = CLEU lastHit or Death Recap with Player-* GUID.
 -- Target / unit-token guesses are never reliable: target switches, DoTs, pets,
 -- NPC and environment deaths would blame whoever happens to be targeted.
 local function ResolveDeath()
@@ -340,11 +476,17 @@ local function ResolveDeath()
       cause = cause,
       spell = SpellForCause(cause, lastHit.spell),
       reliable = true,
+      source = "cleu",
     }
   end
 
-  -- No CLEU on Forever: only unit tokens. A hostile player there is a suspect,
-  -- not a killer, so it is neither named nor counted.
+  -- Forever (no CLEU): Death Recap is the honest killer source for toast + Wanted.
+  local recap = ReadRecapAttribution()
+  if recap then
+    return recap
+  end
+
+  -- Unit tokens: hostile player is a suspect only — never counted / named as killer.
   if UnitAffectingCombat("player") then
     for _, unit in ipairs({ "attacking", "target" }) do
       if UnitExists(unit) and (unit == "attacking" or (UnitCanAttack and UnitCanAttack("player", unit))) then
@@ -356,6 +498,7 @@ local function ResolveDeath()
             spell = "",
             reliable = false,
             suspect = UnitKillerName(unit),
+            source = "unit",
           }
         end
         return {
@@ -364,6 +507,7 @@ local function ResolveDeath()
           cause = "mob",
           spell = U.L("DEATH_MELEE"),
           reliable = false,
+          source = "unit",
         }
       end
     end
@@ -376,6 +520,7 @@ local function ResolveDeath()
       isPlayer = false,
       cause = "env",
       spell = hint,
+      source = "hint",
     }
   end
 
@@ -384,6 +529,7 @@ local function ResolveDeath()
     isPlayer = false,
     cause = "env",
     spell = U.L("DEATH_CAUSE_ENV"),
+    source = "fallback",
   }
 end
 
@@ -456,17 +602,97 @@ local function SetDeathCapture(on)
   end
 end
 
+-- Diag-only dump of Recap tables (attribution itself uses the same FetchRecapEvents).
+local function ClipDiag(s, maxLen)
+  s = tostring(s or ""):gsub("[%c]", " ")
+  maxLen = maxLen or 80
+  if #s > maxLen then s = s:sub(1, maxLen) end
+  return s
+end
+
+local function GuidKind(guid)
+  guid = tostring(guid or "")
+  if guid == "" then return "-" end
+  local kind = guid:match("^([%w]+)%-")
+  return kind or "?"
+end
+
+local function AppendRecapDump(lines)
+  local hasCRecap = C_DeathRecap ~= nil
+  local hasGetEvents = hasCRecap and type(C_DeathRecap.GetRecapEvents) == "function"
+  local hasHasEvents = hasCRecap and type(C_DeathRecap.HasRecapEvents) == "function"
+  local hasLegacy = type(DeathRecap_GetEvents) == "function"
+  local hasLink = type(GetDeathRecapLink) == "function"
+  lines[#lines + 1] = string.format(
+    "recap apis: C_DeathRecap=%s GetRecapEvents=%s HasRecapEvents=%s DeathRecap_GetEvents=%s GetDeathRecapLink=%s",
+    tostring(hasCRecap), tostring(hasGetEvents), tostring(hasHasEvents),
+    tostring(hasLegacy), tostring(hasLink)
+  )
+
+  if hasHasEvents then
+    local ok, has = pcall(function() return C_DeathRecap.HasRecapEvents() end)
+    if ok then
+      lines[#lines + 1] = "recap: HasRecapEvents=" .. tostring(has)
+    else
+      lines[#lines + 1] = "recap: HasRecapEvents err " .. ClipDiag(has, 60)
+    end
+  end
+
+  local events, src = FetchRecapEvents()
+  if type(events) ~= "table" then
+    lines[#lines + 1] = "recap: none"
+  else
+    lines[#lines + 1] = "recap: via " .. tostring(src)
+    local n = 0
+    for i = 1, #events do
+      local ev = events[i]
+      if type(ev) == "table" then
+        n = n + 1
+        if n > 5 then break end
+        local f = RecapEventFields(ev)
+        local amount = ev.amount or ev.overkill or ""
+        lines[#lines + 1] = string.format(
+          "recap[%d]: event=%s source=%s guid=%s amount=%s",
+          n, ClipDiag(f.event, 40), ClipDiag(f.sourceName, 40),
+          GuidKind(f.sourceGUID), ClipDiag(amount, 24)
+        )
+      end
+    end
+    if n == 0 then
+      lines[#lines + 1] = "recap: empty table"
+    end
+  end
+
+  if hasLink then
+    local ok, link = pcall(function() return GetDeathRecapLink(1) end)
+    if not ok then
+      lines[#lines + 1] = "recap link: err " .. ClipDiag(link, 60)
+    elseif link == nil or link == "" then
+      lines[#lines + 1] = "recap link: nil"
+    else
+      lines[#lines + 1] = "recap link: " .. ClipDiag(link, 100)
+    end
+  end
+end
+
 local function SnapshotDeath(info, ctx, zone, verdict)
   local diag = GR.Diag
   if not diag or not diag:Enabled() then return end
   local now = U.Now()
   local lines = {}
-  lines[#lines + 1] = string.format("apis: C_DeathInfo=%s GetDeathRecapLink=%s GetServerTime=%s CLEUinfo=%s",
-    tostring(C_DeathInfo ~= nil), tostring(GetDeathRecapLink ~= nil),
-    tostring(GetServerTime ~= nil), tostring(CombatLogGetCurrentEventInfo ~= nil))
+  lines[#lines + 1] = string.format(
+    "apis: C_DeathInfo=%s C_DeathRecap=%s GetDeathRecapLink=%s DeathRecap_GetEvents=%s GetServerTime=%s CLEUinfo=%s",
+    tostring(C_DeathInfo ~= nil),
+    tostring(C_DeathRecap ~= nil),
+    tostring(GetDeathRecapLink ~= nil),
+    tostring(DeathRecap_GetEvents ~= nil),
+    tostring(GetServerTime ~= nil),
+    tostring(CombatLogGetCurrentEventInfo ~= nil)
+  )
   lines[#lines + 1] = string.format("units: attacking=%s target=%s targetPlayer=%s canAttack=%s",
     tostring(UnitExists("attacking")), tostring(UnitName("target")),
     tostring(UnitIsPlayer("target")), tostring(UnitCanAttack and UnitCanAttack("player", "target")))
+  AppendRecapDump(lines)
   lines[#lines + 1] = "registered: " .. (#diagRegistered > 0 and table.concat(diagRegistered, ",") or "-")
   for i = 1, #diagEvents do
     local e = diagEvents[i]
@@ -475,9 +701,9 @@ local function SnapshotDeath(info, ctx, zone, verdict)
     end
   end
   diag:AddDeath({
-    header = string.format("%s %s cause=%s reliable=%s suspect=%s ctx=%s duel=%s -> %s",
+    header = string.format("%s %s cause=%s reliable=%s source=%s suspect=%s ctx=%s duel=%s -> %s",
       date and date("%H:%M:%S") or "", zone or "?", tostring(info.cause), tostring(info.reliable),
-      tostring(info.suspect), tostring(ctx.instanceType), tostring(ctx.inDuel), verdict),
+      tostring(info.source), tostring(info.suspect), tostring(ctx.instanceType), tostring(ctx.inDuel), verdict),
     lines = lines,
   })
 end
@@ -536,6 +762,8 @@ end
 
 Death.ResolveDeath = ResolveDeath
 Death.DeathContext = DeathContext
+Death.AttributionFromRecapEvents = AttributionFromRecapEvents
+Death.ReadRecapAttribution = ReadRecapAttribution
 
 function Death:Preview()
   Cfg().showToasts = true
