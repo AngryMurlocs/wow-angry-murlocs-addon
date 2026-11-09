@@ -1,5 +1,12 @@
 # AngryMurlocs Changelog
 
+## 0.8.3
+
+- Guild map pins use the new chunky class-murloc heads (`Media/PinsHeads`)
+- Pins in the same pile spread instead of stacking: 2 side by side, 3 triangle, 4 grid, 5 as two over three, 6+ one in the center with the rest on a ring
+- A line of nearby players stays on the real spots; only a pile about two pin-widths across is rearranged
+- Pile slots are ordered by name and recomputed when the map zoom changes
+
 ## 0.8.2
 
 - WantedLogic in Core; Wanted split (Sync/Panel) + MinimapButton module

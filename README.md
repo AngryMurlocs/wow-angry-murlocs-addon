@@ -2,11 +2,11 @@
 
 Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
 
-**Version:** 0.8.2
+**Version:** 0.8.3
 
 ## Features
 
-- Gilden-Kartenpins mit **klassenbezogenen Mini-Murloc-Icons** (Zoom-feste Größe, Default **18**; Styles: Heads / Body / Rings; Ausfaden vor dem Verschwinden nach 60 s)
+- Gilden-Kartenpins mit **klassenbezogenen Murloc-Köpfen** (Zoom-feste Größe, Default **18**; Styles: Heads / Body / Rings; Ausfaden vor dem Verschwinden nach 60 s). Mehrere Spieler auf einem Punkt stehen nebeneinander statt übereinander.
 - Berufsliste mit Gilden-Sync, **Online** (Addon kürzlich gehört), Sortierung und Paging (Top 40 von N)
 - Wanted-Liste mit Zählung **pro Opfer** (kein Doppelzählen über Live/Relay/Sync), Sync mit sichtbarem Status, lokales Ausblenden
 - Wanted-**Sichtungen** beim Anwählen: Frische frisch (&lt;60 s) / aktuell (&lt;5 Min) / veraltet
@@ -49,7 +49,7 @@ Aliases: `/angrymurlocs`, `/gr`
 
 ## Bedienung
 
-- **Kartenpins:** Klassen-Murlocs auf der Weltkarte; Größe in den Optionen (8–24, gilt für Heads/Body/Rings). Style unter Opt → Map. Ohne Update ab ~45 s blasser, bei 60 s weg.
+- **Kartenpins:** Klassen-Murlocs auf der Weltkarte; Größe in den Optionen (8–24, gilt für Heads/Body/Rings). Style unter Opt → Map. Ohne Update ab ~45 s blasser, bei 60 s weg. Liegen mehrere auf einem Haufen, rücken sie auseinander (2 nebeneinander, 3 Dreieck, 4 Raster, 5 als 2 über 3, ab 6 einer in der Mitte). Eine Reihe bleibt an den echten Positionen.
 - **Berufe / Wanted:** Navigation wechselt Fenster exklusiv (kein Übereinanderlegen). Auto-Sync einmal pro Sitzung (Login/Reload) und bei Gildenwechsel; sonst Sync-Button bzw. `/am sync`. Status im Tab „Allgemein“ und im Wanted-Fenster.
 - **Wanted-Zählung (feste Gilden-Regeln):** Jedes Opfer führt pro Killer einen eigenen Zähler; Level = Altdaten + Summe der Opferzähler. Pair-CD **10s** beim Opfer. Duell/BG/Arena/unbekannter Kontext zählen nie. Ränge Markiert→Gildenschreck. Kein Zeit-Expire; Safety-Cap **1000**.
 - **Killer-Quelle auf Forever:** CLEU gesperrt; Ziel/Angreifer gelten nicht als Killer. Death Recap mit `Player-*` kann Wanted zählen (0.8.1); sonst oft „Ursache unbekannt“. `/am diag death` zur Prüfung.
@@ -62,6 +62,11 @@ Aliases: `/angrymurlocs`, `/gr`
 ## Einstellungen
 
 Addon-Optionen: Teilen, Pins (Anzeige + Größe + Style), Toast-Layout. Auto-Wanted-Regeln sind **fest im Addon** (keine Slider).
+
+## Neu in 0.8.3 (Kurz)
+
+- Neue Klassen-Köpfe für die Kartenpins
+- Überlappende Pins bilden eine feste Gruppe statt sich zu verdecken
 
 ## Neu in 0.8.0 (Kurz)
 

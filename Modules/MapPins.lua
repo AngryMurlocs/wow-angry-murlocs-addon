@@ -23,6 +23,9 @@ MapPins.FADE_START_SEC = 45
 MapPins.FADE_MIN = 0.25
 local BASE_LEVEL = 100
 local HOVER_LEVEL = 200
+local CLUSTER_GAP_PX = 2 -- screen pixels between pin edges
+local CLUSTER_SPAN = 2 -- pile diameter, in pin widths; longer chains stay put
+local PI = 3.141592653589793
 local fadeTicker
 
 local CLASSES = {
@@ -33,19 +36,19 @@ local CLASSES = {
 -- Opaque-bbox TexCoords (left, right, top, bottom) so class art fills the pin equally.
 -- Generated from Media/PinsHeads + Media/Pins TGA alpha bounds + ~5% pad.
 local HEAD_UV = {
-  DEATHKNIGHT = { 0.0664, 0.9258, 0.0352, 0.9727 },
-  DEMONHUNTER = { 0.0664, 0.9180, 0.0352, 0.9727 },
-  DRUID       = { 0.0578, 0.9344, 0.0266, 0.9812 },
-  EVOKER      = { 0.0742, 0.9180, 0.0352, 0.9727 },
-  HUNTER      = { 0.0672, 0.9250, 0.0437, 0.9641 },
-  MAGE        = { 0.0664, 0.9258, 0.0352, 0.9727 },
-  MONK        = { 0.0664, 0.9180, 0.0352, 0.9727 },
-  PALADIN     = { 0.0750, 0.9172, 0.0437, 0.9641 },
-  PRIEST      = { 0.0742, 0.9180, 0.0352, 0.9727 },
-  ROGUE       = { 0.0742, 0.9180, 0.0352, 0.9727 },
-  SHAMAN      = { 0.0656, 0.9187, 0.0266, 0.9812 },
-  WARLOCK     = { 0.0734, 0.9187, 0.0266, 0.9812 },
-  WARRIOR     = { 0.0500, 0.9422, 0.0266, 0.9812 },
+  DEATHKNIGHT = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  DEMONHUNTER = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  DRUID       = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  EVOKER      = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  HUNTER      = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  MAGE        = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  MONK        = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  PALADIN     = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  PRIEST      = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  ROGUE       = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  SHAMAN      = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  WARLOCK     = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  WARRIOR     = { 0.0766, 0.9703, 0.0277, 0.9645 },
 }
 
 local BODY_UV = {
@@ -90,6 +93,141 @@ local function ClassUV(style, classFile)
   uv = map.WARRIOR
   if uv then return uv[1], uv[2], uv[3], uv[4] end
   return 0, 1, 0, 1
+end
+
+--- Slot offsets for a stacked group. oy is up (WoW point offset). step is center distance.
+function MapPins.ClusterSlots(count, step)
+  count = math.floor(tonumber(count) or 0)
+  step = tonumber(step) or 0
+  if step < 0 then step = 0 end
+  local slots = {}
+  if count < 1 then return slots end
+  if count == 1 then
+    slots[1] = { 0, 0 }
+  elseif count == 2 then
+    slots[1] = { -step / 2, 0 }
+    slots[2] = { step / 2, 0 }
+  elseif count == 3 then
+    slots[1] = { 0, step * 0.55 }
+    slots[2] = { -step / 2, -step * 0.4 }
+    slots[3] = { step / 2, -step * 0.4 }
+  elseif count == 4 then
+    local h = step / 2
+    slots[1] = { -h, h }
+    slots[2] = { h, h }
+    slots[3] = { -h, -h }
+    slots[4] = { h, -h }
+  elseif count == 5 then
+    local h = step / 2
+    slots[1] = { -h, h }
+    slots[2] = { h, h }
+    slots[3] = { -step, -h }
+    slots[4] = { 0, -h }
+    slots[5] = { step, -h }
+  else
+    slots[1] = { 0, 0 }
+    local nRing = count - 1
+    local denom = 2 * math.sin(PI / nRing)
+    local radius = step
+    if denom > 0 then
+      local need = step / denom
+      if need > radius then radius = need end
+    end
+    for i = 0, nRing - 1 do
+      local ang = (PI / 2) - i * (2 * PI / nRing)
+      slots[i + 2] = { radius * math.cos(ang), radius * math.sin(ang) }
+    end
+  end
+  return slots
+end
+
+local function PointDist2(a, b)
+  local dx = (a.x or 0) - (b.x or 0)
+  local dy = (a.y or 0) - (b.y or 0)
+  return dx * dx + dy * dy
+end
+
+--- Group a pile, not a chain. Centers closer than pinSize join only while the
+--- whole pile stays within CLUSTER_SPAN pin-widths. Names sort into stable slots.
+--- points: { { name, x, y } } with y positive south.
+--- Returns name -> { ox, oy, cx, cy }. Anchor from canvas TOPLEFT: (cx + ox, -cy + oy).
+function MapPins.ClusterOffsets(points, pinSize, gap)
+  local n = points and #points or 0
+  local parent = {}
+  local members = {}
+  for i = 1, n do
+    parent[i] = i
+    members[i] = { i }
+  end
+  local function find(i)
+    while parent[i] ~= i do
+      parent[i] = parent[parent[i]]
+      i = parent[i]
+    end
+    return i
+  end
+  local limit = tonumber(pinSize) or 0
+  if limit < 0 then limit = 0 end
+  local limit2 = limit * limit
+  local span = limit * CLUSTER_SPAN
+  local span2 = span * span
+  for i = 1, n do
+    for j = i + 1, n do
+      if PointDist2(points[i], points[j]) < limit2 then
+        local ra, rb = find(i), find(j)
+        if ra ~= rb then
+          local wide = false
+          local ga, gb = members[ra], members[rb]
+          for a = 1, #ga do
+            for b = 1, #gb do
+              if PointDist2(points[ga[a]], points[gb[b]]) > span2 then
+                wide = true
+                break
+              end
+            end
+            if wide then break end
+          end
+          if not wide then
+            parent[rb] = ra
+            for b = 1, #gb do
+              ga[#ga + 1] = gb[b]
+            end
+            members[rb] = nil
+          end
+        end
+      end
+    end
+  end
+  local groups = {}
+  for i = 1, n do
+    local r = find(i)
+    local g = groups[r]
+    if not g then
+      g = {}
+      groups[r] = g
+    end
+    g[#g + 1] = points[i]
+  end
+  local step = limit + (tonumber(gap) or 0)
+  if step < 0 then step = 0 end
+  local out = {}
+  for _, g in pairs(groups) do
+    table.sort(g, function(a, b)
+      return tostring(a.name) < tostring(b.name)
+    end)
+    local sx, sy = 0, 0
+    for i = 1, #g do
+      sx = sx + (g[i].x or 0)
+      sy = sy + (g[i].y or 0)
+    end
+    local cx, cy = sx / #g, sy / #g
+    local slots = MapPins.ClusterSlots(#g, step)
+    for i = 1, #g do
+      local s = slots[i] or { 0, 0 }
+      out[g[i].name] = { ox = s[1], oy = s[2], cx = cx, cy = cy }
+    end
+  end
+  return out
 end
 
 --- Pure fade curve for tests: 1 until FADE_START, linear down to FADE_MIN at STALE.
@@ -476,7 +614,7 @@ function MapPins:Refresh()
   local cache = positions and positions:GetCache() or {}
   local canvasBase = (canvas.GetFrameLevel and canvas:GetFrameLevel() or 0) + BASE_LEVEL
 
-  -- Oldest first so newer pins sit above when coords overlap.
+  -- Time order only sets frame level. Pile slots sort by name so they stay put.
   local order = {}
   for name, data in pairs(cache) do
     if not U.IsSelfName(name) and data.x and data.y then
@@ -488,6 +626,7 @@ function MapPins:Refresh()
     return a.t < b.t
   end)
 
+  local visible = {}
   for i = 1, #order do
     local name, data = order[i].name, order[i].data
     local px, py = ProjectToView(data.mapId, data.x, data.y, mapId)
@@ -496,29 +635,41 @@ function MapPins:Refresh()
       if not (playerX and playerY
           and math.abs(px - playerX) < NEAR_SELF
           and math.abs(py - playerY) < NEAR_SELF) then
-        seen[name] = true
-        local pin = active[name]
-        if not pin then
-          pin = AcquirePin()
-          active[name] = pin
-        end
-        pin:SetParent(canvas)
-        pin:SetFrameStrata("HIGH")
-        pin.baseLevel = canvasBase + i
-        pin:SetFrameLevel(pin.baseLevel)
-        pin:SetScale(1)
-        pin:SetSize(size, size)
-        SyncPinLayers(pin, size)
-        pin.data = data
-        pin.member = name
-
-        ApplyPinArt(pin, data.classFile, data.dead, PinAge(data))
-
-        pin:ClearAllPoints()
-        pin:SetPoint("CENTER", canvas, "TOPLEFT", px * cw, -py * ch)
-        pin:Show()
+        visible[#visible + 1] = { name = name, data = data, x = px * cw, y = py * ch, order = i }
       end
     end
+  end
+  local laid = MapPins.ClusterOffsets(visible, size, CLUSTER_GAP_PX / scale)
+
+  for i = 1, #visible do
+    local item = visible[i]
+    local name, data = item.name, item.data
+    local lay = laid[name]
+    seen[name] = true
+    local pin = active[name]
+    if not pin then
+      pin = AcquirePin()
+      active[name] = pin
+    end
+    pin:SetParent(canvas)
+    pin:SetFrameStrata("HIGH")
+    pin.baseLevel = canvasBase + (item.order or i)
+    pin:SetFrameLevel(pin.baseLevel)
+    pin:SetScale(1)
+    pin:SetSize(size, size)
+    SyncPinLayers(pin, size)
+    pin.data = data
+    pin.member = name
+
+    ApplyPinArt(pin, data.classFile, data.dead, PinAge(data))
+
+    local ax = lay and lay.cx or item.x
+    local ay = lay and lay.cy or item.y
+    local ox = lay and lay.ox or 0
+    local oy = lay and lay.oy or 0
+    pin:ClearAllPoints()
+    pin:SetPoint("CENTER", canvas, "TOPLEFT", ax + ox, -ay + oy)
+    pin:Show()
   end
 
   for name, pin in pairs(active) do
@@ -552,20 +703,21 @@ local function HookMap()
     end)
   end
 
-  -- Forever: scale notifications are on WorldMapFrame (Leatrix/MoveAny pattern)
+  -- Forever: scale notifications are on WorldMapFrame (Leatrix/MoveAny pattern).
+  -- Refresh, not SyncSizes: pile offsets are in canvas pixels and must track zoom.
   if WorldMapFrame.OnCanvasScaleChanged then
     hooksecurefunc(WorldMapFrame, "OnCanvasScaleChanged", function()
-      MapPins:SyncSizes()
+      MapPins:Refresh()
     end)
   end
   WorldMapFrame:HookScript("OnSizeChanged", function()
-    MapPins:SyncSizes()
+    MapPins:Refresh()
   end)
 
   local sc = GetScrollContainer()
   if sc and sc.OnCanvasScaleChanged then
     hooksecurefunc(sc, "OnCanvasScaleChanged", function()
-      MapPins:SyncSizes()
+      MapPins:Refresh()
     end)
   end
 end

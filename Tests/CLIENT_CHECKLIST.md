@@ -1,4 +1,4 @@
-# AngryMurlocs 0.8.1 — Client-Checkliste (WoW Forever)
+# AngryMurlocs 0.8.3 — Client-Checkliste (WoW Forever)
 
 Diese Punkte lassen sich nur im echten Client prüfen. Die Lua-Tests (`luajit Tests/run_all.lua`) simulieren Logik, Protokoll und mehrere Clients mit gestubbter WoW-API. Sie ersetzen keinen Ingame-Test.
 
@@ -8,7 +8,7 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 
 ## 0. Laden und Migration
 
-- [ ] Addon lädt ohne Lua-Fehler (BugSack). Chat zeigt „AngryMurlocs 0.8.1 loaded“.
+- [ ] Addon lädt ohne Lua-Fehler (BugSack). Chat zeigt „AngryMurlocs 0.8.3 loaded“.
 - [ ] Bestehende Wanted-Einträge aus 0.6.1 sind noch da, mit demselben Level (Tooltip: „Altdaten aus 0.6.x“).
 - [ ] Teilen-Einstellungen, Pin-Stil, Pin-Größe und Toast-Positionen sind unverändert.
 - [ ] `/reload` zweimal: Level und Einträge bleiben gleich.
@@ -26,7 +26,8 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 - [ ] Wanted-Spieler anvisieren: Sichtung erscheint bei anderen mit Zone und Melder.
 - [ ] Innerhalb ~60 s: Liste/Tooltip „frisch“ (+); nach 1–5 Min „aktuell“; nach 5+ Min „veraltet“ (*). Panel offen lassen — Markierung wechselt ohne Reload.
 - [ ] Weltkarte: Gilden-Pin voll sichtbar; nach ~45 s ohne Update blasser; bei 60 s weg.
-- [ ] Zwei Pins übereinander: neuerer oben; Hover hebt den Pin und zeigt Frische-Zeile.
+- [ ] Zwei Pins auf demselben Punkt: nebeneinander, Reihenfolge bleibt nach einem Update gleich. Drei als Dreieck, vier als Raster. Eine Reihe von Spielern entlang einer Straße bleibt auf den echten Positionen.
+- [ ] Karte zoomen: die Gruppe bleibt zusammen und die Pins überdecken sich nicht neu. Hover hebt den Pin und zeigt die Frische-Zeile.
 - [ ] Berufe: Online zuerst; Offline gedimmt mit ·; bei >40 Einträgen Seiten `<` `>` und Kopfzeile „Top 40 von N“.
 - [ ] Mehrere Tode/Level-Ups schnell hintereinander: Toasts nacheinander (Tod vor Level), kein Überlappen, im Kampf Pause bis Kampfende.
 

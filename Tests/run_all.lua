@@ -11,6 +11,7 @@ local tests = {
   "Tests/ProfFilter_test.lua",
   "Tests/Freshness_test.lua",
   "Tests/PinFade_test.lua",
+  "Tests/PinCluster_test.lua",
   "Tests/ToastQueue_test.lua",
   "Tests/L10n_test.lua",
 }
