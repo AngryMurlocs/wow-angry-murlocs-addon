@@ -1,5 +1,12 @@
 # AngryMurlocs Changelog
 
+## 0.9.0
+
+- Guild members on the map use the new class murloc icons
+- When several members stand on the same spot, their icons spread out instead of covering each other: two side by side, three in a triangle, four in a square, five as two above and three below, six or more with one in the middle and the rest around it
+- Members standing apart along a road stay where they actually are
+- The layout stays put when the map updates or you zoom in and out
+
 ## 0.8.3
 
 - Guild members on the map use the new class murloc icons

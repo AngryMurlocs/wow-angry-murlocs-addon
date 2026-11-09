@@ -1,4 +1,4 @@
-# AngryMurlocs 0.8.3 — Client-Checkliste (WoW Forever)
+# AngryMurlocs 0.9.0 — Client-Checkliste (WoW Forever)
 
 Diese Punkte lassen sich nur im echten Client prüfen. Die Lua-Tests (`luajit Tests/run_all.lua`) simulieren Logik, Protokoll und mehrere Clients mit gestubbter WoW-API. Sie ersetzen keinen Ingame-Test.
 
@@ -8,7 +8,7 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 
 ## 0. Laden und Migration
 
-- [ ] Addon lädt ohne Lua-Fehler (BugSack). Chat zeigt „AngryMurlocs 0.8.3 loaded“.
+- [ ] Addon lädt ohne Lua-Fehler (BugSack). Chat zeigt „AngryMurlocs 0.9.0 loaded“.
 - [ ] Bestehende Wanted-Einträge aus 0.6.1 sind noch da, mit demselben Level (Tooltip: „Altdaten aus 0.6.x“).
 - [ ] Teilen-Einstellungen, Pin-Stil, Pin-Größe und Toast-Positionen sind unverändert.
 - [ ] `/reload` zweimal: Level und Einträge bleiben gleich.

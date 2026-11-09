@@ -1,7 +1,7 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.8.3"
+GR.VERSION = "0.9.0"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
 
