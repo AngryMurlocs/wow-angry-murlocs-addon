@@ -2,10 +2,10 @@
 
 ## 0.8.3
 
-- Guild map pins use the new chunky class-murloc heads (`Media/PinsHeads`)
-- Pins in the same pile spread instead of stacking: 2 side by side, 3 triangle, 4 grid, 5 as two over three, 6+ one in the center with the rest on a ring
-- A line of nearby players stays on the real spots; only a pile about two pin-widths across is rearranged
-- Pile slots are ordered by name and recomputed when the map zoom changes
+- Guild members on the map use the new class murloc icons
+- When several members stand on the same spot, their icons spread out instead of covering each other: two side by side, three in a triangle, four in a square, five as two above and three below, six or more with one in the middle and the rest around it
+- Members standing apart along a road stay where they actually are
+- The layout stays put when the map updates or you zoom in and out
 
 ## 0.8.2
 
