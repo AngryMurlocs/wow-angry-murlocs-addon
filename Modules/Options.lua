@@ -27,11 +27,27 @@ local function EnsureLvlCfg()
   return c
 end
 
-function Options:Open()
+function Options:OpenAddonWindow()
   local ui = GR:GetModule("UI")
   if ui and ui.ShowTab then
     ui:ShowTab("opt")
   end
+end
+
+function Options:Open()
+  if optionsCategory and Settings and Settings.OpenToCategory then
+    local id = optionsCategory
+    if type(optionsCategory.GetID) == "function" then
+      id = optionsCategory:GetID()
+    end
+    local ok = pcall(Settings.OpenToCategory, id)
+    if ok then return end
+  end
+  if optionsPanel and InterfaceOptionsFrame_OpenToCategory then
+    local ok = pcall(InterfaceOptionsFrame_OpenToCategory, optionsPanel)
+    if ok then return end
+  end
+  Options:OpenAddonWindow()
 end
 
 function Options:AttachPanel(parent)
@@ -58,7 +74,7 @@ function Options:AttachPanel(parent)
 
   local sub = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
   sub:SetPoint("TOPLEFT", 8, Next(24))
-  sub:SetText("Angry Murlocs — Forever")
+  sub:SetText(U.L("OPT_SUBTITLE"))
 
   local function Header(key)
     local h = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -339,6 +355,9 @@ function Options:AttachPanel(parent)
 end
 
 function Options:OnEnable()
+  if self.enabled then return end
+  self.enabled = true
+
   local panel = CreateFrame("Frame")
   panel.name = "AngryMurlocs"
   optionsPanel = panel
@@ -358,7 +377,7 @@ function Options:OnEnable()
   btn:SetPoint("TOPLEFT", 16, -80)
   btn:SetText(U.L("OPT_OPEN_WINDOW"))
   btn:SetScript("OnClick", function()
-    Options:Open()
+    Options:OpenAddonWindow()
   end)
 
   if Settings and Settings.RegisterCanvasLayoutCategory then
@@ -368,4 +387,10 @@ function Options:OnEnable()
   elseif InterfaceOptions_AddCategory then
     InterfaceOptions_AddCategory(panel)
   end
+end
+
+function Options:OnDisable()
+  if not self.enabled then return end
+  self.enabled = false
+  -- Esc category stays registered for the session (Blizzard has no clean unregister).
 end

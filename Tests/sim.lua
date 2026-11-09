@@ -12,12 +12,13 @@ local LATENCY = 0.05
 local FILES = {
   "Localization/enUS.lua",
   "Core/Util.lua",
+  "Core/Theme.lua",
   "Core/Protocol.lua",
   "Core/Queue.lua",
   "Core/Events.lua",
   "Core/Diag.lua",
   "Core/Comm.lua",
-  "Modules/WantedLogic.lua",
+  "Core/WantedLogic.lua",
 }
 
 local function DeepCopy(v)
@@ -203,7 +204,9 @@ function Sim:AddClient(name, opts)
   GR.db = opts.db or DefaultDB()
   GR.VERSION = "sim"
 
-  for _, f in ipairs(opts.extraFiles or { "Modules/Wanted.lua" }) do Load(f) end
+  for _, f in ipairs(opts.extraFiles or {
+    "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/WantedPanel.lua",
+  }) do Load(f) end
   for _, n in ipairs(GR._moduleOrder) do
     local mod = GR._modules[n]
     if mod.OnEnable then mod:OnEnable() end

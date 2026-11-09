@@ -162,17 +162,21 @@ function LevelUp:ResetLayout()
 end
 
 function LevelUp:OnEnable()
+  if self.enabled then return end
+  self.enabled = true
+
   Cfg()
   if GR.ToastQueue then
     GR.ToastQueue.Register("lvl", DisplayToast)
   end
 
-  GR:RegisterMessage("LVL_UPDATE", function(_, sender, level)
+  GR:BindMessage(self, "LVL_UPDATE", function(_, sender, level)
     if U.IsSelfName(sender) then return end
     Enqueue(sender, level)
   end)
 
   local f = CreateFrame("Frame")
+  self._eventFrame = f
   U.SafeRegisterEvent(f, "PLAYER_LEVEL_UP")
   U.SafeRegisterEvent(f, "PLAYER_REGEN_ENABLED")
   f:SetScript("OnEvent", function(_, event, ...)
@@ -188,4 +192,12 @@ function LevelUp:OnEnable()
       if GR.ToastQueue then GR.ToastQueue.OnCombatEnd() end
     end
   end)
+end
+
+function LevelUp:OnDisable()
+  if not self.enabled then return end
+  self.enabled = false
+  GR:UnbindMessages(self)
+  GR:ReleaseEventFrame(self._eventFrame)
+  self._eventFrame = nil
 end

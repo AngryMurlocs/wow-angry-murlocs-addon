@@ -92,7 +92,7 @@ do
   local sim = Sim.New(4)
   local db = Sim.DefaultDB()
   db.prof = { cache = { ["Smith-Realm"] = { list = { { key = "BS", rank = 300 } }, time = 1 } } }
-  local files = { "Modules/Wanted.lua", "Modules/Professions.lua" }
+  local files = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/WantedPanel.lua", "Modules/Professions.lua" }
   local alice = sim:AddClient("Alice", { db = db, extraFiles = files, env = {
     GetNumSkillLines = function() return 0 end,
   } })
@@ -102,6 +102,47 @@ do
   check("prof: global cache marked moved", alice.GR.db.prof._movedToScope == true)
   alice.guild = "Other Guild"
   check("prof: other guild sees no foreign cache", prof:GetAll()["Smith-Realm"] == nil)
+end
+
+-- Stranger without a guild: no wire traffic, receive ignored.
+do
+  local sim = Sim.New(5)
+  local solo = sim:AddClient("Solo", { guild = false })
+  local Comm = solo.GR.Comm
+  local before = #sim.bus
+  check("noguild: Send refused", Comm:Send("LVL|10", "ctrl", "lvl") == false)
+  check("noguild: POS refused", Comm:Send("POS|1415|0.5|0.5|Z|0|MAGE|10", "pos", "pos") == false)
+  check("noguild: WK refused", Comm:Send(
+    "WK|Enemy-Realm|Solo|1|1|" .. sim:Wall() .. "|Z", "kill", "death") == false)
+  if solo.Wanted and solo.Wanted.RequestSync then
+    check("noguild: sync refused", solo.Wanted:RequestSync("full") == false)
+  end
+  Comm:OnAddonMessage("GildenRadar", "LVL|5", "GUILD", "Spy-Realm")
+  local peers = select(1, Comm:Peers(600))
+  check("noguild: receive ignored", peers == 0, peers)
+  sim:Run(5)
+  check("noguild: bus stays empty", #sim.bus == before, #sim.bus)
+end
+
+-- Guild leave: purge outbound queue and stop further sends.
+do
+  local sim = Sim.New(6)
+  local alice = sim:AddClient("Alice")
+  sim:AddClient("Bob")
+  local Comm = alice.GR.Comm
+  for i = 1, 30 do
+    Comm:Send("LVL|" .. i, "ctrl", "lvl")
+  end
+  check("leave: queue filled", Comm:QueueSize() > 0, Comm:QueueSize())
+  alice.guild = nil
+  Comm:OnGuildLeft()
+  check("leave: queue purged", Comm:QueueSize() == 0, Comm:QueueSize())
+  local afterLeave = #sim.bus
+  check("leave: new Send refused", Comm:Send("LVL|99", "ctrl", "lvl") == false)
+  sim:Run(20)
+  check("leave: no further bus traffic", #sim.bus == afterLeave, #sim.bus)
+  Comm:OnAddonMessage("GildenRadar", "LVL|1", "GUILD", "Bob-Realm")
+  check("leave: receive ignored", select(1, Comm:Peers(600)) == 0)
 end
 
 print(string.format("\n%d failures", fails))

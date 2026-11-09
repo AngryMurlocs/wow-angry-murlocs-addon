@@ -1,5 +1,14 @@
 # AngryMurlocs Changelog
 
+## 0.8.2
+
+- WantedLogic in Core; Wanted split (Sync/Panel) + MinimapButton module
+- Idempotent OnEnable/OnDisable; BindMessage/UnregisterMessage
+- One-shot SV migrations for pin size and toast duration
+- Minimap button parents under Minimap; Esc Settings OpenToCategory
+- Docs/checklist: Recap Wanted vs CLEU; .pkgmeta markdown changelog
+- Comm: ignore guild traffic / purge queue when not in a guild
+
 ## 0.8.1
 
 - Death Recap fallback when CLEU is silent (Forever)
@@ -29,7 +38,7 @@
 - New counting model: every victim (origin) keeps its own kill counter per killer. Level = legacy level + sum of origin counters. Merging takes the maximum per origin, so the same kill arriving live, relayed and by sync is counted once.
 - The 10 s pair cooldown is checked only on the victim's own client. The old minute-bucket event id (which dropped a second kill after 10–59 s) is gone.
 - Duels, battlegrounds, arenas and **unknown instance context** never count. Mobs, environment and unclear killers never count.
-- **Auto-increment is effectively off on WoW Forever for now.** The only reliable killer source (combat log) is blocked there. A target or attacking enemy player is no longer blamed: such deaths show as "cause unknown" and do not count. Use `/am diag on` + `/am diag death` to collect evidence for a reliable source.
+- **Auto-increment is effectively off on WoW Forever for now.** The only reliable killer source (combat log) is blocked there. A target or attacking enemy player is no longer blamed: such deaths show as "cause unknown" and do not count. Use `/am diag on` + `/am diag death` to collect evidence for a reliable source. *(Superseded in 0.8.1: Death Recap `Player-*` can count Wanted; CLEU remains blocked.)*
 - Shift-click no longer deletes for the guild. It hides the entry **locally**; it returns when its level rises. `/am wanted unhide all` restores everything.
 - Wanted list: shows "Top 40 of N" with paging, search by name, sort by level or last seen, a source breakdown in the tooltip (own / victim report / relayed / legacy) and the data age.
 

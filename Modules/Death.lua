@@ -21,8 +21,7 @@ local envHint = {
 }
 local ENV_HINT_TTL = 5
 local toast
-local tracker
-local fallElapsed = 0
+local fallTicker
 
 local ENV_KEYS = {
   FALLING = "DEATH_ENV_FALL",
@@ -294,10 +293,7 @@ local function OnMirrorTimerStart(timer)
   if spell then CacheEnvHint(spell) end
 end
 
-local function PollFalling(elapsed)
-  fallElapsed = fallElapsed + (elapsed or 0)
-  if fallElapsed < 0.5 then return end
-  fallElapsed = 0
+local function PollFalling()
   if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then return end
   if IsFalling and IsFalling() then
     CacheEnvHint(U.L("DEATH_ENV_FALL"))
@@ -786,12 +782,15 @@ function Death:ResetLayout()
 end
 
 function Death:OnEnable()
+  if self.enabled then return end
+  self.enabled = true
+
   Cfg()
   if GR.ToastQueue then
     GR.ToastQueue.Register("death", DisplayDeathToast)
   end
 
-  GR:RegisterMessage("DEATH_UPDATE", function(_, victim, data)
+  GR:BindMessage(self, "DEATH_UPDATE", function(_, victim, data)
     if U.IsSelfName(victim) then return end
     data = data or {}
     local cause = data.cause or (data.isPlayer and "player" or "mob")
@@ -806,6 +805,7 @@ function Death:OnEnable()
 
   Death._inDuel = false
   local f = CreateFrame("Frame")
+  self._eventFrame = f
   -- Forever: CLEU RegisterEvent -> ADDON_ACTION_FORBIDDEN — skip CLEU.
   U.SafeRegisterEvent(f, "PLAYER_DEAD")
   U.SafeRegisterEvent(f, "MIRROR_TIMER_START")
@@ -827,17 +827,27 @@ function Death:OnEnable()
     end
   end)
 
-  if not tracker then
-    tracker = CreateFrame("Frame")
-    tracker:SetScript("OnUpdate", function(_, elapsed)
-      PollFalling(elapsed)
-    end)
+  if not fallTicker then
+    fallTicker = C_Timer.NewTicker(0.5, PollFalling)
   end
 
-  GR:RegisterMessage("DIAG_CHANGED", function(_, on)
+  GR:BindMessage(self, "DIAG_CHANGED", function(_, on)
     SetDeathCapture(on)
   end)
   if GR.Diag and GR.Diag:Enabled() then
     SetDeathCapture(true)
   end
+end
+
+function Death:OnDisable()
+  if not self.enabled then return end
+  self.enabled = false
+  GR:UnbindMessages(self)
+  GR:ReleaseEventFrame(self._eventFrame)
+  self._eventFrame = nil
+  if fallTicker then
+    fallTicker:Cancel()
+    fallTicker = nil
+  end
+  SetDeathCapture(false)
 end

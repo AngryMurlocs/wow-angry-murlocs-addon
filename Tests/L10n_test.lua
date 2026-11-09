@@ -49,14 +49,14 @@ for key in pairs(used) do
   if key:sub(-1) == "_" then used[key] = nil end
 end
 for _, s in ipairs({ "IDLE", "PENDING", "WAITING", "NOREPLY", "NOGUILD", "FAILED" }) do
-  used["SYNC_STATE_" .. s] = "Modules/Wanted.lua (dynamic)"
+  used["SYNC_STATE_" .. s] = "Modules/WantedSync.lua (dynamic)"
 end
 _G.AngryMurlocs = nil
-local logic = dofile("Modules/WantedLogic.lua")
+local logic = dofile("Core/WantedLogic.lua")
 logic = logic or (_G.AngryMurlocs and _G.AngryMurlocs.WantedLogic)
 for level = 0, 1000, 1 do
   local rank = logic.RankFromLevel(level)
-  used["WANTED_RANK_" .. rank.key] = "Modules/WantedLogic.lua (dynamic)"
+  used["WANTED_RANK_" .. rank.key] = "Core/WantedLogic.lua (dynamic)"
 end
 
 local count = 0

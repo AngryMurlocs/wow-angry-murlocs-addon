@@ -120,17 +120,16 @@ local function FormatPinAge(ageSec)
   return string.format(U.L("AGO_MIN"), math.floor(ageSec / 60))
 end
 
-local function ApplyPinArt(pin, classFile, dead, ageSec)
-  local fade = MapPins.FadeFactor(ageSec or 0)
-  local a = (dead and 0.45 or 1) * fade
-  local style = PinStyle()
+local function BindPinArt(pin, classFile, style)
+  local key = (style or "") .. "|" .. tostring(classFile or "")
+  if pin._artKey == key then return end
+  pin._artKey = key
   local r, g, b = U.ClassColor(classFile)
 
   if style == "rings" then
     if pin.glow then
       pin.glow:SetTexture(CIRCLE_TEX)
       pin.glow:SetTexCoord(0, 1, 0, 1)
-      pin.glow:SetVertexColor(GOLD_R, GOLD_G, GOLD_B, (dead and 0.5 or 1) * fade)
       if pin.glow.SetBlendMode then
         pcall(pin.glow.SetBlendMode, pin.glow, "BLEND")
       end
@@ -138,9 +137,9 @@ local function ApplyPinArt(pin, classFile, dead, ageSec)
     end
     pin.tex:SetTexture(CIRCLE_TEX)
     pin.tex:SetTexCoord(0, 1, 0, 1)
-    -- Darken fill slightly so gold rim reads clearer vs class color
-    local fr, fg, fb = r * 0.78, g * 0.78, b * 0.78
-    pin.tex:SetVertexColor(fr, fg, fb, a)
+    pin._fillR, pin._fillG, pin._fillB = r * 0.78, g * 0.78, b * 0.78
+    pin._glowR, pin._glowG, pin._glowB = GOLD_R, GOLD_G, GOLD_B
+    pin._rings = true
     return
   end
 
@@ -149,19 +148,42 @@ local function ApplyPinArt(pin, classFile, dead, ageSec)
   local uL, uR, uT, uB = ClassUV(style, classFile)
   pin.tex:SetTexture(path)
   pin.tex:SetTexCoord(uL, uR, uT, uB)
-  pin.tex:SetVertexColor(1, 1, 1, a)
-
+  pin._fillR, pin._fillG, pin._fillB = 1, 1, 1
   if pin.glow then
-    local ga = (dead and 0.25 or 0.65) * fade
     -- Same TGA + UV as icon → glow follows silhouette
     pin.glow:SetTexture(path)
-    pin.glow:SetVertexColor(r, g, b, ga)
     pin.glow:SetTexCoord(uL, uR, uT, uB)
     if pin.glow.SetBlendMode then
       pcall(pin.glow.SetBlendMode, pin.glow, "ADD")
     end
     pin.glow:Show()
   end
+  pin._glowR, pin._glowG, pin._glowB = r, g, b
+  pin._rings = false
+end
+
+local function ApplyPinFade(pin, dead, ageSec)
+  local fade = MapPins.FadeFactor(ageSec or 0)
+  local a = (dead and 0.45 or 1) * fade
+  local fr = pin._fillR or 1
+  local fg = pin._fillG or 1
+  local fb = pin._fillB or 1
+  pin.tex:SetVertexColor(fr, fg, fb, a)
+  if pin.glow then
+    local ga
+    if pin._rings then
+      ga = (dead and 0.5 or 1) * fade
+    else
+      ga = (dead and 0.25 or 0.65) * fade
+    end
+    pin.glow:SetVertexColor(pin._glowR or 1, pin._glowG or 1, pin._glowB or 1, ga)
+  end
+end
+
+local function ApplyPinArt(pin, classFile, dead, ageSec)
+  local style = PinStyle()
+  BindPinArt(pin, classFile, style)
+  ApplyPinFade(pin, dead, ageSec)
 end
 
 local function PlayerViewPos(viewMapId)
@@ -252,6 +274,7 @@ local function ReleasePin(pin)
   pin:SetParent(nil)
   pin.data = nil
   pin.member = nil
+  pin._artKey = nil
   pool[#pool + 1] = pin
 end
 
@@ -288,6 +311,18 @@ end
 
 local function MapShown()
   return WorldMapFrame and WorldMapFrame:IsShown()
+end
+
+local refreshPending = false
+local function ScheduleRefresh()
+  if refreshPending then return end
+  refreshPending = true
+  C_Timer.After(0.25, function()
+    refreshPending = false
+    if MapShown() then
+      MapPins:Refresh()
+    end
+  end)
 end
 
 local function GetScrollContainer()
@@ -405,7 +440,7 @@ local function EnsureFadeTicker()
     end
     for _, pin in pairs(active) do
       if pin.data then
-        ApplyPinArt(pin, pin.data.classFile, pin.data.dead, PinAge(pin.data))
+        ApplyPinFade(pin, pin.data.dead, PinAge(pin.data))
       end
     end
   end)
@@ -536,26 +571,41 @@ local function HookMap()
 end
 
 function MapPins:OnEnable()
+  if self.enabled then return end
+  self.enabled = true
+
   DiscardPool()
   HookMap()
 
-  GR:RegisterMessage("POS_CACHE_CHANGED", function()
+  GR:BindMessage(self, "POS_CACHE_CHANGED", function()
     PurgeSelfFromCache()
     if MapShown() then
-      MapPins:Refresh()
+      ScheduleRefresh()
     end
   end)
-  GR:RegisterMessage("POS_REMOVED", function()
+  GR:BindMessage(self, "POS_REMOVED", function()
     if MapShown() then
-      MapPins:Refresh()
+      ScheduleRefresh()
     end
   end)
-  GR:RegisterMessage("POS_CACHE_CLEARED", function()
+  GR:BindMessage(self, "POS_CACHE_CLEARED", function()
     ReleaseAll()
   end)
-  GR:RegisterMessage("MAP_SETTINGS_CHANGED", function()
+  GR:BindMessage(self, "MAP_SETTINGS_CHANGED", function()
     DiscardPool()
     MapPins:Refresh()
   end)
   -- Refresh via OnShow / OnMapChanged / scale / POS_* messages (no polling ticker)
+end
+
+function MapPins:OnDisable()
+  if not self.enabled then return end
+  self.enabled = false
+  GR:UnbindMessages(self)
+  if fadeTicker then
+    fadeTicker:Cancel()
+    fadeTicker = nil
+  end
+  ReleaseAll()
+  -- WorldMapFrame hooks stay (HookScript cannot cleanly unhook); canvasHooked keeps HookMap idempotent.
 end

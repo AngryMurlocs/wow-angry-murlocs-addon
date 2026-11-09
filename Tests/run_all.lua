@@ -8,6 +8,7 @@ local tests = {
   "Tests/Sync_sim_test.lua",
   "Tests/PrivacyScope_test.lua",
   "Tests/UISmoke_test.lua",
+  "Tests/ProfFilter_test.lua",
   "Tests/Freshness_test.lua",
   "Tests/PinFade_test.lua",
   "Tests/ToastQueue_test.lua",

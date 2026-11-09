@@ -2,25 +2,29 @@
 ## Title: AngryMurlocs
 ## Notes: Angry Murlocs guild helper — map pins, professions, Wanted sightings
 ## Notes-deDE: Angry Murlocs Gilden-Helfer — Pins, Berufe, Wanted-Sichtungen
-## Version: 0.8.1
+## Version: 0.8.2
 ## SavedVariables: AngryMurlocsDB
 
 Localization\enUS.lua
 Localization\deDE.lua
 Core\Util.lua
+Core\Theme.lua
 Core\Protocol.lua
 Core\Queue.lua
 Core\Toasts.lua
 Core\Events.lua
 Core\Diag.lua
 Core\Comm.lua
-Modules\WantedLogic.lua
+Core\WantedLogic.lua
 AngryMurlocs.lua
 Modules\Positions.lua
 Modules\MapPins.lua
 Modules\Professions.lua
 Modules\Death.lua
 Modules\Wanted.lua
+Modules\WantedSync.lua
+Modules\WantedPanel.lua
 Modules\LevelUp.lua
 Modules\UI.lua
+Modules\MinimapButton.lua
 Modules\Options.lua

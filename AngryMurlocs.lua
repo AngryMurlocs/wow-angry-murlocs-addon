@@ -1,7 +1,7 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.8.1"
+GR.VERSION = "0.8.2"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
 
@@ -88,6 +88,11 @@ local defaults = {
   diag = {
     enabled = false,
   },
+  -- One-shot migration flags (nil = not yet run). Never re-overwrite user prefs after set.
+  migrations = {
+    pinSizeV18 = nil,
+    toastDurV2 = nil,
+  },
 }
 
 local function CopyDefaults(src, dst)
@@ -156,7 +161,7 @@ local function MigrateSchema(db)
 end
 
 function GR:NewModule(name)
-  local mod = { name = name }
+  local mod = { name = name, enabled = false }
   self._modules[name] = mod
   self._moduleOrder[#self._moduleOrder + 1] = name
   return mod
@@ -201,25 +206,30 @@ frame:SetScript("OnEvent", function(_, event, ...)
     CopyDefaults(defaults, AngryMurlocsDB)
     GR.db = AngryMurlocsDB
     GR.db._agentDebug = nil
-    if GR.db.map then
+    GR.db.migrations = GR.db.migrations or {}
+    local mig = GR.db.migrations
+    -- One-shot: old pin defaults (≤14) / invalid → 18
+    if not mig.pinSizeV18 then
+      GR.db.map = GR.db.map or {}
       local ps = tonumber(GR.db.map.pinSize)
-      -- Migrate prior defaults (≤14) / invalid → 18
       if not ps or ps <= 14 or ps > 24 then
         GR.db.map.pinSize = 18
       end
+      mig.pinSizeV18 = true
     end
-    -- Migrate old toast duration defaults → longer defaults
-    if GR.db.levelUp then
-      local d = tonumber(GR.db.levelUp.duration)
-      if not d or d == 4.5 then
+    -- One-shot: old toast duration defaults → longer defaults
+    if not mig.toastDurV2 then
+      GR.db.levelUp = GR.db.levelUp or {}
+      local ld = tonumber(GR.db.levelUp.duration)
+      if not ld or ld == 4.5 then
         GR.db.levelUp.duration = 8.0
       end
-    end
-    if GR.db.death then
-      local d = tonumber(GR.db.death.duration)
-      if not d or d == 5.5 then
+      GR.db.death = GR.db.death or {}
+      local dd = tonumber(GR.db.death.duration)
+      if not dd or dd == 5.5 then
         GR.db.death.duration = 10.0
       end
+      mig.toastDurV2 = true
     end
     -- Discard per-user Auto-Wanted overrides (guild-fixed rules in WantedLogic)
     GR.db.autoWanted = {}
@@ -239,6 +249,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
     local key = U.GuildScopeKey()
     if key == lastGuildKey then return end
     lastGuildKey = key
+    if not key and GR.Comm and GR.Comm.OnGuildLeft then
+      GR.Comm:OnGuildLeft()
+    end
     MigrateLegacyToScope()
     if GR.db then GR.db._recoveredWantedScopes = nil end
     if U.RecoverWantedScopes then U.RecoverWantedScopes() end

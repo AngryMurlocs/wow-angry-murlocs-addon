@@ -46,7 +46,7 @@ end
 
 local function NewPair(seed, db)
   local sim = Sim.New(seed)
-  local files = { "Modules/Wanted.lua", "Modules/Death.lua" }
+  local files = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/WantedPanel.lua", "Modules/Death.lua" }
   local alice = sim:AddClient("Alice", { db = db, extraFiles = files })
   local bob = sim:AddClient("Bob", { extraFiles = files })
   bob.deaths = {}
@@ -141,7 +141,7 @@ do
   local L = AngryMurlocs and AngryMurlocs.WantedLogic
   if not L then
     AngryMurlocs = {}
-    dofile("Modules/WantedLogic.lua")
+    dofile("Core/WantedLogic.lua")
     L = AngryMurlocs.WantedLogic
   end
   local base = { reliable = true, killer = "Enemy-Realm", killerIsPlayer = true, ctxKnown = true, instanceType = "none", inDuel = false }

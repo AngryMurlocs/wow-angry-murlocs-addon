@@ -302,12 +302,16 @@ function Professions:RequestAll()
 end
 
 function Professions:OnEnable()
+  if self.enabled then return end
+  self.enabled = true
+
   C_Timer.After(2, function()
+    if not Professions.enabled then return end
     Professions:MigrateCache()
     Professions:PruneSelfDuplicates()
   end)
 
-  GR:RegisterMessage("PROF_UPDATE", function(_, sender, rest)
+  GR:BindMessage(self, "PROF_UPDATE", function(_, sender, rest)
     if U.IsSelfName(sender) then
       Professions:PruneSelfDuplicates()
       return
@@ -338,41 +342,46 @@ function Professions:OnEnable()
   end)
 
   -- Spread replies so a login request does not trigger a burst from everyone.
-  GR:RegisterMessage("PROF_REQUEST", function()
+  GR:BindMessage(self, "PROF_REQUEST", function()
     local now = U.Now()
     if (now - lastProfReqReply) < PROFREQ_REPLY_CD then return end
     lastProfReqReply = now
     C_Timer.After(1 + math.random() * 4, function()
+      if not Professions.enabled then return end
       Professions:Broadcast(true)
     end)
   end)
 
-  GR:RegisterMessage("SHARE_PROF_CHANGED", function()
+  GR:BindMessage(self, "SHARE_PROF_CHANGED", function()
     if GR.db.privacy.shareProfessions then
       Professions:Broadcast(true)
     end
   end)
 
-  GR:RegisterMessage("GUILD_UPDATE", function()
+  GR:BindMessage(self, "GUILD_UPDATE", function()
     Professions:MigrateCache()
     lastSentEncoded = nil
   end)
 
   local loginBroadcastDone = false
   local f = CreateFrame("Frame")
+  self._eventFrame = f
   U.SafeRegisterEvent(f, "SKILL_LINES_CHANGED")
   U.SafeRegisterEvent(f, "PLAYER_ENTERING_WORLD")
   f:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_ENTERING_WORLD" then
       -- Forever: skill lines often ready later than +5s. Later passes only send on change.
       C_Timer.After(5, function()
+        if not Professions.enabled then return end
         Professions:Broadcast(not loginBroadcastDone)
         loginBroadcastDone = true
       end)
       C_Timer.After(20, function()
+        if not Professions.enabled then return end
         Professions:Broadcast(false)
       end)
       C_Timer.After(45, function()
+        if not Professions.enabled then return end
         Professions:Broadcast(false)
       end)
     else
@@ -381,10 +390,28 @@ function Professions:OnEnable()
       Professions._debounce = true
       C_Timer.After(2, function()
         Professions._debounce = false
+        if not Professions.enabled then return end
         Professions:Broadcast(false)
       end)
     end
   end)
+end
+
+function Professions:OnDisable()
+  if not self.enabled then return end
+  self.enabled = false
+  GR:UnbindMessages(self)
+  GR:ReleaseEventFrame(self._eventFrame)
+  self._eventFrame = nil
+end
+
+local PROF_KEYS_ORDER = {
+  "alch", "bs", "ench", "eng", "herb", "lw", "mine", "skin", "tail",
+  "cook", "aid", "fish", "jc", "insc", "arch",
+}
+
+function Professions.ProfessionKeys()
+  return PROF_KEYS_ORDER
 end
 
 Professions.DisplayName = DisplayName

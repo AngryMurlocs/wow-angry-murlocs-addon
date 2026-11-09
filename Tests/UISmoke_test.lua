@@ -14,7 +14,10 @@ local function check(name, cond, extra)
 end
 
 local sim = Sim.New(1)
-local files = { "Modules/Wanted.lua", "Modules/Professions.lua", "Modules/UI.lua" }
+local files = {
+  "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/WantedPanel.lua",
+  "Modules/Professions.lua", "Modules/UI.lua",
+}
 local env = {
   GetNumSkillLines = function() return 0 end,
   UISpecialFrames = {},

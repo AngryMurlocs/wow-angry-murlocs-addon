@@ -3,6 +3,10 @@
 Allgemeine deutschsprachige Hilfestellung für WoW-Addon-Entwicklung (Classic/TBC-Fokus).  
 Basiert auf [Malura — WoW Addon Dokumentation](https://malura.de/projekte/wow-addon-dokumentation); Abschnitte 8–12 fehlen dort im Live-Body und sind hier aus Standard-WoW-API ergänzt.
 
+**Agents:** Entscheidungsregeln und Projektbefunde stehen im Skill
+`.cursor/skills/wow-addon-dev/` (`SKILL.md` + `references/`). Diese Datei bleibt die
+menschliche Tutorial-Referenz.
+
 ## Inhaltsverzeichnis
 
 1. [Erste Schritte](#1-erste-schritte)
@@ -493,6 +497,9 @@ end
 CopyDefaults(defaults, MeinAddonDB)
 ```
 
+Nur `nil` überschreiben — bewusstes `false` (Feature aus) bleibt erhalten.
+Nicht `db.flag or true` für Booleans nutzen.
+
 `PLAYER_LOGOUT` ist optional für Aufräumen; der Client schreibt SV automatisch.
 
 ---
@@ -586,7 +593,7 @@ Attribute nur **außerhalb** des Kampfes setzen/ändern. Normale Lua-`CastSpellB
 
 - Pfad oft: `World of Warcraft\_forever_\Interface\AddOns\`
 - Interface aktuell z. B. `16001` — immer mit `/dump select(4, GetBuildInfo())` prüfen.
-- Manche Events/`RegisterEvent`-Aufrufe können mit `ADDON_ACTION_FORBIDDEN` scheitern → vorsichtig mit `pcall` / Fallback (kein CLEU erzwingen, wenn der Client es blockt).
+- Manche Events/`RegisterEvent`-Aufrufe können mit `ADDON_ACTION_FORBIDDEN` scheitern → Fehler mit `pcall` abfangen und **echten Fallback** nutzen (kein CLEU erzwingen, wenn der Client es blockt). `pcall` entsperrt keine verbotene Aktion.
 
 ---
 

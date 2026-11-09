@@ -419,6 +419,7 @@ end
 function Comm:OnAddonMessage(prefix, message, channel, sender)
   if prefix ~= GR.PREFIX and prefix ~= GR.PREFIX_NEW then return end
   if channel ~= "GUILD" then return end
+  if not IsInGuild or not IsInGuild() then return end
   if type(message) ~= "string" or message == "" or #message > MAX_RECV then return end
 
   sender = U.NormalizeName(sender)
@@ -438,6 +439,20 @@ function Comm:OnAddonMessage(prefix, message, channel, sender)
   Count("recv")
 
   HandleMessage(message, sender)
+end
+
+-- Drop all outbound traffic and peer state when the player leaves a guild.
+function Comm:OnGuildLeft()
+  local n = queue:Purge(function() return true end)
+  if n > 0 then Reject("guild_left", "queue x" .. n) end
+  wipe(peers)
+  wipe(rateBuckets)
+  wipe(fragBuf)
+  if drainTicker then
+    drainTicker:Cancel()
+    drainTicker = nil
+  end
+  lastSendAt = -SEND_INTERVAL
 end
 
 local function OnPrivacyChanged()

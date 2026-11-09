@@ -1,6 +1,6 @@
 -- From repo root: luajit Tests/WantedLogic_test.lua
 AngryMurlocs = AngryMurlocs or {}
-dofile("Modules/WantedLogic.lua")
+dofile("Core/WantedLogic.lua")
 
 local L = AngryMurlocs.WantedLogic
 assert(L, "WantedLogic missing")

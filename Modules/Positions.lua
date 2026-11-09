@@ -28,6 +28,7 @@ function Positions:Get(name)
 end
 
 local function ClearStale()
+  if not next(cache) then return end
   local now = U.Now()
   for name, data in pairs(cache) do
     if now - (data.time or 0) > STALE then
@@ -35,6 +36,32 @@ local function ClearStale()
       GR:SendMessage("POS_REMOVED", name)
     end
   end
+end
+
+local function SharingPosition()
+  return GR.db and GR.db.privacy.sharePosition
+      and IsInGuild and IsInGuild()
+end
+
+local function StopHeartbeat()
+  if ticker then
+    ticker:Cancel()
+    ticker = nil
+  end
+end
+
+local function EnsureHeartbeat()
+  if ticker then return end
+  if not SharingPosition() and not next(cache) then return end
+  ticker = C_Timer.NewTicker(HEARTBEAT, function()
+    if SharingPosition() then
+      Positions:Broadcast(false)
+    end
+    ClearStale()
+    if not SharingPosition() and not next(cache) then
+      StopHeartbeat()
+    end
+  end)
 end
 
 local function ShouldSuppressPos()
@@ -161,7 +188,7 @@ function Positions:Broadcast(force)
 end
 
 local function StartMovingTicker()
-  if not GR.db or not GR.db.privacy.sharePosition then return end
+  if not SharingPosition() then return end
   if ShouldSuppressPos() then return end
   if movingTicker then return end
   movingTicker = C_Timer.NewTicker(TICK_MOVING, function()
@@ -186,27 +213,36 @@ local function ResumeAfterSuppress()
 end
 
 function Positions:OnEnable()
-  GR:RegisterMessage("POS_UPDATE", function(_, sender, data)
+  if self.enabled then return end
+  self.enabled = true
+
+  GR:BindMessage(self, "POS_UPDATE", function(_, sender, data)
     -- Never cache own position (map shows player arrow only)
     if not sender or U.IsSelfName(sender) then return end
     cache[sender] = data
+    EnsureHeartbeat()
     GR:SendMessage("POS_CACHE_CHANGED", sender, data)
   end)
 
-  GR:RegisterMessage("GUILD_UPDATE", function()
+  GR:BindMessage(self, "GUILD_CHANGED", function()
     wipe(cache)
+    StopMovingTicker()
+    if not SharingPosition() then StopHeartbeat() end
     GR:SendMessage("POS_CACHE_CLEARED")
   end)
 
-  GR:RegisterMessage("SHARE_POS_CHANGED", function()
-    if GR.db.privacy.sharePosition then
+  GR:BindMessage(self, "SHARE_POS_CHANGED", function()
+    if SharingPosition() then
+      EnsureHeartbeat()
       Positions:Broadcast(true)
     else
       StopMovingTicker()
+      if not next(cache) then StopHeartbeat() end
     end
   end)
 
   local f = CreateFrame("Frame")
+  self._eventFrame = f
   U.SafeRegisterEvent(f, "PLAYER_STARTED_MOVING")
   U.SafeRegisterEvent(f, "PLAYER_STOPPED_MOVING")
   U.SafeRegisterEvent(f, "ZONE_CHANGED_NEW_AREA")
@@ -237,7 +273,7 @@ function Positions:OnEnable()
     end
 
     if event == "PLAYER_STARTED_MOVING" then
-      if not GR.db or not GR.db.privacy.sharePosition or ShouldSuppressPos() then
+      if not SharingPosition() or ShouldSuppressPos() then
         StopMovingTicker()
         return
       end
@@ -254,15 +290,23 @@ function Positions:OnEnable()
     end
   end)
 
-  -- Stale cleanup always; heartbeat Broadcast only while sharing
-  ticker = C_Timer.NewTicker(HEARTBEAT, function()
-    if GR.db and GR.db.privacy.sharePosition then
-      Positions:Broadcast(false)
-    end
-    ClearStale()
-  end)
+  EnsureHeartbeat()
 
   C_Timer.After(3, function()
-    Positions:Broadcast(true)
+    if not Positions.enabled then return end
+    if SharingPosition() then
+      EnsureHeartbeat()
+      Positions:Broadcast(true)
+    end
   end)
+end
+
+function Positions:OnDisable()
+  if not self.enabled then return end
+  self.enabled = false
+  GR:UnbindMessages(self)
+  GR:ReleaseEventFrame(self._eventFrame)
+  self._eventFrame = nil
+  StopMovingTicker()
+  StopHeartbeat()
 end

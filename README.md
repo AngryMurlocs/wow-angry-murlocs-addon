@@ -2,7 +2,7 @@
 
 Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
 
-**Version:** 0.8.1
+**Version:** 0.8.2
 
 ## Features
 
@@ -16,7 +16,7 @@ Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Beruf
 
 Kommunikation über den Gilden-Addonkanal (Prefix `GildenRadar` für Kompatibilität). Lange Nachrichten werden fragmentiert. Wanted- und Berufsdaten sind nach **Gilde + Realm** getrennt.
 
-**Grenze Forever:** Der Kampflog ist gesperrt. Ziel/Angreifer zählen **nicht** als Killer — Auto-Wanted ist damit praktisch aus, bis eine verlässliche Quelle gefunden ist (`/am diag death`).
+**Grenze Forever:** Der Kampflog (CLEU) ist gesperrt. Ziel/Angreifer zählen **nicht** als Killer. Ab **0.8.1** kann Death Recap bei `Player-*`-GUID Wanted + Toast setzen; Mob/Umgebung nur Toast ohne Wanted-Credit. Recap-Qualität auf Forever: bitte mit `/am diag death` prüfen — nicht als immer zuverlässig annehmen.
 
 ## Installation
 
@@ -35,7 +35,7 @@ Kommunikation über den Gilden-Addonkanal (Prefix `GildenRadar` für Kompatibili
 |--------|---------|
 | `/am` | Hauptfenster (Berufe + Navigation) |
 | `/am help` | Hilfe |
-| `/am config` | Einstellungen (`options` / `settings`) |
+| `/am config` | Esc-Settings (Stub) bzw. Addon-Tab; Alias `options` / `settings` |
 | `/am wanted` | Wanted-Liste / Sichtungen |
 | `/am wanted unhide all` | Lokal ausgeblendete Wanted-Einträge wieder zeigen |
 | `/am sync` | Gildendaten jetzt abgleichen (Berufe + Wanted) |
@@ -52,7 +52,7 @@ Aliases: `/angrymurlocs`, `/gr`
 - **Kartenpins:** Klassen-Murlocs auf der Weltkarte; Größe in den Optionen (8–24, gilt für Heads/Body/Rings). Style unter Opt → Map. Ohne Update ab ~45 s blasser, bei 60 s weg.
 - **Berufe / Wanted:** Navigation wechselt Fenster exklusiv (kein Übereinanderlegen). Auto-Sync einmal pro Sitzung (Login/Reload) und bei Gildenwechsel; sonst Sync-Button bzw. `/am sync`. Status im Tab „Allgemein“ und im Wanted-Fenster.
 - **Wanted-Zählung (feste Gilden-Regeln):** Jedes Opfer führt pro Killer einen eigenen Zähler; Level = Altdaten + Summe der Opferzähler. Pair-CD **10s** beim Opfer. Duell/BG/Arena/unbekannter Kontext zählen nie. Ränge Markiert→Gildenschreck. Kein Zeit-Expire; Safety-Cap **1000**.
-- **Killer-Quelle auf Forever:** Der Kampflog ist dort gesperrt. Ziel oder angreifender Feind gelten **nicht** als Killer — solche Tode erscheinen als „Ursache unbekannt“ und zählen nicht. `/am diag death` hilft bei der Quellensuche.
+- **Killer-Quelle auf Forever:** CLEU gesperrt; Ziel/Angreifer gelten nicht als Killer. Death Recap mit `Player-*` kann Wanted zählen (0.8.1); sonst oft „Ursache unbekannt“. `/am diag death` zur Prüfung.
 - **Ausblenden:** Shift+Klick blendet **nur lokal** aus (nicht für die Gilde gelöscht). Steigt das Level, erscheint der Eintrag wieder. `/am wanted unhide all` macht alles rückgängig.
 - **Liste:** Top 40 von N mit Seiten, Suche, Sortierung nach Level oder zuletzt gesehen. Tooltip zeigt Quellen und Datenalter.
 - **Wanted-Sichtung:** Wanted-Spieler ins Ziel nehmen → Auto-Meldung an die Gilde (Zone = Zone des Melders; 60 s Sendepause). Frische: frisch / aktuell / veraltet (5+ Min).
