@@ -22,6 +22,9 @@ local envHint = {
 local ENV_HINT_TTL = 5
 local toast
 local fallTicker
+local layoutEdit = false
+local displayDone
+local muteNextSound = false
 
 local ENV_KEYS = {
   FALLING = "DEATH_ENV_FALL",
@@ -57,11 +60,12 @@ local function DefaultPoint(f)
 end
 
 local function ApplyToastLayout(f)
+  if not f then return end
   local c = Cfg()
   U.ApplyPoint(f, c.point, DefaultPoint)
   f:SetScale(U.Clamp(tonumber(c.scale) or 1, 0.6, 1.6))
   if f.hint then
-    f.hint:SetShown(not c.locked)
+    f.hint:SetShown(layoutEdit or not c.locked)
   end
 end
 
@@ -69,6 +73,25 @@ local function RaiseToast(f)
   f:SetFrameStrata("FULLSCREEN_DIALOG")
   f:SetFrameLevel(500)
   if f.Raise then f:Raise() end
+end
+
+local function CancelDeathToastTimers()
+  if toast then
+    if toast._hide then toast._hide:Cancel() toast._hide = nil end
+    if toast._fadeAfter then toast._fadeAfter:Cancel() toast._fadeAfter = nil end
+  end
+end
+
+local function FinishDisplay()
+  CancelDeathToastTimers()
+  if toast then
+    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(toast) end
+    toast:SetAlpha(1)
+    toast:Hide()
+  end
+  local d = displayDone
+  displayDone = nil
+  if d then d() end
 end
 
 local function EnsureToast()
@@ -105,7 +128,10 @@ local function EnsureToast()
   U.MakeMovable(toast, {
     getPoint = function() return Cfg().point end,
     setPoint = function(pt) Cfg().point = pt end,
-    isLocked = function() return Cfg().locked end,
+    isLocked = function()
+      if layoutEdit then return false end
+      return Cfg().locked
+    end,
     defaultFn = DefaultPoint,
   })
 
@@ -146,25 +172,34 @@ local function FormatDeathLine(victim, cause, killer, spell, zone)
 end
 
 local function DisplayDeathToast(item, done)
-  if AngryMurlocsLevelUpToast and AngryMurlocsLevelUpToast.Hide then
+  if not layoutEdit and AngryMurlocsLevelUpToast and AngryMurlocsLevelUpToast.Hide then
     AngryMurlocsLevelUpToast:Hide()
   end
   local f = EnsureToast()
   ApplyToastLayout(f)
   RaiseToast(f)
-  if f._hide then f._hide:Cancel() f._hide = nil end
-  if f._fadeAfter then f._fadeAfter:Cancel() f._fadeAfter = nil end
+  CancelDeathToastTimers()
   if UIFrameFadeRemoveFrame then
     UIFrameFadeRemoveFrame(f)
   end
+  displayDone = done
   f.text:SetText(FormatDeathLine(item.victim, item.cause, item.killer, item.spell, item.zone))
   f:SetAlpha(1)
   f:Show()
+
+  if not muteNextSound and not layoutEdit and not (item and item._preview) then
+    if GR.Sounds and GR.Sounds.Play then GR.Sounds.Play("death") end
+  end
+  muteNextSound = false
+
+  if layoutEdit then
+    return
+  end
+
   local dur = U.Clamp(tonumber(Cfg().duration) or 10.0, 1.5, 15)
   f._hide = C_Timer.NewTimer(dur, function()
     local function Finish()
-      f:Hide()
-      if done then done() end
+      FinishDisplay()
     end
     if UIFrameFadeOut then
       UIFrameFadeOut(f, 0.5, 1, 0)
@@ -565,12 +600,87 @@ local diagFrame
 local diagRegistered = {}
 local diagEvents = {}
 
+-- #region agent log
+local function AgentDeathLog(hypothesisId, message, data)
+  if not GR.db then return end
+  if not GR._agentDebugCleared then
+    GR._agentDebugCleared = true
+    GR.db._agentDebug = {}
+    if U and U.Print then U.Print("AMDBG: DiagSafeArg post-fix active") end
+  end
+  local logs = GR.db._agentDebug
+  logs[#logs + 1] = {
+    sessionId = "e387d6",
+    runId = "post-fix",
+    hypothesisId = hypothesisId,
+    location = "Modules/Death.lua:DiagArgs",
+    message = message,
+    data = data,
+    timestamp = (GetServerTime and GetServerTime() or time()) * 1000,
+  }
+  while #logs > 50 do table.remove(logs, 1) end
+end
+-- #endregion
+
+-- Forever: UNIT_COMBAT amount can be secret; table.concat rejects secrets.
+local function DiagSafeArg(v)
+  if type(issecretvalue) == "function" and issecretvalue(v) then
+    return "<secret:" .. type(v) .. ">", true
+  end
+  local ok, s = pcall(tostring, v)
+  if not ok then
+    return "<tostring-err>", true
+  end
+  if type(issecretvalue) == "function" and issecretvalue(s) then
+    return "<secret:" .. type(v) .. ">", true
+  end
+  return s, false
+end
+
 local function DiagArgs(...)
   local parts = {}
+  -- #region agent log
+  local argMeta = {}
+  local hasSecretRaw = false
+  local replaced = 0
+  local secretIdx = {}
+  local hasRestrictions = C_Secrets and C_Secrets.HasSecretRestrictions and C_Secrets.HasSecretRestrictions() or false
+  local hasIsSecret = type(issecretvalue) == "function"
+  -- #endregion
   for i = 1, math.min(select("#", ...), 8) do
-    parts[#parts + 1] = tostring((select(i, ...)))
+    local v = select(i, ...)
+    local asStr, wasSecret = DiagSafeArg(v)
+    -- #region agent log
+    local rawSecret = hasIsSecret and issecretvalue(v) or false
+    if rawSecret then
+      hasSecretRaw = true
+      secretIdx[#secretIdx + 1] = i
+    elseif wasSecret then
+      secretIdx[#secretIdx + 1] = i
+    end
+    if wasSecret then replaced = replaced + 1 end
+    argMeta[i] = {
+      typ = type(v),
+      rawSecret = rawSecret and 1 or 0,
+      replaced = wasSecret and 1 or 0,
+      preview = wasSecret and asStr or tostring(asStr):sub(1, 24),
+    }
+    -- #endregion
+    parts[#parts + 1] = asStr
   end
   local s = table.concat(parts, " | "):gsub("[%c]", " ")
+  -- #region agent log
+  AgentDeathLog("fix", "DiagArgs after fix", {
+    n = #parts,
+    hasRestrictions = hasRestrictions and 1 or 0,
+    hasIsSecret = hasIsSecret and 1 or 0,
+    hasSecretRaw = hasSecretRaw and 1 or 0,
+    replaced = replaced,
+    secretIdx = table.concat(secretIdx, ","),
+    concatOk = 1,
+    args = argMeta,
+  })
+  -- #endregion
   if #s > 160 then s = s:sub(1, 160) end
   return s
 end
@@ -581,6 +691,12 @@ local function SetDeathCapture(on)
       diagFrame = CreateFrame("Frame")
       diagFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "UNIT_COMBAT" and (...) ~= "player" then return end
+        -- #region agent log
+        AgentDeathLog("C", "diag event", {
+          event = tostring(event or "?"),
+          argc = select("#", ...),
+        })
+        -- #endregion
         diagEvents[#diagEvents + 1] = { t = U.Now(), text = event .. " " .. DiagArgs(...) }
         while #diagEvents > DIAG_KEEP do table.remove(diagEvents, 1) end
       end)
@@ -762,23 +878,92 @@ Death.AttributionFromRecapEvents = AttributionFromRecapEvents
 Death.ReadRecapAttribution = ReadRecapAttribution
 
 function Death:Preview()
-  Cfg().showToasts = true
+  if layoutEdit then
+    muteNextSound = true
+    DisplayDeathToast({
+      victim = U.ShortName(U.PlayerName()),
+      cause = "mob",
+      killer = "Preview",
+      spell = U.L("DEATH_MELEE"),
+      zone = GetZoneText and GetZoneText() or "?",
+      _preview = true,
+    }, nil)
+    if toast and toast.ClampToScreen then toast:ClampToScreen() end
+    return
+  end
+  if GR.ToastQueue then
+    GR.ToastQueue.Pause()
+    GR.ToastQueue.FinishCurrent()
+  else
+    FinishDisplay()
+  end
+  muteNextSound = true
   DisplayDeathToast({
     victim = U.ShortName(U.PlayerName()),
     cause = "mob",
     killer = "Preview",
     spell = U.L("DEATH_MELEE"),
     zone = GetZoneText and GetZoneText() or "?",
-  })
+    _preview = true,
+  }, function()
+    if GR.ToastQueue and not layoutEdit then
+      GR.ToastQueue.Resume()
+    end
+  end)
+  if toast and toast.ClampToScreen then
+    toast:ClampToScreen()
+  end
+end
+
+function Death:RefreshLayout()
+  if toast then ApplyToastLayout(toast) end
+end
+
+function Death:BeginLayoutEdit()
+  -- Caller (Options) must Pause + FinishCurrent first.
+  layoutEdit = true
+  CancelDeathToastTimers()
+  muteNextSound = true
+  DisplayDeathToast({
+    victim = U.ShortName(U.PlayerName()),
+    cause = "mob",
+    killer = "Preview",
+    spell = U.L("DEATH_MELEE"),
+    zone = GetZoneText and GetZoneText() or "?",
+    _preview = true,
+  }, nil)
+  ApplyToastLayout(toast)
+end
+
+function Death:EndLayoutEdit()
+  if not layoutEdit then return end
+  layoutEdit = false
+  FinishDisplay()
+  if toast then
+    toast:StopMovingOrSizing()
+    ApplyToastLayout(toast)
+  end
+end
+
+function Death:IsLayoutEdit()
+  return layoutEdit
+end
+
+function Death:ResetPosition()
+  Cfg().point = nil
+  if toast then ApplyToastLayout(toast) end
+end
+
+function Death:ResetAppearance()
+  local c = Cfg()
+  c.scale = 1
+  c.duration = 10.0
+  if toast then ApplyToastLayout(toast) end
 end
 
 function Death:ResetLayout()
-  local c = Cfg()
-  c.point = nil
-  c.scale = 1
-  c.duration = 10.0
-  c.locked = false
-  if toast then ApplyToastLayout(toast) end
+  self:ResetPosition()
+  self:ResetAppearance()
 end
 
 function Death:OnEnable()
@@ -788,6 +973,7 @@ function Death:OnEnable()
   Cfg()
   if GR.ToastQueue then
     GR.ToastQueue.Register("death", DisplayDeathToast)
+    GR.ToastQueue.RegisterFinishHook("death", FinishDisplay)
   end
 
   GR:BindMessage(self, "DEATH_UPDATE", function(_, victim, data)
@@ -842,6 +1028,10 @@ end
 function Death:OnDisable()
   if not self.enabled then return end
   self.enabled = false
+  if layoutEdit then
+    self:EndLayoutEdit()
+    if GR.ToastQueue and GR.ToastQueue.Resume then GR.ToastQueue.Resume() end
+  end
   GR:UnbindMessages(self)
   GR:ReleaseEventFrame(self._eventFrame)
   self._eventFrame = nil

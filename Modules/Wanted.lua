@@ -138,24 +138,20 @@ function Wanted:ApplySighting(target, zone, reporter, ts)
   return ok
 end
 
-function Wanted:Hide(killer)
+function Wanted:SetClassFile(killer, classFile)
   local key = self:NormalizeKiller(killer)
-  if not key then return end
-  if Logic.Hide(self:State(), key, self:Now()) then
-    U.Print(string.format(U.L("WANTED_HIDDEN"), U.ShortName(key)))
-    GR:SendMessage("WANTED_CHANGED")
-  end
-end
-
-function Wanted:UnhideAll()
-  local n = Logic.UnhideAll(self:State())
-  U.Print(string.format(U.L("WANTED_UNHIDDEN"), n))
+  if not key or not classFile or classFile == "" then return false end
+  local entry = self:State().wanted[key]
+  if not entry then return false end
+  if entry.classFile == classFile then return false end
+  entry.classFile = classFile
   GR:SendMessage("WANTED_CHANGED")
+  return true
 end
 
 function Wanted:Summary()
-  local list, hidden = Logic.Sorted(self:State(), self:Now())
-  return { total = #list, hidden = hidden, top = list[1] }
+  local list = Logic.Sorted(self:State(), self:Now(), { includeHidden = true })
+  return { total = #list, hidden = 0, top = list[1] }
 end
 
 local function MaybeAlert(targetKey, zone, reporter)
@@ -171,6 +167,9 @@ local function MaybeAlert(targetKey, zone, reporter)
     zone or "?",
     U.ShortName(reporter or "?")
   ))
+  if GR.Sounds and GR.Sounds.Play then
+    GR.Sounds.Play("sight")
+  end
 end
 
 local function OnTargetChanged()
@@ -196,6 +195,13 @@ local function OnTargetChanged()
   if not key then return end
   if not Wanted:State().wanted[key] then return end
 
+  if UnitClass then
+    local _, classFile = UnitClass("target")
+    if classFile then
+      Wanted:SetClassFile(key, classFile)
+    end
+  end
+
   local zone = Wanted:PlayerZone()
   local me = U.NormalizeName(U.PlayerName())
   local nowSession = U.Now()
@@ -220,6 +226,11 @@ function Wanted:OnEnable()
 
   self:Scope()
   self:PruneNow()
+  -- Local hide feature removed; clear any leftover markers from older versions.
+  local st = self:State()
+  if st and type(st.hidden) == "table" then
+    wipe(st.hidden)
+  end
 
   local targetFrame = CreateFrame("Frame")
   self._targetFrame = targetFrame

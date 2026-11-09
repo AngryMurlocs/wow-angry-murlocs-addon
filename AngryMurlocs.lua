@@ -1,7 +1,8 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.9.0"
+GR.VERSION = "0.10.0"
+GR.DISCORD_INVITE = "https://discord.gg/2Yh4gn8aQt"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
 
@@ -23,6 +24,7 @@ local function RunGuildSync()
     if prof.ClearEmptyRemoteStubs then prof:ClearEmptyRemoteStubs() end
     if prof.RequestAll then prof:RequestAll() end
   end
+  -- Recipe lists sync on-demand when a catalog is opened (PROFRQ per profession).
   local wanted = GR:GetModule("Wanted")
   if wanted and wanted.RequestSync then wanted:RequestSync("delta") end
   if wanted and wanted.AnnounceOwn then wanted:AnnounceOwn() end
@@ -60,6 +62,7 @@ local defaults = {
   autoWanted = {},
   prof = {
     cache = {},
+    recipeMeta = {},
   },
   wanted = {}, -- legacy 0.4 flat; migrated into scopes
   scopes = {},
@@ -301,14 +304,6 @@ SlashCmdList["ANGRYMURLOCS"] = function(msg)
     local wanted = GR:GetModule("Wanted")
     if wanted and wanted.Toggle then
       wanted:Toggle()
-    end
-    return
-  end
-
-  if lower == "wanted unhide" or lower == "wanted unhide all" then
-    local wanted = GR:GetModule("Wanted")
-    if wanted and wanted.UnhideAll then
-      wanted:UnhideAll()
     end
     return
   end

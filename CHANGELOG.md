@@ -1,5 +1,14 @@
 # AngryMurlocs Changelog
 
+## 0.10.0
+
+- Settings use a left sidebar: Sharing, Map, Level-Up, Death, Sightings, and Interface
+- Level-Up and Death toasts: sound, size, duration, and position live on one page per type
+- Pick a notification sound and preview it; turn sounds on or off per message type
+- Move toast position on screen, then lock it; reset position or size without hunting other tabs
+- Profession recipes: browse and search what guild crafters can make
+- Clearer main tabs and calmer settings navigation
+
 ## 0.9.0
 
 - Guild members on the map use the new class murloc icons

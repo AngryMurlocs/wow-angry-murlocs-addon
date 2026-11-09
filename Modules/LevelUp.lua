@@ -7,6 +7,9 @@ local LevelUp = GR:NewModule("LevelUp")
 local toast
 local hideTimer
 local fadeAfter
+local layoutEdit = false
+local displayDone
+local muteNextSound = false
 
 local function Cfg()
   GR.db.levelUp = GR.db.levelUp or {}
@@ -23,11 +26,12 @@ local function DefaultPoint(f)
 end
 
 local function ApplyToastLayout(f)
+  if not f then return end
   local c = Cfg()
   U.ApplyPoint(f, c.point, DefaultPoint)
   f:SetScale(U.Clamp(tonumber(c.scale) or 1, 0.6, 1.6))
   if f.hint then
-    f.hint:SetShown(not c.locked)
+    f.hint:SetShown(layoutEdit or not c.locked)
   end
 end
 
@@ -46,6 +50,18 @@ local function CancelToastTimers()
     fadeAfter:Cancel()
     fadeAfter = nil
   end
+end
+
+local function FinishDisplay()
+  CancelToastTimers()
+  if toast then
+    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(toast) end
+    toast:SetAlpha(1)
+    toast:Hide()
+  end
+  local d = displayDone
+  displayDone = nil
+  if d then d() end
 end
 
 local function EnsureToast()
@@ -84,7 +100,10 @@ local function EnsureToast()
   U.MakeMovable(toast, {
     getPoint = function() return Cfg().point end,
     setPoint = function(pt) Cfg().point = pt end,
-    isLocked = function() return Cfg().locked end,
+    isLocked = function()
+      if layoutEdit then return false end
+      return Cfg().locked
+    end,
     defaultFn = DefaultPoint,
   })
 
@@ -94,7 +113,7 @@ local function EnsureToast()
 end
 
 local function DisplayToast(item, done)
-  if AngryMurlocsDeathToast and AngryMurlocsDeathToast.Hide then
+  if not layoutEdit and AngryMurlocsDeathToast and AngryMurlocsDeathToast.Hide then
     AngryMurlocsDeathToast:Hide()
   end
   local f = EnsureToast()
@@ -106,16 +125,25 @@ local function DisplayToast(item, done)
     UIFrameFadeRemoveFrame(f)
   end
 
+  displayDone = done
   local lvl = tonumber(item.level) or 1
   f.text:SetText(string.format(U.L("LVL_TOAST"), item.name, lvl))
   f:SetAlpha(1)
   f:Show()
 
+  if not muteNextSound and not layoutEdit and not (item and item._preview) then
+    if GR.Sounds and GR.Sounds.Play then GR.Sounds.Play("lvl") end
+  end
+  muteNextSound = false
+
+  if layoutEdit then
+    return
+  end
+
   local dur = U.Clamp(tonumber(Cfg().duration) or 8.0, 1.5, 15)
   hideTimer = C_Timer.NewTimer(dur, function()
     local function Finish()
-      f:Hide()
-      if done then done() end
+      FinishDisplay()
     end
     if UIFrameFadeOut then
       UIFrameFadeOut(f, 0.4, 1, 0)
@@ -143,22 +171,86 @@ local function Enqueue(name, level)
   DisplayToast({ name = U.ShortName(name), level = level })
 end
 
+-- Visual preview: no SV mutation, silent. Does not change showToasts/point.
 function LevelUp:Preview()
-  Cfg().showToasts = true
-  Cfg().point = nil -- force default; saved off-screen kills preview
-  DisplayToast({ name = U.ShortName(U.PlayerName()), level = UnitLevel("player") or 1 })
+  if layoutEdit then
+    muteNextSound = true
+    DisplayToast({
+      name = U.ShortName(U.PlayerName()),
+      level = UnitLevel("player") or 1,
+      _preview = true,
+    }, nil)
+    if toast and toast.ClampToScreen then toast:ClampToScreen() end
+    return
+  end
+  if GR.ToastQueue then
+    GR.ToastQueue.Pause()
+    GR.ToastQueue.FinishCurrent()
+  else
+    FinishDisplay()
+  end
+  muteNextSound = true
+  DisplayToast({
+    name = U.ShortName(U.PlayerName()),
+    level = UnitLevel("player") or 1,
+    _preview = true,
+  }, function()
+    if GR.ToastQueue and not layoutEdit then
+      GR.ToastQueue.Resume()
+    end
+  end)
   if toast and toast.ClampToScreen then
     toast:ClampToScreen()
   end
 end
 
-function LevelUp:ResetLayout()
+function LevelUp:RefreshLayout()
+  if toast then ApplyToastLayout(toast) end
+end
+
+function LevelUp:BeginLayoutEdit()
+  -- Caller (Options) must Pause + FinishCurrent first.
+  layoutEdit = true
+  CancelToastTimers()
+  muteNextSound = true
+  DisplayToast({
+    name = U.ShortName(U.PlayerName()),
+    level = UnitLevel("player") or 1,
+    _preview = true,
+  }, nil)
+  ApplyToastLayout(toast)
+end
+
+function LevelUp:EndLayoutEdit()
+  if not layoutEdit then return end
+  layoutEdit = false
+  FinishDisplay()
+  if toast then
+    toast:StopMovingOrSizing()
+    ApplyToastLayout(toast)
+  end
+end
+
+function LevelUp:IsLayoutEdit()
+  return layoutEdit
+end
+
+function LevelUp:ResetPosition()
+  Cfg().point = nil
+  if toast then ApplyToastLayout(toast) end
+end
+
+function LevelUp:ResetAppearance()
   local c = Cfg()
-  c.point = nil
   c.scale = 1
   c.duration = 8.0
-  c.locked = false
+  -- locked intentionally preserved
   if toast then ApplyToastLayout(toast) end
+end
+
+function LevelUp:ResetLayout()
+  self:ResetPosition()
+  self:ResetAppearance()
 end
 
 function LevelUp:OnEnable()
@@ -168,6 +260,7 @@ function LevelUp:OnEnable()
   Cfg()
   if GR.ToastQueue then
     GR.ToastQueue.Register("lvl", DisplayToast)
+    GR.ToastQueue.RegisterFinishHook("lvl", FinishDisplay)
   end
 
   GR:BindMessage(self, "LVL_UPDATE", function(_, sender, level)
@@ -197,6 +290,10 @@ end
 function LevelUp:OnDisable()
   if not self.enabled then return end
   self.enabled = false
+  if layoutEdit then
+    self:EndLayoutEdit()
+    if GR.ToastQueue and GR.ToastQueue.Resume then GR.ToastQueue.Resume() end
+  end
   GR:UnbindMessages(self)
   GR:ReleaseEventFrame(self._eventFrame)
   self._eventFrame = nil

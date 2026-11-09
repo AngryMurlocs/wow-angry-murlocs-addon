@@ -261,26 +261,17 @@ do
   check("forged WK diag reason", (bob.GR.Diag.counters.reject_origin_mismatch or 0) == 1)
 end
 
--- Local hide survives an old sync, returns on a newer kill (acceptance 10 over the wire).
+-- ClassFile can be set locally on a Wanted entry (no hide UI).
 do
   local sim = Sim.New(41)
   local alice = sim:AddClient("Alice")
   local bob = sim:AddClient("Bob")
   alice.Wanted:RecordOwnDeath(KILLER, "Hillsbrad")
   sim:Run(3)
-  bob.Wanted:Hide(KILLER)
-  local s = bob.Wanted:Summary()
-  check("hide removes from Bob's list", s.total == 0 and s.hidden == 1)
-  bob.Wanted:RequestSync("full")
-  sim:Run(40)
-  s = bob.Wanted:Summary()
-  check("hide survives old sync", s.total == 0 and s.hidden == 1)
-  check("hide is local only (Alice still lists)", alice.Wanted:Summary().total == 1)
-  sim:Run(11)
-  alice.Wanted:RecordOwnDeath(KILLER, "Hillsbrad")
-  sim:Run(3)
-  s = bob.Wanted:Summary()
-  check("hidden entry returns on higher level", s.total == 1 and s.hidden == 0)
+  check("bob has killer", bob.Wanted:Summary().total == 1)
+  bob.Wanted:SetClassFile(KILLER, "MAGE")
+  local entry = bob.Wanted:State().wanted[KILLER]
+  check("classFile stored", entry and entry.classFile == "MAGE")
 end
 
 -- Send rate: never more than 2 messages per second from one client.

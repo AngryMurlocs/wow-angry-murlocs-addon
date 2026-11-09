@@ -80,5 +80,41 @@ do
   check("first shown was death or lvl", shown[1] and (shown[1].kind == "death" or shown[1].kind == "lvl"))
 end
 
+-- Pause / Resume / FinishCurrent
+do
+  T._ResetForTest()
+  _G.GetTime = function() return 200 end
+  _G.UnitAffectingCombat = function() return false end
+  local finished = 0
+  local shown = 0
+  local pendingDone
+  T.Register("lvl", function(item, done)
+    shown = shown + 1
+    pendingDone = done
+    -- do not auto-complete
+  end)
+  T.RegisterFinishHook("lvl", function()
+    finished = finished + 1
+    if pendingDone then
+      local d = pendingDone
+      pendingDone = nil
+      d()
+    end
+  end)
+  T.Enqueue({ kind = "lvl", id = 1 })
+  check("showing after enqueue", T.IsShowing())
+  T.Pause()
+  check("paused", T.IsPaused())
+  T.Enqueue({ kind = "lvl", id = 2 })
+  check("enqueue while paused keeps size", T.Size() >= 1)
+  T.FinishCurrent()
+  check("finish hook ran", finished >= 1)
+  check("not showing after finish", not T.IsShowing())
+  -- advance clock past cooldown so Resume can drain
+  _G.GetTime = function() return 220 end
+  T.Resume()
+  check("resumed drains queued item", shown >= 2)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then error(fails .. " test failures") end

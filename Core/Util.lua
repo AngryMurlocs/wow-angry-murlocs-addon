@@ -203,6 +203,31 @@ function U.GuildScopeKey()
   return U.RealmKey() .. "::" .. tostring(guild)
 end
 
+-- Guild lead / officer for UI gates (UX). Positive hits only (OR):
+-- IsGuildLeader, C_GuildInfo.IsGuildOfficer (Forever / Gethe forever @ 9dc84f0d),
+-- C_GuildInfo.CanEditOfficerNote / CanEditOfficerNote. Not a security boundary alone.
+function U.IsGuildOfficer()
+  if not IsInGuild or not IsInGuild() then
+    return false
+  end
+  if IsGuildLeader and IsGuildLeader() then
+    return true
+  end
+  if C_GuildInfo and type(C_GuildInfo.IsGuildOfficer) == "function" then
+    if C_GuildInfo.IsGuildOfficer() then
+      return true
+    end
+  end
+  if C_GuildInfo and type(C_GuildInfo.CanEditOfficerNote) == "function" then
+    if C_GuildInfo.CanEditOfficerNote() then
+      return true
+    end
+  elseif CanEditOfficerNote and CanEditOfficerNote() then
+    return true
+  end
+  return false
+end
+
 function U.EnsureScopeTable(scope)
   scope.wanted = scope.wanted or {}
   scope.wantedHidden = scope.wantedHidden or {}

@@ -2,7 +2,7 @@
 
 Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
 
-**Version:** 0.9.0
+**Version:** 0.10.0
 
 ## Features
 
@@ -37,7 +37,6 @@ Kommunikation über den Gilden-Addonkanal (Prefix `GildenRadar` für Kompatibili
 | `/am help` | Hilfe |
 | `/am config` | Esc-Settings (Stub) bzw. Addon-Tab; Alias `options` / `settings` |
 | `/am wanted` | Wanted-Liste / Sichtungen |
-| `/am wanted unhide all` | Lokal ausgeblendete Wanted-Einträge wieder zeigen |
 | `/am sync` | Gildendaten jetzt abgleichen (Berufe + Wanted) |
 | `/am prof` | Berufsliste |
 | `/am share on\|off` | Position teilen |
@@ -53,15 +52,14 @@ Aliases: `/angrymurlocs`, `/gr`
 - **Berufe / Wanted:** Navigation wechselt Fenster exklusiv (kein Übereinanderlegen). Auto-Sync einmal pro Sitzung (Login/Reload) und bei Gildenwechsel; sonst Sync-Button bzw. `/am sync`. Status im Tab „Allgemein“ und im Wanted-Fenster.
 - **Wanted-Zählung (feste Gilden-Regeln):** Jedes Opfer führt pro Killer einen eigenen Zähler; Level = Altdaten + Summe der Opferzähler. Pair-CD **10s** beim Opfer. Duell/BG/Arena/unbekannter Kontext zählen nie. Ränge Markiert→Gildenschreck. Kein Zeit-Expire; Safety-Cap **1000**.
 - **Killer-Quelle auf Forever:** CLEU gesperrt; Ziel/Angreifer gelten nicht als Killer. Death Recap mit `Player-*` kann Wanted zählen (0.8.1); sonst oft „Ursache unbekannt“. `/am diag death` zur Prüfung.
-- **Ausblenden:** Shift+Klick blendet **nur lokal** aus (nicht für die Gilde gelöscht). Steigt das Level, erscheint der Eintrag wieder. `/am wanted unhide all` macht alles rückgängig.
-- **Liste:** Top 40 von N mit Seiten, Suche, Sortierung nach Level oder zuletzt gesehen. Tooltip zeigt Quellen und Datenalter.
+- **Liste:** Top 40 von N mit Seiten, Suche, Sortierung nach Level oder zuletzt gesehen. Klick öffnet Details (Kill, Sichtung, Quellen, Opferzähler).
 - **Wanted-Sichtung:** Wanted-Spieler ins Ziel nehmen → Auto-Meldung an die Gilde (Zone = Zone des Melders; 60 s Sendepause). Frische: frisch / aktuell / veraltet (5+ Min).
 - **Minimap:** Linksklick Hauptfenster, Rechtsklick Settings.
 - **Ingame-Prüfung:** [Tests/CLIENT_CHECKLIST.md](Tests/CLIENT_CHECKLIST.md).
 
 ## Einstellungen
 
-Addon-Optionen: Teilen, Pins (Anzeige + Größe + Style), Toast-Layout. Auto-Wanted-Regeln sind **fest im Addon** (keine Slider).
+Addon-Optionen (Seitenleiste): Freigaben, Karte, Level-Up / Tod / Sichtungen, Oberfläche (Hauptfenster + Minimap). Auto-Wanted-Regeln sind **fest im Addon** (keine Slider).
 
 ## Neu in 0.9.0 (Kurz)
 

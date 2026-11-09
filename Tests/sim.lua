@@ -15,6 +15,8 @@ local FILES = {
   "Core/Theme.lua",
   "Core/Protocol.lua",
   "Core/Queue.lua",
+  "Core/Toasts.lua",
+  "Core/Sounds.lua",
   "Core/Events.lua",
   "Core/Diag.lua",
   "Core/Comm.lua",

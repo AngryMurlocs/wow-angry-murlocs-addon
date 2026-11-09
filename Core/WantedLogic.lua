@@ -573,15 +573,14 @@ function WantedLogic.SyncPage(state, cursorT, cursorKey, maxRecords, opts)
   return page, more, nextT, nextKey, records
 end
 
---- Sorted view: { key, entry, level, score } (hidden excluded unless opts.includeHidden).
+--- Sorted view: { key, entry, level, score }.
+--- Hidden markers are ignored (local-hide UI removed); second return stays 0 for callers.
 function WantedLogic.Sorted(state, now, opts)
   opts = opts or {}
-  local list, hidden = {}, 0
+  local list = {}
   local filter = opts.filter and opts.filter ~= "" and string.lower(opts.filter) or nil
   for key, e in pairs(state and state.wanted or {}) do
-    if WantedLogic.IsHidden(state, key, e) and not opts.includeHidden then
-      hidden = hidden + 1
-    elseif not filter or string.lower(key):find(filter, 1, true) then
+    if not filter or string.lower(key):find(filter, 1, true) then
       list[#list + 1] = { key = key, entry = e, level = WantedLogic.Level(e), score = WantedLogic.Score(e, now) }
     end
   end
@@ -594,7 +593,7 @@ function WantedLogic.Sorted(state, now, opts)
     if a.score ~= b.score then return a.score > b.score end
     return a.key < b.key
   end)
-  return list, hidden
+  return list, 0
 end
 
 --- Source breakdown for display: direct self-reports, relayed reports, legacy.

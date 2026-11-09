@@ -6,9 +6,23 @@ local MinimapButton = GR:NewModule("MinimapButton")
 local minimapBtn
 local pendingMinimapUpdate = false
 
+local function MinimapCfg()
+  GR.db = GR.db or {}
+  GR.db.minimap = GR.db.minimap or {}
+  return GR.db.minimap
+end
+
 local function MinimapRadius()
   local w = (Minimap and Minimap.GetWidth and Minimap:GetWidth()) or 140
   return (w / 2) + 5
+end
+
+local function StopMinimapDrag()
+  if not minimapBtn then return end
+  minimapBtn:SetScript("OnUpdate", nil)
+  if minimapBtn.StopMovingOrSizing then
+    minimapBtn:StopMovingOrSizing()
+  end
 end
 
 local function UpdateMinimapButton()
@@ -18,16 +32,31 @@ local function UpdateMinimapButton()
     return
   end
   pendingMinimapUpdate = false
-  local angle = (GR.db.minimap and GR.db.minimap.angle) or 200
+  local cfg = MinimapCfg()
+  if cfg.hide then
+    StopMinimapDrag()
+    minimapBtn:Hide()
+    return
+  end
+  minimapBtn:Show()
+  local angle = cfg.angle or 200
   local rad = math.rad(angle)
   local r = MinimapRadius()
   minimapBtn:ClearAllPoints()
   minimapBtn:SetPoint("CENTER", Minimap, "CENTER", math.cos(rad) * r, math.sin(rad) * r)
 end
 
+function MinimapButton:ApplySettings()
+  local cfg = MinimapCfg()
+  if cfg.locked then
+    StopMinimapDrag()
+  end
+  UpdateMinimapButton()
+end
+
 local function EnsureMinimapButton()
   if minimapBtn then
-    UpdateMinimapButton()
+    MinimapButton:ApplySettings()
     return
   end
   if not Minimap then
@@ -75,6 +104,8 @@ local function EnsureMinimapButton()
   minimapBtn:SetScript("OnLeave", GameTooltip_Hide)
 
   minimapBtn:SetScript("OnDragStart", function(self)
+    local cfg = MinimapCfg()
+    if cfg.hide or cfg.locked then return end
     self:SetScript("OnUpdate", function()
       if not Minimap then return end
       local mx, my = Minimap:GetCenter()
@@ -82,8 +113,7 @@ local function EnsureMinimapButton()
       local scale = Minimap:GetEffectiveScale()
       cx, cy = cx / scale, cy / scale
       local angle = math.deg(math.atan2(cy - my, cx - mx)) % 360
-      GR.db.minimap = GR.db.minimap or {}
-      GR.db.minimap.angle = angle
+      MinimapCfg().angle = angle
       UpdateMinimapButton()
     end)
   end)
@@ -91,9 +121,11 @@ local function EnsureMinimapButton()
     self:SetScript("OnUpdate", nil)
   end)
 
-  UpdateMinimapButton()
-  minimapBtn:Show()
-  C_Timer.After(2, UpdateMinimapButton)
+  -- Apply hide/lock before first Show so delayed create respects SV.
+  MinimapButton:ApplySettings()
+  C_Timer.After(2, function()
+    MinimapButton:ApplySettings()
+  end)
 end
 
 function MinimapButton:OnEnable()
@@ -115,6 +147,7 @@ end
 function MinimapButton:OnDisable()
   if not self.enabled then return end
   self.enabled = false
+  StopMinimapDrag()
   GR:ReleaseEventFrame(self._combatFrame)
   self._combatFrame = nil
 end

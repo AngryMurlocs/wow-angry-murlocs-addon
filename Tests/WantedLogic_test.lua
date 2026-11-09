@@ -194,19 +194,16 @@ do
   check("no expire", s.wanted.Old ~= nil)
 end
 
--- Acceptance 10: local hide survives the same old sync, reappears on new kill
+-- Local hide markers still exist in logic, but Sorted always lists entries (UI hide removed).
 do
   local s = NewState()
   L.MergeOrigin(s, cfg, "K", "V", { n = 2, seq = 2, t = 100 }, 200, {})
   L.Hide(s, "K", 300)
-  L.MergeOrigin(s, cfg, "K", "V", { n = 2, seq = 2, t = 100 }, 400, {})
-  L.MergeEntryHeader(s, cfg, "K", { legacy = 0, seenT = 350, seenZone = "Z", seenBy = "X" }, 400)
+  check("hide marker set", L.IsHidden(s, "K", s.wanted.K))
   local list, hidden = L.Sorted(s, 400)
-  check("A10 hidden after old sync", #list == 0 and hidden == 1)
-  L.MergeOrigin(s, cfg, "K", "V", { n = 3, seq = 3, t = 390 }, 400, {})
-  list = L.Sorted(s, 400)
-  check("A10 visible after new kill", #list == 1)
+  check("Sorted ignores hide markers", #list == 1 and hidden == 0)
   check("unhide all", L.UnhideAll(s) == 1)
+  check("unhidden", not L.IsHidden(s, "K", s.wanted.K))
 end
 
 -- Acceptance 7: more than 40 entries -> sorted list keeps all, top 40 is a view

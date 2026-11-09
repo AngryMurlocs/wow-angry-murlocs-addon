@@ -317,6 +317,60 @@ local function DispatchParsed(tag, rest, sender)
     GR:SendMessage("PROF_UPDATE", sender, cleaned)
   elseif tag == "PROFREQ" then
     GR:SendMessage("PROF_REQUEST", sender)
+  elseif tag == "PROFR" then
+    -- Recipe knowledge; may be large (FRAG-reassembled). Do not 200-truncate like PROF.
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    if #cleaned > 20000 then
+      Reject("too_long", "PROFR " .. tostring(sender))
+      return
+    end
+    local recipes = GR:GetModule("ProfRecipes")
+    local data, why = recipes and recipes.Decode and recipes.Decode(cleaned)
+    if not data then
+      Reject("invalid", "PROFR " .. tostring(why) .. " " .. tostring(sender))
+      return
+    end
+    Count("recv_PROFR")
+    GR:SendMessage("PROF_RECIPE_UPDATE", sender, data)
+  elseif tag == "PROFRQ" then
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    local ver, profKey = cleaned:match("^(%d+)|([%w_]*)$")
+    if not ver then
+      ver, profKey = cleaned:match("^(%d+)$"), ""
+    end
+    if tonumber(ver) ~= 1 then return end
+    Count("recv_PROFRQ")
+    GR:SendMessage("PROF_RECIPE_REQUEST", sender, profKey or "")
+  elseif tag == "PROFRMQ" then
+    -- Recipe metadata request (IDs only). Older clients ignore unknown tags.
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    if #cleaned > 4000 then
+      Reject("too_long", "PROFRMQ " .. tostring(sender))
+      return
+    end
+    local recipes = GR:GetModule("ProfRecipes")
+    local ids, why = recipes and recipes.DecodeMetaRequest and recipes.DecodeMetaRequest(cleaned)
+    if not ids then
+      Reject("invalid", "PROFRMQ " .. tostring(why) .. " " .. tostring(sender))
+      return
+    end
+    Count("recv_PROFRMQ")
+    GR:SendMessage("PROF_RECIPE_META_REQUEST", sender, ids)
+  elseif tag == "PROFRM" then
+    -- Recipe metadata batch (names/reagents). Does not grant craft knowledge.
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    if #cleaned > 20000 then
+      Reject("too_long", "PROFRM " .. tostring(sender))
+      return
+    end
+    local recipes = GR:GetModule("ProfRecipes")
+    local entries, why = recipes and recipes.DecodeMetaBatch and recipes.DecodeMetaBatch(cleaned)
+    if not entries then
+      Reject("invalid", "PROFRM " .. tostring(why) .. " " .. tostring(sender))
+      return
+    end
+    Count("recv_PROFRM")
+    GR:SendMessage("PROF_RECIPE_META_UPDATE", sender, entries)
   elseif tag == "DEATH" then
     local parts = U.Split(rest, "|")
     local cause = parts[5]

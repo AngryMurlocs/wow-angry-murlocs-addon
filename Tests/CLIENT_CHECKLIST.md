@@ -42,11 +42,16 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 
 - [ ] Pin-Stile Heads / Body / Rings wechseln; Größenregler wirkt auf alle drei.
 - [ ] Wanted-Suche, Sortierung (Gefahrenstufe / zuletzt gesehen), Seiten `<` `>`; Fußzeile „1–40 von N · Seite …“.
-- [ ] Shift+Klick blendet nur lokal aus (anderer Client sieht den Eintrag weiter). Button „Ausgeblendete wieder anzeigen“ bzw. `/am wanted unhide all` bringt sie zurück.
+- [ ] Wanted-Zeile: Name in Klassenfarbe (nach Target-Sichtung oder POS/Prof-Cache). Detail zeigt Kill, Sichtung, Quellen, Opfer.
 - [ ] Minimap: Button ist Kind von `Minimap` (UI-Packs können ihn sammeln); Linksklick Hauptfenster, Rechtsklick Einstellungen; Ziehen verschiebt den Button.
 - [ ] `/am config` öffnet Esc-Settings-Kategorie (Stub) wenn `Settings` API da; Button „Einstellungen öffnen“ → Addon-Tab.
+- [ ] Optionen: Hinweis unter „Gilden-Tode teilen“ / Privacy überdeckt keine Checkboxen.
+- [ ] General: Discord-Icon kopiert Invite (URL nicht dauerhaft sichtbar); Popup mit EditBox.
 - [ ] Optionen: Häkchen „Gilden-Tode teilen“ zeigt den Hinweistext; Ausschalten → eigener Tod erscheint bei anderen weder als Toast noch in Wanted; Positions-Pin zeigt keinen Tot-Status.
+- [ ] Optionen bei **640 × 460**: linke Seitenleiste flach (kein rotes Panel-Chrom), aktiver Eintrag grün; Abstand vor Oberfläche. Haupt-Tabs etwas größer. Seitentitel rechts; Oberfläche: kurze Labels, Hint eng am Reset, größere Lücke zur Minimap-Gruppe; „Position sperren“ ausgegraut wenn Button aus (SV bleibt). Notes/Pins/Resets in der rechten Breite ohne Overlap. Sound-Menü schließt bei Bereichswechsel/Fenster zu.
+- [ ] Optionen Layout-Flow: Freigaben — Notes unter Checkboxen, keine Überlagerung; Karte — kleiner Abstand vor Pin-Kacheln, „Pin-Größe“+Slider darunter sichtbar.
 - [ ] `/am sync`, `/am diag show`, `/am diag off` funktionieren.
+- [ ] Admin-Tab: nur als Gildenlead/Offizier sichtbar; als Member fehlt der Button. Promote/Demote → Button erscheint/verschwindet (ggf. Roster kurz aktualisieren). Placeholder-Text im Tab.
 
 ## 13. UI-Redesign — Sichtprüfung (nur Client; Lua-Smoke deckt Layout nicht ab)
 
@@ -60,14 +65,45 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 - [ ] Aufklappbares „Details“: Freigaben, Hilfe, ohne Überlappung mit der Feed-Liste.
 - [ ] DE- und EN-Texte: nichts abgeschnitten/überlappend.
 
-### Berufe
+### Berufe (Unterreiter)
 
-- [ ] Zwei Filterzeilen: Suche, Beruf („Alle Berufe“), Mindestfertigkeit, „Nur kürzlich aktive“, Reset.
-- [ ] Beruf gewählt + Min-Skill: nur dieser Beruf zählt (anderer Hochskill reicht nicht).
-- [ ] Zeilenhöhe/Hover/Klassenfarbe nur beim Namen; Skill klar lesbar; lange Texte im Tooltip.
-- [ ] Klick → Menü „Anflüstern“ öffnet Whisper.
-- [ ] Sort-Labels „Kürzlich aktiv zuerst“ / „Name A–Z“; Fußzeile „1–40 von N · Seite …“; Pfeile am Rand disabled.
-- [ ] Leer: Cache leer vs. keine Treffer (+ Reset-Aktion).
+- [ ] Unterreiter **Übersicht** / **Rezeptsuche** gleiche Position/Breite; Start = Übersicht.
+- [ ] Übersicht: Suche, Beruf, Mindestfertigkeit, „Nur kürzlich aktive“, Reset, Sync erreichbar.
+- [ ] Beruf gewählt + Min-Skill: nur dieser Beruf zählt.
+- [ ] Zeile: Name Klassenfarbe; feste Berufsicons + Skill; Nebenberufe als Icons; Volltext im Tooltip.
+- [ ] Klick **Icon** → Rezeptliste dieses Mitglieds; Klick **Name** → Anflüstern.
+- [ ] Sort / Seitenfuß / Leerzustände wie zuvor.
+
+### Rezeptsuche + Detail (gemeinsam)
+
+Voraussetzung: Forever `C_TradeSkillUI` (Interface 16001). Nur erfasste Cache-Rezepte.
+
+- [ ] Rezeptsuche idle (leeres Feld / nur Leerzeichen, Alle Berufe): Crafting-Berufskategorien; keine Sammelberufe; Klick → Rezepte; Scroll/Filter-Reset beim Wechsel.
+- [ ] Tippen oder Beruf gewählt: eine Zeile je Rezept (Icon, Name, Beruf, Herstellerzahl); 3 Hersteller = 1 Zeile; Crafter-Count pro Kategorie unique.
+- [ ] Abdeckungszeile: „Rezeptdaten von X Charakteren · Y vollständige Berufskataloge“ (kein Gilden-Allwissen).
+- [ ] Button **Rezeptdaten aktualisieren**: Status laden/fertig/Timeout; Tippen in Suche sendet **keine** Anfrage.
+- [ ] Suche: „Healing Test“ findet „Test Healing Potion“; `item:118` / Itemlink; `recipe:ID`; Umlaute.
+- [ ] Klick Treffer → Detail mit Herstellerwahl (Klassenfarbe, voller Name/Tooltip); Scan-Datum mit Tag+Uhr.
+- [ ] Menge ± aktualisiert Benötigt/Fehlt/Summary; Beuteländerung bei offenem Detail aktualisiert Mats.
+- [ ] Unbekannter Bestand ≠ 0; kein grünes „alles da“ bei unbekannten Mats.
+- [ ] Anfrage: Entwurf wird bei Mengen-/Hersteller-/Materialwechsel **veraltet**; „Neu erstellen“ nötig; „In Flüsterchat“ gesperrt bis Rebuild.
+- [ ] Chat-Ziel inkl. Realmbezug; bestehender Chat-Entwurf bleibt unberührt; kein Auto-Send.
+- [ ] Neuer Katalog ohne Rezept → Anfrage gesperrt („kennt nicht mehr“); kein stiller Herstellerwechsel.
+- [ ] Zurück stellt Suche/Filter/Scroll (bzw. Übersichtsliste) wieder her.
+- [ ] Übersicht-Pfad: Icon → Liste → Detail; kein Scan → „Noch keine Rezeptdaten…“ (≠ „niemand in der Gilde“).
+- [ ] Sammelberuf: verständlicher Leerzustand. DE-/EN-Lange Namen + UI-Skalierung >1 lesbar.
+
+### Rezeptsuche — Zwei Gildenmitglieder (A teilt, B sucht)
+
+Voraussetzung: Beide online in derselben Gilde; A hat Beruf mit bestätigtem Scan geteilt (`shareProfessions`).
+
+1. **A:** Berufsfenster öffnen → Addon scannt → Katalog vollständig. Optional Filter leeren, „Rezepte aktualisieren“.
+2. **B (frisch / ohne vorgefüllte Meta):** Berufe → Rezeptsuche → **Rezeptdaten aktualisieren** → Status beobachten (laden → fertig/Timeout).
+3. **B:** Rezept per Namen suchen (nicht nur `#ID`). Detail öffnen: Zutaten/Ausgabe soweit verfügbar sichtbar.
+4. **B:** Menge 1→2 bei offener Vorschau → Entwurf veraltet; „Neu erstellen“ → neuer Text; selbst in Flüsterchat übernehmen (A empfängt nichts automatisch).
+5. **B:** Item in Beutel legen/entfernen bei offenem Detail → Need/Bag/Missing aktualisiert sich.
+6. **A:** Rezept verlernen / leeren bestätigten Katalog pushen → bei B Anfrage für alte Kombi gesperrt.
+7. Diag: `/am diag show` — `recv_PROFR` / ggf. Meta-Tags; keine Dauerschleife bei wiederholtem Klick (Cooldown).
 
 ### Wanted
 

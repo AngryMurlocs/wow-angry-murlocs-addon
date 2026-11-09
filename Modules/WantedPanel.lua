@@ -18,26 +18,26 @@ local sortBtn
 local prevBtn
 local nextBtn
 local emptyText
-local unhideBtn
 local recentCb
 local recentOnly = false
 local selectedKiller = nil
 local detailFrame
 local detailLines = {}
-local detailHideBtn
+local detailTitle
 local colHeaders
 local PAGE_SIZE = 40
-local ROW_H = 28
-local DETAIL_H = 110
+local ROW_H = 30
+local DETAIL_H = 152
+local DETAIL_LINE_COUNT = 8
 local freshnessTicker
 local page = 1
 local sortBy = "level"
 
+-- Zone stays in hover tooltip + detail pane (not a table column).
 local WANTED_COLS = {
-  { key = "WANTED_COL_KILLER", x = 4, w = 140 },
-  { key = "WANTED_COL_THREAT", x = 150, w = 130 },
-  { key = "WANTED_COL_SEEN", x = 286, w = 160 },
-  { key = "WANTED_COL_SEEN_ZONE", x = 452, w = 120 },
+  { key = "WANTED_COL_KILLER", x = 4, w = 170 },
+  { key = "WANTED_COL_THREAT", x = 180, w = 150 },
+  { key = "WANTED_COL_SEEN", x = 336, w = 220 },
 }
 
 local RANK_RGB = {
@@ -84,6 +84,47 @@ local function ThreatLabel(level)
   return string.format(U.L("WANTED_THREAT_CELL"), level, U.L("WANTED_RANK_" .. rank.key))
 end
 
+local function ResolveClassFile(killer, entry)
+  if entry and entry.classFile then return entry.classFile end
+  local pos = GR:GetModule("Positions")
+  local p = pos and pos.Get and pos:Get(killer)
+  if p and p.classFile then return p.classFile end
+  local prof = GR:GetModule("Professions")
+  local cache = prof and prof.GetAll and prof:GetAll()
+  local pe = cache and cache[killer]
+  if pe and pe.classFile then return pe.classFile end
+  return nil
+end
+
+local function ClassDisplayName(classFile)
+  if not classFile then return nil end
+  if LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classFile] then
+    return LOCALIZED_CLASS_NAMES_MALE[classFile]
+  end
+  return classFile
+end
+
+local function TopOriginsText(entry, maxN)
+  maxN = maxN or 5
+  local list = {}
+  for _, o in pairs(entry and entry.origins or {}) do
+    list[#list + 1] = { name = o.name or "?", n = tonumber(o.n) or 0 }
+  end
+  table.sort(list, function(a, b)
+    if a.n ~= b.n then return a.n > b.n end
+    return a.name < b.name
+  end)
+  if #list == 0 then return nil end
+  local parts = {}
+  for i = 1, math.min(#list, maxN) do
+    parts[#parts + 1] = string.format("%s×%d", list[i].name, list[i].n)
+  end
+  if #list > maxN then
+    parts[#parts + 1] = "…"
+  end
+  return table.concat(parts, " · ")
+end
+
 local function SetDetailOpen(open)
   if not detailFrame or not scrollFrame then return end
   if open then
@@ -99,6 +140,7 @@ local function FillDetail(killer)
   if not detailFrame then return end
   if not killer then
     SetDetailOpen(false)
+    if detailTitle then detailTitle:SetText("") end
     for i = 1, #detailLines do
       detailLines[i]:SetText("")
     end
@@ -114,27 +156,54 @@ local function FillDetail(killer)
   local level = Logic.Level(entry)
   local rank = Logic.RankFromLevel(level)
   local s = Logic.SourceSummary(entry)
-  detailLines[1]:SetText(U.ShortName(killer) .. " — " .. string.format(U.L("WANTED_RANK_LINE"), level, U.L("WANTED_RANK_" .. rank.key)))
-  detailLines[2]:SetText(string.format(U.L("WANTED_COL_SEEN_BY") .. ": %s",
-    (entry.lastSeenBy ~= "" and U.ShortName(entry.lastSeenBy)) or "-"))
-  detailLines[3]:SetText(string.format(U.L("WANTED_COL_VICTIM") .. ": %s",
-    (entry.lastVictim ~= "" and entry.lastVictim) or "-"))
+  local classFile = ResolveClassFile(killer, entry)
+  local r, g, b = U.ClassColor(classFile)
+  local className = ClassDisplayName(classFile)
+  local title = U.ShortName(killer)
+  if className then
+    title = title .. " (" .. className .. ")"
+  end
+  title = title .. " — " .. string.format(U.L("WANTED_RANK_LINE"), level, U.L("WANTED_RANK_" .. rank.key))
+  if detailTitle then
+    detailTitle:SetText(title)
+    detailTitle:SetTextColor(r, g, b)
+  end
+
   if (entry.lastKillTime or 0) > 0 then
-    detailLines[4]:SetText(string.format(U.L("WANTED_LAST_KILL"), Wanted.FormatAge(entry.lastKillTime),
+    detailLines[1]:SetText(string.format(U.L("WANTED_LAST_KILL"), Wanted.FormatAge(entry.lastKillTime),
       entry.lastVictim ~= "" and entry.lastVictim or "?", entry.lastZone ~= "" and entry.lastZone or "?"))
   else
-    detailLines[4]:SetText(U.L("WANTED_SIGHT_NONE"))
+    detailLines[1]:SetText(string.format(U.L("WANTED_COL_VICTIM") .. ": %s",
+      (entry.lastVictim ~= "" and entry.lastVictim) or "-"))
   end
+
+  if (entry.lastSeenTime or 0) > 0 then
+    detailLines[2]:SetText(string.format(U.L("WANTED_SIGHT_LINE"),
+      Wanted.FormatAge(entry.lastSeenTime),
+      entry.lastSeenZone ~= "" and entry.lastSeenZone or "?",
+      entry.lastSeenBy ~= "" and U.ShortName(entry.lastSeenBy) or "?"))
+  else
+    detailLines[2]:SetText(U.L("WANTED_SIGHT_NONE"))
+  end
+
+  if (entry.changedAt or 0) > 0 then
+    detailLines[3]:SetText(string.format(U.L("WANTED_DATA_AGE"), Wanted.FormatAge(entry.changedAt)))
+  else
+    detailLines[3]:SetText("")
+  end
+
+  local origins = TopOriginsText(entry, 5)
+  detailLines[4]:SetText(origins and string.format(U.L("WANTED_ORIGINS"), origins) or "")
+
   local src = {}
   if s.own > 0 then src[#src + 1] = string.format(U.L("WANTED_SRC_OWN"), s.own) end
   if s.direct > 0 then src[#src + 1] = string.format(U.L("WANTED_SRC_DIRECT"), s.direct) end
   if s.relayed > 0 then src[#src + 1] = string.format(U.L("WANTED_SRC_RELAYED"), s.relayed) end
   if s.legacy > 0 then src[#src + 1] = string.format(U.L("WANTED_SRC_LEGACY"), s.legacy) end
-  detailLines[5]:SetText((#src > 0 and table.concat(src, " · ")) or U.L("WANTED_SRC_NOTE"))
-  if detailHideBtn then
-    detailHideBtn.killer = killer
-    detailHideBtn:Show()
-  end
+  detailLines[5]:SetText((#src > 0 and table.concat(src, " · ")) or "")
+  detailLines[6]:SetText(U.L("WANTED_SRC_NOTE"))
+  detailLines[7]:SetText("")
+  detailLines[8]:SetText("")
 end
 
 local function RefreshAges()
@@ -173,10 +242,12 @@ end
 
 local function ShowRowTooltip(self)
   if not self.killer then return end
+  local entry = Wanted:State().wanted[self.killer]
+  local classFile = ResolveClassFile(self.killer, entry)
+  local r, g, b = U.ClassColor(classFile)
   GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-  GameTooltip:AddLine(U.ShortName(self.killer), 1, 0.85, 0.4)
+  GameTooltip:AddLine(U.ShortName(self.killer), r, g, b)
   GameTooltip:AddLine(U.L("WANTED_DETAIL_HINT"), 0.7, 0.7, 0.7)
-  GameTooltip:AddLine(U.L("WANTED_CLICK_HIDE"), 0.6, 0.6, 0.6)
   if self.fullSight then
     GameTooltip:AddLine(self.fullSight, 0.9, 0.9, 0.9, true)
   end
@@ -251,15 +322,6 @@ function Wanted:AttachPanel(parent)
   statusText:SetWidth(500)
   statusText:SetJustifyH("LEFT")
 
-  unhideBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  unhideBtn:SetSize(200, 18)
-  unhideBtn:SetPoint("TOPRIGHT", -4, -26)
-  unhideBtn:Hide()
-  unhideBtn:SetScript("OnClick", function()
-    Wanted:UnhideAll()
-    Wanted:Refresh()
-  end)
-
   colHeaders = U.BuildColHeaders(frame, WANTED_COLS, 4, -48, ROW_H)
 
   scrollFrame = CreateFrame("ScrollFrame", "AngryMurlocsWantedScroll", frame, "UIPanelScrollFrameTemplate")
@@ -278,14 +340,6 @@ function Wanted:AttachPanel(parent)
     row:RegisterForClicks("LeftButtonUp")
     row:SetScript("OnClick", function(self)
       if not self.killer then return end
-      if IsShiftKeyDown and IsShiftKeyDown() then
-        Wanted:Hide(self.killer)
-        if selectedKiller == self.killer then
-          selectedKiller = nil
-          FillDetail(nil)
-        end
-        return
-      end
       if selectedKiller == self.killer then
         selectedKiller = nil
         FillDetail(nil)
@@ -317,27 +371,20 @@ function Wanted:AttachPanel(parent)
   T.ApplyPanelBackdrop(detailFrame, T.BG_ALT)
   detailFrame:Hide()
 
-  local dy = -6
-  for i = 1, 5 do
+  detailTitle = detailFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  detailTitle:SetPoint("TOPLEFT", T.INSET, -6)
+  detailTitle:SetPoint("RIGHT", detailFrame, "RIGHT", -T.INSET, 0)
+  detailTitle:SetJustifyH("LEFT")
+
+  local dy = -24
+  for i = 1, DETAIL_LINE_COUNT do
     local fs = detailFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     fs:SetPoint("TOPLEFT", T.INSET, dy)
-    fs:SetPoint("RIGHT", detailFrame, "RIGHT", -100, 0)
+    fs:SetPoint("RIGHT", detailFrame, "RIGHT", -T.INSET, 0)
     fs:SetJustifyH("LEFT")
     detailLines[i] = fs
-    dy = dy - 16
+    dy = dy - 15
   end
-
-  detailHideBtn = CreateFrame("Button", nil, detailFrame, "UIPanelButtonTemplate")
-  detailHideBtn:SetSize(150, 20)
-  detailHideBtn:SetPoint("BOTTOMRIGHT", -T.INSET, T.INSET)
-  detailHideBtn:SetText(U.L("WANTED_DETAIL_HIDE"))
-  detailHideBtn:SetScript("OnClick", function(self)
-    if self.killer then
-      Wanted:Hide(self.killer)
-      selectedKiller = nil
-      FillDetail(nil)
-    end
-  end)
 
   pageText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   pageText:SetPoint("BOTTOMLEFT", T.INSET, 8)
@@ -369,7 +416,7 @@ function Wanted:Refresh()
   if not frame or not self:_PanelShown() then return end
   EnsureFreshnessTicker()
   local filter = searchBox and searchBox:GetText() or ""
-  local list, hidden = Logic.Sorted(self:State(), self:Now(), { filter = filter, sortBy = sortBy })
+  local list = Logic.Sorted(self:State(), self:Now(), { filter = filter, sortBy = sortBy, includeHidden = true })
   if recentOnly then
     local filtered = {}
     for i = 1, #list do
@@ -402,14 +449,6 @@ function Wanted:Refresh()
   if statusText then
     statusText:SetText(Wanted:SyncStatusText())
   end
-  if unhideBtn then
-    if hidden > 0 then
-      unhideBtn:SetText(string.format(U.L("WANTED_UNHIDE_BTN"), hidden))
-      unhideBtn:Show()
-    else
-      unhideBtn:Hide()
-    end
-  end
   if prevBtn then
     if page <= 1 then prevBtn:Disable() else prevBtn:Enable() end
   end
@@ -422,7 +461,7 @@ function Wanted:Refresh()
       emptyText:Show()
       local rawTotal = 0
       for _ in pairs(self:State().wanted or {}) do rawTotal = rawTotal + 1 end
-      if rawTotal == 0 and hidden == 0 then
+      if rawTotal == 0 then
         emptyText:SetText(U.L("WANTED_EMPTY"))
       else
         emptyText:SetText(U.L("WANTED_EMPTY_FILTER"))
@@ -434,7 +473,7 @@ function Wanted:Refresh()
 
   if selectedKiller then
     local still = self:State().wanted[selectedKiller]
-    if not still or Logic.IsHidden(self:State(), selectedKiller, still) then
+    if not still then
       selectedKiller = nil
       FillDetail(nil)
     else
@@ -454,24 +493,22 @@ function Wanted:Refresh()
       local seen, tier = FormatSightCell(e)
       local zone = (e.lastSeenZone ~= "" and e.lastSeenZone) or "-"
       local threat = ThreatLabel(item.level)
-      local nameShown = T.Truncate(U.ShortName(item.key), 16)
-      local threatShown = T.Truncate(threat, 16)
-      local seenShown = T.Truncate(seen, 22)
-      local zoneShown = T.Truncate(zone, 14)
+      local nameShown = T.Truncate(U.ShortName(item.key), 18)
+      local threatShown = T.Truncate(threat, 18)
+      local seenShown = T.Truncate(seen, 28)
       row.fullSight = seen
       row.fullZone = zone
       T.ApplyRowChrome(row, i, selectedKiller == item.key)
       if row.cols then
+        local cr, cg, cb = U.ClassColor(ResolveClassFile(item.key, e))
         row.cols[1]:SetText(nameShown)
-        row.cols[1]:SetTextColor(T.TEXT[1], T.TEXT[2], T.TEXT[3])
+        row.cols[1]:SetTextColor(cr, cg, cb)
         row.cols[2]:SetText(threatShown)
         local tr, tg, tb = RankColor(item.level)
         row.cols[2]:SetTextColor(tr, tg, tb)
         row.cols[3]:SetText(seenShown)
         local sc = SightColor(tier)
         row.cols[3]:SetTextColor(sc[1], sc[2], sc[3])
-        row.cols[4]:SetText(zoneShown)
-        row.cols[4]:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
       end
       row:Show()
     else

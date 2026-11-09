@@ -79,11 +79,35 @@ local NAME_BY_KEY_DE = {
   arch = "Archaeologie",
 }
 
+-- Classic/Forever trade-skill icons (Interface\Icons).
+local ICON_BY_KEY = {
+  alch = "Interface\\Icons\\Trade_Alchemy",
+  bs = "Interface\\Icons\\Trade_BlackSmithing",
+  ench = "Interface\\Icons\\Trade_Engraving",
+  eng = "Interface\\Icons\\Trade_Engineering",
+  herb = "Interface\\Icons\\Trade_Herbalism",
+  lw = "Interface\\Icons\\Trade_LeatherWorking",
+  mine = "Interface\\Icons\\Trade_Mining",
+  skin = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01",
+  tail = "Interface\\Icons\\Trade_Tailoring",
+  cook = "Interface\\Icons\\INV_Misc_Food_15",
+  aid = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
+  fish = "Interface\\Icons\\Trade_Fishing",
+  jc = "Interface\\Icons\\INV_Misc_Gem_01",
+  insc = "Interface\\Icons\\INV_Inscription_Tradeskill01",
+  arch = "Interface\\Icons\\Trade_Archaeology",
+}
+
 local function DisplayName(key)
   if GetLocale() == "deDE" then
     return NAME_BY_KEY_DE[key] or key
   end
   return NAME_BY_KEY[key] or key
+end
+
+local function IconPath(key)
+  if not key then return "Interface\\Icons\\INV_Misc_QuestionMark" end
+  return ICON_BY_KEY[key] or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
 local function FoldSkillName(name)
@@ -164,10 +188,20 @@ local function CollectLocal()
   return list
 end
 
+local VALID_CLASS = {
+  WARRIOR = true, PALADIN = true, HUNTER = true, ROGUE = true, PRIEST = true,
+  DEATHKNIGHT = true, SHAMAN = true, MAGE = true, WARLOCK = true, MONK = true,
+  DRUID = true, DEMONHUNTER = true, EVOKER = true,
+}
+
 -- Field separator is '+' (not '|') so payloads survive SanitizeText / tag splits.
 -- Decode still accepts legacy '|' from older clients.
-local function Encode(list)
+-- Optional leading CLASS token: WARRIOR+alch:300+bs:200
+local function Encode(list, classFile)
   local parts = {}
+  if classFile and VALID_CLASS[classFile] then
+    parts[#parts + 1] = classFile
+  end
   for i = 1, #list do
     parts[#parts + 1] = list[i].key .. ":" .. tostring(list[i].skill)
   end
@@ -176,7 +210,8 @@ end
 
 local function Decode(rest)
   local out = {}
-  if not rest or rest == "" then return out end
+  local classFile
+  if not rest or rest == "" then return out, classFile end
   -- Normalize legacy pipe payloads to '+'
   rest = tostring(rest):gsub("|", "+")
   for piece in string.gmatch(rest, "([^+]+)") do
@@ -187,9 +222,14 @@ local function Decode(rest)
         skill = tonumber(skill),
         name = DisplayName(key),
       }
+    else
+      local cf = string.upper(piece)
+      if not classFile and VALID_CLASS[cf] then
+        classFile = cf
+      end
     end
   end
-  return out
+  return out, classFile
 end
 
 -- 0.6.x kept one account-wide cache; move it once into the guild scope that is
@@ -279,12 +319,20 @@ function Professions:Broadcast(force)
   Professions:MigrateCache()
   Professions:PruneSelfDuplicates()
   local list = CollectLocal()
-  local encoded = Encode(list)
+  local classFile = U.PlayerClassFile()
+  local encoded = Encode(list, classFile)
   local me = U.NormalizeName(U.PlayerName())
+  local prevSelf = Cache()[me]
+  local recipes = prevSelf and prevSelf.recipes
+  local recipesMod = GR:GetModule("ProfRecipes")
+  if recipesMod and recipesMod.PruneRecipesToProfessionList then
+    recipes = recipesMod.PruneRecipesToProfessionList(recipes, list)
+  end
   Cache()[me] = {
     list = list,
-    classFile = U.PlayerClassFile(),
+    classFile = classFile,
     time = U.WallTime(),
+    recipes = recipes,
   }
   GR:SendMessage("PROF_CACHE_CHANGED", me)
   if not force and encoded == lastSentEncoded then return end
@@ -301,6 +349,27 @@ function Professions:RequestAll()
   Comm:Send("PROFREQ", "ctrl", "sync")
 end
 
+-- Persist class from map pins onto the professions row (survives POS expire).
+function Professions:ApplyClassFile(who, classFile)
+  if not who or not classFile or classFile == "" then return false end
+  local cache = Cache()
+  if not cache then return false end
+  local entry = cache[who]
+  if not entry then
+    local short = string.lower(U.ShortName(who) or "")
+    for name, e in pairs(cache) do
+      if e and (U.SameCharacter(name, who) or string.lower(U.ShortName(name) or "") == short) then
+        entry = e
+        break
+      end
+    end
+  end
+  if not entry then return false end
+  if entry.classFile == classFile then return false end
+  entry.classFile = classFile
+  return true
+end
+
 function Professions:OnEnable()
   if self.enabled then return end
   self.enabled = true
@@ -311,6 +380,14 @@ function Professions:OnEnable()
     Professions:PruneSelfDuplicates()
   end)
 
+  GR:BindMessage(self, "POS_CACHE_CHANGED", function(_, sender, data)
+    local cf = data and data.classFile
+    if not cf or not sender then return end
+    if Professions:ApplyClassFile(sender, cf) then
+      GR:SendMessage("PROF_CACHE_CHANGED", sender)
+    end
+  end)
+
   GR:BindMessage(self, "PROF_UPDATE", function(_, sender, rest)
     if U.IsSelfName(sender) then
       Professions:PruneSelfDuplicates()
@@ -318,7 +395,7 @@ function Professions:OnEnable()
     end
     local raw = tostring(rest or "")
     if #raw > 200 then raw = raw:sub(1, 200) end
-    local list = Decode(raw)
+    local list, classFile = Decode(raw)
     local cache = Cache()
     local prev = cache[sender]
     if #list == 0 then
@@ -329,14 +406,22 @@ function Professions:OnEnable()
       if prev and prev.list and #prev.list > 0 then
         prev.raw = raw
         prev.time = U.WallTime()
+        if classFile then prev.classFile = classFile end
         GR:SendMessage("PROF_CACHE_CHANGED", sender)
         return
       end
+    end
+    local recipes = prev and prev.recipes
+    local recipesMod = GR:GetModule("ProfRecipes")
+    if recipesMod and recipesMod.PruneRecipesToProfessionList then
+      recipes = recipesMod.PruneRecipesToProfessionList(recipes, list)
     end
     cache[sender] = {
       list = list,
       raw = raw,
       time = U.WallTime(),
+      classFile = classFile or (prev and prev.classFile),
+      recipes = recipes,
     }
     GR:SendMessage("PROF_CACHE_CHANGED", sender)
   end)
@@ -415,5 +500,7 @@ function Professions.ProfessionKeys()
 end
 
 Professions.DisplayName = DisplayName
+Professions.IconPath = IconPath
+Professions.KeyFromSkillName = KeyFromSkillName
 Professions.Decode = Decode
 Professions.Encode = Encode

@@ -95,6 +95,66 @@ function T.StyleTabButton(btn, active)
   end
 end
 
+-- Flat options sidebar row (no UIPanel chrome). Active = green fill + left accent bar.
+function T.StyleNavRow(btn, active)
+  if not btn then return end
+  if not btn._amNavBg then
+    local bg = btn:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    Solid(bg, { 0, 0, 0, 0 })
+    btn._amNavBg = bg
+  end
+  if not btn._amNavAccent then
+    local bar = btn:CreateTexture(nil, "ARTWORK")
+    bar:SetWidth(3)
+    bar:SetPoint("TOPLEFT", 0, 0)
+    bar:SetPoint("BOTTOMLEFT", 0, 0)
+    Solid(bar, T.ACCENT)
+    btn._amNavAccent = bar
+  end
+  if not btn._amNavLabel then
+    local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    fs:SetPoint("LEFT", 10, 0)
+    fs:SetPoint("RIGHT", -4, 0)
+    fs:SetJustifyH("LEFT")
+    btn._amNavLabel = fs
+    if btn.GetFontString and btn:GetFontString() then
+      -- Prefer custom label; hide template text if any.
+      btn:GetFontString():SetAlpha(0)
+    end
+  end
+  if btn._amNavText then
+    btn._amNavLabel:SetText(btn._amNavText)
+  end
+  btn:Enable()
+  if active then
+    Solid(btn._amNavBg, T.BG_SELECT)
+    btn._amNavAccent:Show()
+    T.SetTextColor(btn._amNavLabel, T.TEXT)
+  else
+    Solid(btn._amNavBg, { 0, 0, 0, 0 })
+    btn._amNavAccent:Hide()
+    T.SetTextColor(btn._amNavLabel, T.TEXT)
+  end
+end
+
+function T.WireNavRowHover(btn)
+  if not btn or btn._amNavHoverWired then return end
+  btn._amNavHoverWired = true
+  btn:SetScript("OnEnter", function(self)
+    if self._amNavActive then return end
+    if self._amNavBg then
+      Solid(self._amNavBg, T.BG_HOVER)
+    end
+  end)
+  btn:SetScript("OnLeave", function(self)
+    if self._amNavActive then return end
+    if self._amNavBg then
+      Solid(self._amNavBg, { 0, 0, 0, 0 })
+    end
+  end)
+end
+
 function T.ApplyRowChrome(row, index, selected)
   if not row then return end
   local bg = EnsureBg(row)
@@ -109,6 +169,26 @@ function T.ApplyRowChrome(row, index, selected)
     c = { 0, 0, 0, 0 }
   end
   Solid(bg, c)
+  -- Subtle bottom divider for calmer table rows.
+  if not row._amRowDivider then
+    local div = row:CreateTexture(nil, "ARTWORK")
+    div:SetHeight(1)
+    div:SetPoint("BOTTOMLEFT", 2, 0)
+    div:SetPoint("BOTTOMRIGHT", -2, 0)
+    row._amRowDivider = div
+  end
+  Solid(row._amRowDivider, { T.BORDER[1], T.BORDER[2], T.BORDER[3], 0.45 })
+end
+
+function T.StylePrimaryButton(btn)
+  if not btn then return end
+  if not btn._amPrimaryBg then
+    local bg = btn:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    Solid(bg, T.BG_SELECT)
+    btn._amPrimaryBg = bg
+  end
+  btn._amPrimaryBg:Show()
 end
 
 function T.RowHoverEnter(row)

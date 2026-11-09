@@ -639,7 +639,17 @@ function MapPins:Refresh()
       end
     end
   end
-  local laid = MapPins.ClusterOffsets(visible, size, CLUSTER_GAP_PX / scale)
+  local clustering = not GR.db.map or GR.db.map.pinClustering ~= false
+  local laid
+  if clustering then
+    laid = MapPins.ClusterOffsets(visible, size, CLUSTER_GAP_PX / scale)
+  else
+    laid = {}
+    for i = 1, #visible do
+      local item = visible[i]
+      laid[item.name] = { ox = 0, oy = 0, cx = item.x, cy = item.y }
+    end
+  end
 
   for i = 1, #visible do
     local item = visible[i]

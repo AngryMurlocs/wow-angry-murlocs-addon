@@ -40,6 +40,7 @@ function T.Push(items, item, max)
 end
 
 function T.CanShow(state, now, inCombat, cooldown)
+  if state.paused then return false end
   if inCombat then return false end
   if state.showing then return false end
   if #(state.items or {}) == 0 then return false end
@@ -51,12 +52,19 @@ end
 
 -- Runtime ----------------------------------------------------------------
 
-local state = { items = {}, showing = false, lastAt = -1000 }
+local state = { items = {}, showing = false, lastAt = -1000, paused = false }
 local handlers = {}
+local finishHooks = {}
 local drainPending
+local activeDone
 
 function T.Register(kind, handler)
   handlers[kind] = handler
+end
+
+-- Optional: modules register to force-hide current toast when FinishCurrent runs.
+function T.RegisterFinishHook(kind, fn)
+  finishHooks[kind] = fn
 end
 
 local function InCombat()
@@ -69,8 +77,9 @@ end
 
 local function Drain()
   drainPending = nil
+  if state.paused then return end
   if not T.CanShow(state, Now(), InCombat(), T.COOLDOWN_SEC) then
-    if state.showing == false and #(state.items) > 0 and not InCombat() then
+    if state.showing == false and #(state.items) > 0 and not InCombat() and not state.paused then
       local wait = T.COOLDOWN_SEC - (Now() - (state.lastAt or 0))
       if wait > 0.05 and C_Timer and C_Timer.After then
         drainPending = true
@@ -84,10 +93,14 @@ local function Drain()
   if not fn then return Drain() end
   state.showing = true
   state.lastAt = Now()
-  fn(item, function()
+  activeDone = function()
+    activeDone = nil
     state.showing = false
-    Drain()
-  end)
+    if not state.paused then
+      Drain()
+    end
+  end
+  fn(item, activeDone)
 end
 
 function T.Enqueue(item)
@@ -96,6 +109,35 @@ function T.Enqueue(item)
   T.Push(state.items, item, T.MAX)
   Drain()
   return true
+end
+
+function T.Pause()
+  state.paused = true
+end
+
+function T.Resume()
+  state.paused = false
+  Drain()
+end
+
+function T.IsPaused()
+  return state.paused and true or false
+end
+
+-- Force current display to finish so showing is released (edit mode / preview).
+-- Prefer Pause() before FinishCurrent so done() does not drain the next item.
+function T.FinishCurrent()
+  if not state.showing then return end
+  for _, fn in pairs(finishHooks) do
+    if type(fn) == "function" then
+      pcall(fn)
+    end
+  end
+  -- Hooks should invoke the display done callback; clear if they did not.
+  if state.showing then
+    activeDone = nil
+    state.showing = false
+  end
 end
 
 function T.OnCombatEnd()
@@ -112,9 +154,11 @@ end
 
 -- Tests: replace runtime state.
 function T._ResetForTest()
-  state = { items = {}, showing = false, lastAt = -1000 }
+  state = { items = {}, showing = false, lastAt = -1000, paused = false }
   handlers = {}
+  finishHooks = {}
   drainPending = nil
+  activeDone = nil
 end
 
 function T._StateForTest()
