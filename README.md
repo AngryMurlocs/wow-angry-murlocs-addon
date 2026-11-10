@@ -2,7 +2,7 @@
 
 Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
 
-**Version:** 0.10.0
+**Version:** 0.10.1
 
 ## Features
 

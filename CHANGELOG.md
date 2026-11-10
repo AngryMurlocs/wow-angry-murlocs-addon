@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## 0.10.1
+
+- Main window closes when you enter combat
+- Opening Overview or Settings during combat is blocked until combat ends
+
 ## 0.10.0
 
 - Settings use a left sidebar: Sharing, Map, Level-Up, Death, Sightings, and Interface

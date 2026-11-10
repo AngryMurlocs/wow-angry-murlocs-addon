@@ -11,6 +11,14 @@ local wantedPanel
 local optPanel
 local adminPanel
 local adminEvents
+local combatEvents
+
+local function IsInCombat()
+  if InCombatLockdown then
+    return InCombatLockdown() and true or false
+  end
+  return UnitAffectingCombat and UnitAffectingCombat("player") and true or false
+end
 local scrollChild
 local filterBox
 local emptyText
@@ -2106,6 +2114,7 @@ function UI:RefreshAdminTabVisibility()
 end
 
 function UI:ShowTab(id)
+  if IsInCombat() then return end
   EnsureFrame()
   if id == "admin" and not CanShowAdminTab() then
     id = "general"
@@ -2380,7 +2389,7 @@ function UI:Toggle()
   EnsureFrame()
   if frame:IsShown() then
     frame:Hide()
-  else
+  elseif not IsInCombat() then
     self:ShowTab(activeTab or "general")
   end
 end
@@ -2406,6 +2415,17 @@ function UI:OnEnable()
   U.SafeRegisterEvent(adminEvents, "GUILD_RANKS_UPDATE")
   U.SafeRegisterEvent(adminEvents, "GUILD_RANKS_UPDATE_ACTIVE_PLAYER")
   RefreshAdminAccess()
+
+  if not combatEvents then
+    combatEvents = CreateFrame("Frame")
+    combatEvents:SetScript("OnEvent", function()
+      if frame and frame:IsShown() then
+        frame:Hide()
+      end
+    end)
+  end
+  self._combatFrame = combatEvents
+  U.SafeRegisterEvent(combatEvents, "PLAYER_REGEN_DISABLED")
 
   -- Stacked with ProfRecipePanel handlers (BindMessage appends). Catalog-closed
   -- panel early-return must not prevent search/members refresh.
@@ -2496,4 +2516,7 @@ function UI:OnDisable()
   if adminEvents then
     adminEvents:UnregisterAllEvents()
   end
+  GR:ReleaseEventFrame(self._combatFrame)
+  self._combatFrame = nil
+  combatEvents = nil
 end
