@@ -5,6 +5,8 @@ local tests = {
   "Tests/Protocol_test.lua",
   "Tests/Queue_test.lua",
   "Tests/Attribution_test.lua",
+  "Tests/DeathRegression_test.lua",
+  "Tests/VersionNag_test.lua",
   "Tests/Sync_sim_test.lua",
   "Tests/PrivacyScope_test.lua",
   "Tests/UISmoke_test.lua",

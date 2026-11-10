@@ -1,7 +1,7 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.10.1"
+GR.VERSION = "0.11.0"
 GR.DISCORD_INVITE = "https://discord.gg/2Yh4gn8aQt"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
@@ -245,6 +245,11 @@ frame:SetScript("OnEvent", function(_, event, ...)
     if not initialSyncDone then
       initialSyncDone = true
       ScheduleGuildSync(4)
+      C_Timer.After(2, function()
+        if GR.Comm and GR.Comm.AnnounceVersion then
+          GR.Comm:AnnounceVersion()
+        end
+      end)
     end
   elseif event == "CHAT_MSG_ADDON" then
     GR.Comm:OnAddonMessage(...)
@@ -261,6 +266,11 @@ frame:SetScript("OnEvent", function(_, event, ...)
     GR:SendMessage("GUILD_UPDATE")
     if initialSyncDone and key then
       ScheduleGuildSync(2)
+      C_Timer.After(2, function()
+        if GR.Comm and GR.Comm.AnnounceVersion then
+          GR.Comm:AnnounceVersion()
+        end
+      end)
     end
   end
 end)

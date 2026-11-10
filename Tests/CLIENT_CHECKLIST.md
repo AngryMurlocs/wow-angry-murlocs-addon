@@ -126,6 +126,17 @@ Ziel: CLEU bleibt gesperrt; Recap `Player-*` darf Wanted zählen. Ziel/Angreifer
    - Zeile `apis:` — ist `C_DeathInfo`, `C_DeathRecap` oder `GetDeathRecapLink` `true`?
    - Zeilen `recap:` / `recap[n]:` — nach PvP-Tod (a): steht ein Tätername (`source=…`, `guid=Player`)? Bei NPC+falsches Ziel (b): darf **nicht** der Spieler im Ziel als Recap-Source erscheinen.
    - Zeile `registered:` — welche Events ließen sich registrieren?
-   - Erwartet bei (a) mit Recap `Player-*`: Wanted-Zähler + Spieler-Toast (0.8.1). Bei (b)/(c): Toast ohne Wanted-Credit bzw. Env; bei (d): ausgeschlossen.
+   - Erwartet bei (a) mit aktuellem tödlichem Recap `Player-*`: Wanted-Zähler + Spieler-Toast. Bei (b)/(c): belegter Mob-/Umwelttod oder „Ursache unbekannt“, ohne Wanted-Credit; bei (d): ausgeschlossen.
    - Ziel/Angreifer ohne Recap-Player: kein Wanted (`unclear_killer` / `no_player`).
 5. Ergebnis an die Entwicklung geben. Forever-Recap-Vollständigkeit bleibt **client-confirmed** erst nach diesem Check.
+
+### Regression: Todesursachen im aktuellen Arbeitsstand
+
+- [ ] Falltod nach Mobtreffern: Enthält der Recap `FALLING`, zeigt lokal und beim Gildenmitglied Fallschaden; ältere Mob-/Spielertreffer erhalten keinen Credit.
+- [ ] Tödlicher Mobtreffer nach einem harmlosen Sprung: bleibt Mobtod. Ein frischer Bewegungshinweis darf den tödlichen Treffer nicht überschreiben.
+- [ ] Kein verwertbarer Recap, feindlicher NPC im Ziel: „Ursache unbekannt“, kein erfundener Täter/Nahkampfangriff.
+- [ ] Atemleiste starten, auftauchen und anschließend anders sterben: kein behauptetes Ertrinken. Ohne bestätigten Umweltschaden bleibt die Ursache unbekannt.
+- [ ] Zauber/DoT/Fernkampf ohne `spellName`: nutzbare Zauber-ID auflösen oder unbekannten Angriff/Fernkampf anzeigen; kein erfundener Nahkampf.
+- [ ] Direkt nach dem Tod Geist freilassen: ausstehende Zuordnung darf nicht verloren gehen. Wiederbelebung und Addon-Deaktivierung beenden dagegen ausstehende Versuche.
+- [ ] Verzögert verfügbarer Recap: höchstens ein Todes-Toast/DEATH-Eintrag, mit Zone und Duell-/Instanzkontext vom Todeszeitpunkt.
+- [ ] Alte Recap-Daten vom vorherigen Tod dürfen keinen neuen Wanted-Eintrag erzeugen. Tatsächliche Zeitstempel und Recap-Reihenfolge mit Client-Build dokumentieren.

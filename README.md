@@ -2,7 +2,7 @@
 
 Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
 
-**Version:** 0.10.1
+**Version:** 0.11.0
 
 ## Features
 
@@ -51,7 +51,7 @@ Aliases: `/angrymurlocs`, `/gr`
 - **Kartenpins:** Klassen-Murlocs auf der Weltkarte; Größe in den Optionen (8–24, gilt für Heads/Body/Rings). Style unter Opt → Map. Ohne Update ab ~45 s blasser, bei 60 s weg. Liegen mehrere auf einem Haufen, rücken sie auseinander (2 nebeneinander, 3 Dreieck, 4 Raster, 5 als 2 über 3, ab 6 einer in der Mitte). Eine Reihe bleibt an den echten Positionen.
 - **Berufe / Wanted:** Navigation wechselt Fenster exklusiv (kein Übereinanderlegen). Auto-Sync einmal pro Sitzung (Login/Reload) und bei Gildenwechsel; sonst Sync-Button bzw. `/am sync`. Status im Tab „Allgemein“ und im Wanted-Fenster.
 - **Wanted-Zählung (feste Gilden-Regeln):** Jedes Opfer führt pro Killer einen eigenen Zähler; Level = Altdaten + Summe der Opferzähler. Pair-CD **10s** beim Opfer. Duell/BG/Arena/unbekannter Kontext zählen nie. Ränge Markiert→Gildenschreck. Kein Zeit-Expire; Safety-Cap **1000**.
-- **Killer-Quelle auf Forever:** CLEU gesperrt; Ziel/Angreifer gelten nicht als Killer. Death Recap mit `Player-*` kann Wanted zählen (0.8.1); sonst oft „Ursache unbekannt“. `/am diag death` zur Prüfung.
+- **Killer-Quelle auf Forever:** CLEU gesperrt; Ziel/Angreifer gelten nicht als Killer. Death Recap mit `Player-*` kann Wanted zählen. Tödliche Treffer haben Vorrang vor älteren Treffern; ausdrücklich nicht tödliche Treffer und unvollständige Quellen bleiben „Ursache unbekannt“. Fehlt der Recap zunächst, wartet das Addon höchstens eine Sekunde auf die Daten. Sprungbewegung oder ein Atembalken allein beweisen keinen Fall-/Ertrinkungstod. `/am diag death` zur Prüfung.
 - **Liste:** Top 40 von N mit Seiten, Suche, Sortierung nach Level oder zuletzt gesehen. Klick öffnet Details (Kill, Sichtung, Quellen, Opferzähler).
 - **Wanted-Sichtung:** Wanted-Spieler ins Ziel nehmen → Auto-Meldung an die Gilde (Zone = Zone des Melders; 60 s Sendepause). Frische: frisch / aktuell / veraltet (5+ Min).
 - **Minimap:** Linksklick Hauptfenster, Rechtsklick Settings.

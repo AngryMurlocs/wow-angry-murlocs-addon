@@ -393,3 +393,35 @@ function U.Clamp(n, lo, hi)
   if n > hi then return hi end
   return n
 end
+
+-- SemVer X.Y.Z for addon version nags. Pre-release suffix (-beta…) is stripped.
+-- Returns {major, minor, patch} or nil.
+function U.ParseAddonVersion(s)
+  if type(s) ~= "string" then
+    if type(s) == "number" then s = tostring(s) else return nil end
+  end
+  s = s:match("^%s*(.-)%s*$") or ""
+  if s == "" then return nil end
+  s = s:match("^([^%-+]+)") or s
+  local parts = {}
+  for n in s:gmatch("%d+") do
+    local v = tonumber(n)
+    if not v or v ~= v or v < 0 then return nil end
+    parts[#parts + 1] = math.floor(v)
+    if #parts >= 3 then break end
+  end
+  if #parts == 0 then return nil end
+  while #parts < 3 do parts[#parts + 1] = 0 end
+  return parts
+end
+
+-- -1 if a < b, 0 if equal, 1 if a > b, nil if either unparsable.
+function U.CompareAddonVersion(a, b)
+  local pa, pb = U.ParseAddonVersion(a), U.ParseAddonVersion(b)
+  if not pa or not pb then return nil end
+  for i = 1, 3 do
+    if pa[i] < pb[i] then return -1 end
+    if pa[i] > pb[i] then return 1 end
+  end
+  return 0
+end

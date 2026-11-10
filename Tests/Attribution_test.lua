@@ -93,11 +93,11 @@ do
   local sim, alice, bob = NewPair(3)
   SetWorld(alice, { combat = true, units = { target = { name = "Defias Thug", player = false, hostile = true } } })
   local info = Death(alice).ResolveDeath()
-  check("mob: cause mob, unreliable", info.cause == "mob" and info.reliable == false)
+  check("mob target: cause unknown, unreliable", info.cause == "unknown" and info.reliable == false)
   Death(alice):BroadcastLocalDeath()
   sim:Run(3)
   check("mob: no Wanted entry", Sim.Entries(alice) == 0)
-  check("mob: guild toast mob", bob.deaths[1] and bob.deaths[1].data.cause == "mob")
+  check("mob target: guild toast unknown", bob.deaths[1] and bob.deaths[1].data.cause == "unknown")
 end
 
 -- 4) Friendly player in target (healer) while a mob kills you: never blamed.
@@ -111,12 +111,12 @@ do
   check("friendly target: no Wanted entry", Sim.Entries(alice) == 0)
 end
 
--- 5) Out of combat, nothing known: environment, no Wanted.
+-- 5) Out of combat, nothing known: unknown, no Wanted.
 do
   local sim, alice = NewPair(5)
   SetWorld(alice, { combat = false, units = {} })
   local info = Death(alice).ResolveDeath()
-  check("no combat: env", info.cause == "env")
+  check("no combat: unknown", info.cause == "unknown")
   Death(alice):BroadcastLocalDeath()
   sim:Run(3)
   check("no combat: no Wanted", Sim.Entries(alice) == 0)
@@ -178,9 +178,9 @@ do
   local _, alice = NewPair(9)
   local Map = Death(alice).AttributionFromRecapEvents
   local mob = Map({
-    { event = "SWING_DAMAGE", sourceName = "Trash", sourceGUID = "Creature-0-1-0-0-1-0", amount = 10 },
+    { event = "SWING_DAMAGE", sourceName = "Trash", sourceGUID = "Creature-0-1-0-0-1-0", amount = 10, overkill = -1 },
     { event = "SPELL_PERIODIC_DAMAGE", sourceName = "Fleischfressendes Unkraut",
-      sourceGUID = "Creature-0-1-0-0-123-0", amount = 34, spellName = "Absorb" },
+      sourceGUID = "Creature-0-1-0-0-123-0", amount = 34, overkill = 0, spellName = "Absorb" },
   })
   check("recap map: last creature is mob", mob and mob.cause == "mob" and mob.reliable == false
     and mob.killer == "Fleischfressendes Unkraut", mob and mob.killer)

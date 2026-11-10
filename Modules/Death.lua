@@ -22,6 +22,8 @@ local envHint = {
 local ENV_HINT_TTL = 5
 local toast
 local fallTicker
+local resolveTimer
+local deathSerial = 0
 local layoutEdit = false
 local displayDone
 local muteNextSound = false
@@ -141,9 +143,10 @@ local function EnsureToast()
 end
 
 local function SpellForCause(cause, spell)
+  if cause == "unknown" then return "" end
   if cause == "player" or cause == "mob" then
     if type(spell) ~= "string" or spell == "" or spell == U.L("UNKNOWN_KILLER") then
-      return U.L("DEATH_MELEE")
+      return U.L("DEATH_UNKNOWN_ATTACK")
     end
     return spell
   end
@@ -323,15 +326,32 @@ local function MirrorTimerToSpell(timer)
   return nil
 end
 
-local function OnMirrorTimerStart(timer)
+local function OnMirrorTimerStart(timer, value, _, scale, paused)
   local spell = MirrorTimerToSpell(timer)
-  if spell then CacheEnvHint(spell) end
+  if not spell then return end
+  if type(issecretvalue) == "function" and (issecretvalue(value) or issecretvalue(scale) or issecretvalue(paused)) then return end
+  -- A visible breath bar is not drowning damage. Only a depleted, running
+  -- timer is even a hint; it never establishes a killing blow by itself.
+  if type(value) == "number" and value <= 0 and type(scale) == "number" and scale < 0
+    and (paused == nil or paused == false or paused == 0) then
+    CacheEnvHint(spell)
+  elseif envHint.spell == spell then
+    envHint.spell, envHint.t = nil, 0
+  end
+end
+
+local function OnMirrorTimerStop(timer)
+  if envHint.spell == MirrorTimerToSpell(timer) then
+    envHint.spell, envHint.t = nil, 0
+  end
 end
 
 local function PollFalling()
   if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then return end
   if IsFalling and IsFalling() then
     CacheEnvHint(U.L("DEATH_ENV_FALL"))
+  elseif envHint.spell == U.L("DEATH_ENV_FALL") then
+    envHint.spell, envHint.t = nil, 0
   end
 end
 
@@ -359,43 +379,57 @@ local function UnitKillerName(unit)
   return U.NormalizeName(name)
 end
 
+local function Plain(v)
+  if type(issecretvalue) == "function" and issecretvalue(v) then return nil end
+  return v
+end
+
 -- Fetch Death Recap event tables (Forever: CLEU off, Recap often still works).
 local function FetchRecapEvents()
-  local events, src
   if C_DeathRecap and type(C_DeathRecap.GetRecapEvents) == "function" then
-    local ok, res = pcall(function() return C_DeathRecap.GetRecapEvents() end)
-    if ok and res ~= nil then
-      events, src = res, "C_DeathRecap.GetRecapEvents"
-    end
-    if events == nil then
-      local ok2, res2 = pcall(function() return C_DeathRecap.GetRecapEvents(1) end)
-      if ok2 and res2 ~= nil then
-        events, src = res2, "C_DeathRecap.GetRecapEvents(1)"
-      end
+    local ok, events = pcall(C_DeathRecap.GetRecapEvents)
+    events = ok and Plain(events) or nil
+    if type(events) == "table" and #events > 0 then
+      return events, "C_DeathRecap.GetRecapEvents"
     end
   end
-  if events == nil and type(DeathRecap_GetEvents) == "function" then
-    local ok, res = pcall(function() return DeathRecap_GetEvents() end)
-    if ok and res ~= nil then
-      events, src = res, "DeathRecap_GetEvents"
-    end
-    if events == nil then
-      local ok2, res2 = pcall(function() return DeathRecap_GetEvents(1) end)
-      if ok2 and res2 ~= nil then
-        events, src = res2, "DeathRecap_GetEvents(1)"
-      end
+  if type(DeathRecap_GetEvents) == "function" then
+    local ok, events = pcall(DeathRecap_GetEvents)
+    events = ok and Plain(events) or nil
+    if type(events) == "table" and #events > 0 then
+      return events, "DeathRecap_GetEvents"
     end
   end
-  return events, src
+  -- ID 1 can describe a historical death. Never substitute it for the current
+  -- default recap, which may still be unavailable on the PLAYER_DEAD frame.
+  return nil
+end
+
+local function PlainNumber(v)
+  v = Plain(v)
+  if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return nil end
+  return v
+end
+
+local function PlainName(v)
+  v = Plain(v)
+  if type(v) ~= "string" then return nil end
+  v = v:match("^%s*(.-)%s*$")
+  return v ~= "" and v or nil
 end
 
 local function RecapEventFields(ev)
   return {
-    event = ev.event or ev[2],
-    sourceName = ev.sourceName or ev[5],
-    sourceGUID = ev.sourceGUID or ev[4],
-    spellName = ev.spellName,
-    environmentalType = ev.environmentalType or ev.envType,
+    event = PlainName(Plain(ev.event) or Plain(ev[2])),
+    sourceName = PlainName(Plain(ev.sourceName) or Plain(ev[5])),
+    sourceGUID = PlainName(Plain(ev.sourceGUID) or Plain(ev[4])),
+    spellName = PlainName(ev.spellName),
+    spellId = PlainNumber(Plain(ev.spellId) or Plain(ev.spellID)),
+    environmentalType = Plain(Plain(ev.environmentalType) or Plain(ev.envType)),
+    timestamp = PlainNumber(ev.timestamp),
+    overkill = PlainNumber(ev.overkill),
+    amount = PlainNumber(ev.amount),
+    currentHP = PlainNumber(ev.currentHP),
   }
 end
 
@@ -403,40 +437,50 @@ local function IsRecapDamageEvent(evName)
   evName = tostring(evName or "")
   if evName == "" then return false end
   if evName == "ENVIRONMENTAL_DAMAGE" then return true end
-  return evName:find("DAMAGE", 1, true) ~= nil or evName:find("MISSED", 1, true) ~= nil
+  return evName:match("_DAMAGE$") ~= nil or evName == "DAMAGE_SHIELD" or evName == "DAMAGE_SPLIT"
 end
 
 local function SpellFromRecap(f)
-  if type(f.spellName) == "string" and f.spellName ~= "" then
-    return f.spellName
-  end
   local evName = tostring(f.event or "")
   if evName == "ENVIRONMENTAL_DAMAGE" then
     return EnvLabelFromType(f.environmentalType)
   end
-  return U.L("DEATH_MELEE")
+  if evName == "SWING_DAMAGE" then return U.L("DEATH_MELEE") end
+  if f.spellName then return f.spellName end
+  if f.spellId then
+    if C_Spell and type(C_Spell.GetSpellInfo) == "function" then
+      local ok, info = pcall(C_Spell.GetSpellInfo, f.spellId)
+      info = ok and Plain(info) or nil
+      local name = type(info) == "table" and PlainName(info.name)
+      if name then return name end
+    end
+    if type(GetSpellInfo) == "function" then
+      local ok, name = pcall(GetSpellInfo, f.spellId)
+      name = ok and PlainName(name) or nil
+      if name then return name end
+    end
+  end
+  return U.L(evName == "RANGE_DAMAGE" and "DEATH_RANGED" or "DEATH_UNKNOWN_ATTACK")
 end
 
 -- Pure mapping: Recap event list -> attribution (testable without WoW APIs).
 -- Player-* GUID is reliable (Wanted + toast). Creature/Vehicle/Pet = mob toast only.
 local function AttributionFromRecapEvents(events)
+  events = Plain(events)
   if type(events) ~= "table" then return nil end
   local pick
-  for i = #events, 1, -1 do
-    local ev = events[i]
+  -- Blizzard's recap marks its first entry as causedDeath. Explicit lethal
+  -- fields and timestamps also support clients returning a different order.
+  for i = 1, #events do
+    local ev = Plain(events[i])
     if type(ev) == "table" then
       local f = RecapEventFields(ev)
-      local name = f.sourceName
-      if type(name) == "string" then
-        name = name:match("^%s*(.-)%s*$")
-        if name == "" then name = nil end
-      else
-        name = nil
-      end
-      f.sourceName = name
-      if IsRecapDamageEvent(f.event) or name then
-        pick = f
-        if IsRecapDamageEvent(f.event) then break end
+      if IsRecapDamageEvent(f.event) and (f.amount == nil or f.amount > 0) then
+        f.lethal = (f.overkill ~= nil and f.overkill >= 0) or (f.currentHP ~= nil and f.currentHP <= 0)
+        if not pick or (f.lethal and not pick.lethal)
+          or (f.lethal == pick.lethal and f.timestamp and pick.timestamp and f.timestamp > pick.timestamp) then
+          pick = f
+        end
       end
     end
   end
@@ -446,6 +490,24 @@ local function AttributionFromRecapEvents(events)
   local name = pick.sourceName
   local spell = SpellFromRecap(pick)
 
+  -- A recap containing only explicitly nonlethal hits is incomplete. Its last
+  -- known attacker is a suspect, not a killing-blow source for toast or Wanted.
+  if not pick.lethal and pick.overkill ~= nil and pick.overkill < 0 then
+    return {
+      killer = U.L("UNKNOWN_KILLER"), isPlayer = false, cause = "unknown",
+      spell = "", reliable = false, source = "recap", suspect = name,
+      lethal = false, timestamp = pick.timestamp,
+    }
+  end
+
+  if pick.event == "ENVIRONMENTAL_DAMAGE" then
+    return {
+      killer = U.L("UNKNOWN_KILLER"), isPlayer = false, cause = "env",
+      spell = spell, reliable = false, source = "recap",
+      lethal = pick.lethal, timestamp = pick.timestamp,
+    }
+  end
+
   if guid:find("^Player%-") and name then
     return {
       killer = name,
@@ -454,6 +516,8 @@ local function AttributionFromRecapEvents(events)
       spell = SpellForCause("player", spell),
       reliable = true,
       source = "recap",
+      lethal = pick.lethal,
+      timestamp = pick.timestamp,
     }
   end
 
@@ -465,40 +529,42 @@ local function AttributionFromRecapEvents(events)
       spell = SpellForCause("mob", spell),
       reliable = false,
       source = "recap",
+      lethal = pick.lethal,
+      timestamp = pick.timestamp,
     }
   end
 
-  local evName = tostring(pick.event or "")
-  if evName == "ENVIRONMENTAL_DAMAGE" or not name then
-    return {
-      killer = U.L("UNKNOWN_KILLER"),
-      isPlayer = false,
-      cause = "env",
-      spell = spell,
-      reliable = false,
-      source = "recap",
-    }
-  end
-
-  -- Named source, unclear GUID: toast as mob, never Wanted.
+  -- An incomplete identity does not prove either a mob or an environmental kill.
   return {
-    killer = name,
+    killer = U.L("UNKNOWN_KILLER"),
     isPlayer = false,
-    cause = "mob",
-    spell = SpellForCause("mob", spell),
+    cause = "unknown",
+    spell = "",
     reliable = false,
     source = "recap",
+    suspect = name,
+    lethal = pick.lethal,
+    timestamp = pick.timestamp,
   }
 end
 
-local function ReadRecapAttribution()
-  return AttributionFromRecapEvents(FetchRecapEvents())
+local function ReadRecapAttribution(deathWall)
+  local info = AttributionFromRecapEvents(FetchRecapEvents())
+  if not info then return nil end
+  -- Known epoch timestamps must match this death. Relative-time client formats
+  -- are not compared to a different clock domain.
+  deathWall = deathWall or U.WallTime()
+  if info.timestamp and info.timestamp >= 1000000000 and deathWall >= 1000000000
+    and (info.timestamp < deathWall - 2 or info.timestamp > deathWall + 2) then
+    return nil
+  end
+  return info
 end
 
 -- reliable = CLEU lastHit or Death Recap with Player-* GUID.
 -- Target / unit-token guesses are never reliable: target switches, DoTs, pets,
 -- NPC and environment deaths would blame whoever happens to be targeted.
-local function ResolveDeath()
+local function ResolveDeath(deathWall)
   if lastHit.t > 0 and (U.Now() - lastHit.t) < 15 then
     local cause = lastHit.cause or (lastHit.isPlayer and "player" or "mob")
     return {
@@ -512,54 +578,43 @@ local function ResolveDeath()
   end
 
   -- Forever (no CLEU): Death Recap is the honest killer source for toast + Wanted.
-  local recap = ReadRecapAttribution()
+  local hint = FreshEnvHint()
+  local recap = ReadRecapAttribution(deathWall)
   if recap then
-    return recap
+    -- A recent fall/depleted timer can contradict an incomplete recap, but is
+    -- never sufficient to override an explicitly lethal mob/player hit.
+    if not hint or recap.lethal or recap.cause == "env" then return recap end
+    return {
+      killer = U.L("UNKNOWN_KILLER"), isPlayer = false, cause = "unknown",
+      spell = "", reliable = false, source = "hint", envHint = hint,
+    }
   end
 
   -- Unit tokens: hostile player is a suspect only — never counted / named as killer.
   if UnitAffectingCombat("player") then
     for _, unit in ipairs({ "attacking", "target" }) do
       if UnitExists(unit) and (unit == "attacking" or (UnitCanAttack and UnitCanAttack("player", unit))) then
-        if UnitIsPlayer(unit) then
-          return {
-            killer = U.L("UNKNOWN_KILLER"),
-            isPlayer = false,
-            cause = "unknown",
-            spell = "",
-            reliable = false,
-            suspect = UnitKillerName(unit),
-            source = "unit",
-          }
-        end
         return {
-          killer = UnitKillerName(unit) or U.L("UNKNOWN_KILLER"),
+          killer = U.L("UNKNOWN_KILLER"),
           isPlayer = false,
-          cause = "mob",
-          spell = U.L("DEATH_MELEE"),
+          cause = "unknown",
+          spell = "",
           reliable = false,
+          suspect = UnitKillerName(unit),
+          envHint = hint,
           source = "unit",
         }
       end
     end
   end
 
-  local hint = FreshEnvHint()
-  if hint then
-    return {
-      killer = U.L("UNKNOWN_KILLER"),
-      isPlayer = false,
-      cause = "env",
-      spell = hint,
-      source = "hint",
-    }
-  end
-
   return {
     killer = U.L("UNKNOWN_KILLER"),
     isPlayer = false,
-    cause = "env",
-    spell = U.L("DEATH_CAUSE_ENV"),
+    cause = "unknown",
+    spell = "",
+    reliable = false,
+    envHint = hint,
     source = "fallback",
   }
 end
@@ -820,12 +875,20 @@ local function SnapshotDeath(info, ctx, zone, verdict)
   })
 end
 
-function Death:BroadcastLocalDeath()
-  local info = ResolveDeath()
-  local ctx = DeathContext()
-  local zone = GetZoneText and GetZoneText() or ""
-  local mapId = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or 0
-  local cause = info.cause or "env"
+local function CaptureDeathContext()
+  return {
+    ctx = DeathContext(),
+    zone = GetZoneText and GetZoneText() or "",
+    mapId = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or 0,
+    wallTime = U.WallTime(),
+  }
+end
+
+function Death:BroadcastLocalDeath(info, snapshot)
+  snapshot = snapshot or CaptureDeathContext()
+  info = info or ResolveDeath(snapshot.wallTime)
+  local ctx, zone, mapId = snapshot.ctx, snapshot.zone, snapshot.mapId
+  local cause = info.cause or "unknown"
   local spell = SpellForCause(cause, info.spell)
   local me = U.ShortName(U.PlayerName())
 
@@ -870,6 +933,38 @@ function Death:BroadcastLocalDeath()
     Sanitize(cause),
     Sanitize(spell)
   ), "kill", "death")
+end
+
+local function CancelPendingDeath()
+  deathSerial = deathSerial + 1
+  if resolveTimer then resolveTimer:Cancel() resolveTimer = nil end
+end
+
+local function ClearDeathEvidence()
+  lastHit.t = 0
+  envHint.spell, envHint.t = nil, 0
+end
+
+local function QueueLocalDeath()
+  CancelPendingDeath()
+  local serial = deathSerial
+  local snapshot = CaptureDeathContext()
+  local delays = { 0.15, 0.35, 0.5 }
+  local attempt = 0
+  local function TryResolve()
+    resolveTimer = nil
+    if serial ~= deathSerial or not Death.enabled then return end
+    if attempt > 0 and UnitIsDeadOrGhost and not UnitIsDeadOrGhost("player") then return end
+    local info = ResolveDeath(snapshot.wallTime)
+    if info.source == "cleu" or (info.source == "recap" and info.cause ~= "unknown") or attempt == #delays then
+      Death:BroadcastLocalDeath(info, snapshot)
+      ClearDeathEvidence()
+      return
+    end
+    attempt = attempt + 1
+    resolveTimer = C_Timer.NewTimer(delays[attempt], TryResolve)
+  end
+  TryResolve()
 end
 
 Death.ResolveDeath = ResolveDeath
@@ -994,16 +1089,32 @@ function Death:OnEnable()
   self._eventFrame = f
   -- Forever: CLEU RegisterEvent -> ADDON_ACTION_FORBIDDEN — skip CLEU.
   U.SafeRegisterEvent(f, "PLAYER_DEAD")
+  U.SafeRegisterEvent(f, "PLAYER_ALIVE")
+  U.SafeRegisterEvent(f, "PLAYER_UNGHOST")
   U.SafeRegisterEvent(f, "MIRROR_TIMER_START")
+  U.SafeRegisterEvent(f, "MIRROR_TIMER_STOP")
+  U.SafeRegisterEvent(f, "MIRROR_TIMER_PAUSE")
   U.SafeRegisterEvent(f, "DUEL_REQUESTED")
   U.SafeRegisterEvent(f, "DUEL_FINISHED")
   U.SafeRegisterEvent(f, "DUEL_TO_THE_DEATH_REQUESTED")
   U.SafeRegisterEvent(f, "PLAYER_REGEN_ENABLED")
   f:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_DEAD" then
-      Death:BroadcastLocalDeath()
+      QueueLocalDeath()
+    elseif event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
+      -- PLAYER_ALIVE also accompanies releasing spirit. Ghosts are still dead
+      -- and must retain the pending report until the recap/retry completes.
+      if event == "PLAYER_UNGHOST" or not UnitIsDeadOrGhost or not UnitIsDeadOrGhost("player") then
+        CancelPendingDeath()
+        ClearDeathEvidence()
+      end
     elseif event == "MIRROR_TIMER_START" then
       OnMirrorTimerStart(...)
+    elseif event == "MIRROR_TIMER_STOP" then
+      OnMirrorTimerStop(...)
+    elseif event == "MIRROR_TIMER_PAUSE" then
+      local timer, paused = ...
+      if paused and paused ~= 0 then OnMirrorTimerStop(timer) end
     elseif event == "DUEL_REQUESTED" or event == "DUEL_TO_THE_DEATH_REQUESTED" then
       Death._inDuel = true
     elseif event == "DUEL_FINISHED" then
@@ -1028,6 +1139,8 @@ end
 function Death:OnDisable()
   if not self.enabled then return end
   self.enabled = false
+  CancelPendingDeath()
+  ClearDeathEvidence()
   if layoutEdit then
     self:EndLayoutEdit()
     if GR.ToastQueue and GR.ToastQueue.Resume then GR.ToastQueue.Resume() end

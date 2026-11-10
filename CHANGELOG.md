@@ -1,5 +1,11 @@
 # AngryMurlocs Changelog
 
+## 0.11.0
+
+- Death toast: prefer lethal Recap hits; unknown instead of guessed mob/env
+- Death: short Recap retry; no historical ID-1 fallback; empty-zone DEATH wire fix
+- Guild peer version nag in chat (update via CurseForge)
+
 ## 0.10.1
 
 - Main window closes when you enter combat

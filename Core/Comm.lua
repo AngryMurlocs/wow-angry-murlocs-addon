@@ -28,6 +28,10 @@ local lastSweep = 0
 local lastSendAt = -SEND_INTERVAL
 local drainTicker
 local queue = GR.SendQueue.New()
+-- Session-only: guild peer version nag (no SavedVariables).
+local versionAnnounceSent = false
+local versionNagPrinted = false
+local bestPeerVersion = nil
 
 local VALID_CLASS = {
   WARRIOR = true, PALADIN = true, HUNTER = true, ROGUE = true, PRIEST = true,
@@ -236,6 +240,35 @@ function Comm:Peers(window)
   return n, v2, newest
 end
 
+-- Broadcast own addon SemVer once per session (guild only). No reply storm.
+function Comm:AnnounceVersion()
+  if versionAnnounceSent then return false end
+  local ver = tostring(GR.VERSION or "")
+  if not U.ParseAddonVersion(ver) then return false end
+  -- Wire: digits and dots only; strip accidental junk after parse rebuild.
+  local p = U.ParseAddonVersion(ver)
+  ver = string.format("%d.%d.%d", p[1], p[2], p[3])
+  if not Comm:Send("VER|" .. ver, "ctrl", "misc") then return false end
+  versionAnnounceSent = true
+  return true
+end
+
+local function NotePeerVersion(ver)
+  ver = tostring(ver or ""):match("^%s*([^|%s]+)")
+  local parsed = ver and U.ParseAddonVersion(ver)
+  if not parsed then return end
+  ver = string.format("%d.%d.%d", parsed[1], parsed[2], parsed[3])
+  if not bestPeerVersion or (U.CompareAddonVersion(ver, bestPeerVersion) or 0) > 0 then
+    bestPeerVersion = ver
+  end
+  if versionNagPrinted then return end
+  local cmp = U.CompareAddonVersion(bestPeerVersion, GR.VERSION)
+  if cmp and cmp > 0 then
+    versionNagPrinted = true
+    U.Print(string.format(U.L("UPDATE_AVAILABLE"), bestPeerVersion, tostring(GR.VERSION)))
+  end
+end
+
 -- Seconds since last addon message from this character (CharKey match), or nil.
 function Comm:PeerAge(name)
   if not name or name == "" then return nil end
@@ -372,7 +405,7 @@ local function DispatchParsed(tag, rest, sender)
     Count("recv_PROFRM")
     GR:SendMessage("PROF_RECIPE_META_UPDATE", sender, entries)
   elseif tag == "DEATH" then
-    local parts = U.Split(rest, "|")
+    local parts = U.SplitKeepEmpty(rest, "|")
     local cause = parts[5]
     if cause ~= "player" and cause ~= "mob" and cause ~= "env" and cause ~= "unknown" then
       cause = (tonumber(parts[2]) == 1) and "player" or "mob"
@@ -411,6 +444,10 @@ local function DispatchParsed(tag, rest, sender)
       ts = ts,
       fromRemote = true,
     })
+  elseif tag == "VER" then
+    -- Peer addon version; no privacy payload. Older clients ignore unknown tags.
+    local ver = U.SplitKeepEmpty(rest, "|")[1]
+    NotePeerVersion(ver)
   end
   -- Unknown tags (incl. legacy MAIN/CRAFT) ignored for mixed clients
 end
@@ -502,6 +539,7 @@ function Comm:OnGuildLeft()
   wipe(peers)
   wipe(rateBuckets)
   wipe(fragBuf)
+  versionAnnounceSent = false
   if drainTicker then
     drainTicker:Cancel()
     drainTicker = nil
