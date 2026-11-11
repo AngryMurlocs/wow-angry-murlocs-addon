@@ -1,0 +1,49 @@
+# Merge requests only. Nothing runs on main or on tags: a new tag is pushed by
+# hand after the user's go, and CurseForge packages it from the GitHub mirror.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+stages:
+  - test
+
+.luajit:
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache luajit git >/dev/null
+
+# All pure Lua tests, including the version check (Tests/Version_test.lua)
+test:lua:
+  extends: .luajit
+  stage: test
+  script:
+    - luajit Tests/run_all.lua
+
+# English conventional title, so the history stays readable
+test:mr-title:
+  stage: test
+  image: alpine:3.20
+  script:
+    - |
+      if ! printf '%s' "$CI_MERGE_REQUEST_TITLE" | grep -Eq '^(feat|fix|change|remove|release|docs|chore|ci|test|refactor)(\([a-z0-9-]+\))?!?: .+'; then
+        echo "MR title must look like 'feat: Text', 'fix(wanted): Text' or 'release: 0.12.0', got: $CI_MERGE_REQUEST_TITLE"
+        exit 1
+      fi
+
+# Release MRs ("release: X.Y.Z"): title, all four version places and the
+# CHANGELOG top section agree, no Unreleased section is left, the tag is free.
+test:release:
+  extends: .luajit
+  stage: test
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /^release(\(.+\))?!?:/
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - luajit Tests/Version_test.lua release
+    - VERSION=$(sed -n 's/^## Version:[[:space:]]*//p' AngryMurlocs.toc | tr -d '\r')
+    - TITLE_VERSION=$(printf '%s' "$CI_MERGE_REQUEST_TITLE" | sed -E 's/^release(\([^)]*\))?!?:[[:space:]]*v?//')
+    - echo "toc $VERSION, MR title $TITLE_VERSION"
+    - test "$VERSION" = "$TITLE_VERSION" || { echo "MR title must be 'release: $VERSION'"; exit 1; }
+    - git fetch --tags --quiet origin
+    - if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "Tag v$VERSION already exists"; exit 1; fi
