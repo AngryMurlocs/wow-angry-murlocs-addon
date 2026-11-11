@@ -26,15 +26,38 @@ local MAX_META_REQ_IDS = 24
 local MAX_META_NAME = 64
 local MAX_META_REAGENTS = 12
 local META_WIRE_VER = 1
+local META_MAX_ATTEMPTS = 3
+local META_BUDGET_SEC = 90
+-- Must fit 3 attempts inside META_BUDGET_SEC (spacing ≈ expire, with send CD 20).
+local META_PENDING_EXPIRE = 25
 local CHAT_SOFT_LIMIT = 240
+local REFRESH_MIN_COLLECT = 6
+local REFRESH_QUIET = 2.5
+local REFRESH_MAX = 14
+local REFRESH_SUMMARY_HOLD = 8
+local SCAN_INITIAL_DELAY = 0.5
+local SCAN_RETRY_DELAY = 0.8
+local SCAN_MAX_EXTRA = 2
 local INDEX_CACHE = nil
 local INDEX_CACHE_SCOPE = nil
 local INDEX_CACHE_GEN = 0
 local lastMetaReqSend = 0
 local lastMetaReqReply = 0
 local pendingMetaReq = {} -- id -> expireAt
+local metaQueue = {} -- ordered recipe IDs awaiting peer request
+local metaQueueSet = {} -- id -> true
+local metaAttempt = {} -- id -> { n = attemptsSent, firstSentAt = number|nil }
+local metaGiveUp = {} -- id -> true (session)
+local metaDrainGen = 0
+local metaDrainScheduled = false
 local recipeRefreshBusyUntil = 0
 local recipeRefreshWhy = nil
+local recipeRefreshGen = 0
+local recipeRefreshSession = nil -- active settle session
+local recipeRefreshSummary = nil -- sticky UI summary after settle
+local scanOps = {} -- profKey -> { gen, triesLeft, open }
+local pendingLearn = {} -- recipeId -> profKey or true
+local pendingLearnGen = 0
 
 local GATHERING_KEYS = {
   herb = true,
@@ -46,7 +69,7 @@ local GATHERING_KEYS = {
 
 local lastReqSend = 0
 local lastReqReply = 0
-local lastSent = {} -- profKey -> encoded body (without tag)
+local lastSentFp = {} -- profKey -> content fingerprint (excludes scanAt)
 
 local function ProfMod()
   return GR:GetModule("Professions")
@@ -345,10 +368,24 @@ function ProfRecipes.StoreMeta(recipeId, info)
   if not recipeId then return end
   local prev = meta[recipeId] or {}
   local reagents = info.reagents
-  if type(reagents) == "table" and #reagents == 0 and type(prev.reagents) == "table" and #prev.reagents > 0 then
+  if type(reagents) == "table" and #reagents == 0 and type(prev.reagents) == "table" and #prev.reagents > 0
+      and info.reagentsResolved ~= true then
     reagents = prev.reagents
   elseif reagents == nil then
     reagents = prev.reagents
+  end
+  local reagentsResolved = prev.reagentsResolved == true
+  if info.reagentsResolved == true then
+    reagentsResolved = true
+  elseif info.reagentsResolved == false then
+    -- explicit false only if we never confirmed before
+    if not reagentsResolved then
+      reagentsResolved = false
+    end
+  end
+  -- Non-empty reagent list from any source confirms materials.
+  if type(reagents) == "table" and #reagents > 0 then
+    reagentsResolved = true
   end
   meta[recipeId] = {
     name = PickMetaField(info.name, prev.name),
@@ -358,10 +395,33 @@ function ProfRecipes.StoreMeta(recipeId, info)
     outputItemID = info.outputItemID ~= nil and info.outputItemID or prev.outputItemID,
     recipeType = PickMetaField(info.recipeType, prev.recipeType),
     reagents = reagents,
+    reagentsResolved = reagentsResolved and true or nil,
     hyperlink = PickMetaField(info.hyperlink, prev.hyperlink),
     isEnchant = info.isEnchant ~= nil and info.isEnchant or prev.isEnchant,
     locale = PickMetaField(info.locale, prev.locale),
   }
+end
+
+-- Local completeness: name + confirmed reagents (empty OK only with reagentsResolved).
+function ProfRecipes.IsMetaComplete(meta)
+  if type(meta) ~= "table" then return false end
+  if not meta.name or meta.name == "" then return false end
+  if meta.reagentsResolved ~= true then return false end
+  return true
+end
+
+-- Content fingerprint for send dedup (excludes scanAt).
+function ProfRecipes.ContentFingerprint(profKey, ids, complete, epoch)
+  ids = SortIds(ids or {})
+  local parts = {}
+  for i = 1, #ids do parts[i] = tostring(ids[i]) end
+  return string.format(
+    "%s|%d|%s|%s",
+    tostring(profKey or ""),
+    complete and 1 or 0,
+    tostring(tonumber(epoch) or 0),
+    table.concat(parts, "+")
+  )
 end
 
 local function SkillForPlayer(playerName, profKey)
@@ -902,7 +962,8 @@ function ProfRecipes.ResolveRecipeIcon(recipeId, recipeInfo, schematic)
   return icon or QUESTION_ICON, outputItemID
 end
 
-local function CaptureMeta(recipeId, recipeInfo, schematic)
+local function CaptureMeta(recipeId, recipeInfo, schematic, opts)
+  opts = opts or {}
   local isEnchant = false
   if recipeInfo then
     isEnchant = recipeInfo.isEnchantingRecipe and true or false
@@ -915,6 +976,8 @@ local function CaptureMeta(recipeId, recipeInfo, schematic)
   if not outputItemID and schematic then
     outputItemID = schematic.outputItemID
   end
+  -- reagentsResolved only when schematic was successfully inspected (incl. confirmed empty).
+  local reagentsResolved = opts.schematicOk == true
   ProfRecipes.StoreMeta(recipeId, {
     name = (schematic and schematic.name) or (recipeInfo and recipeInfo.name),
     icon = icon,
@@ -923,6 +986,7 @@ local function CaptureMeta(recipeId, recipeInfo, schematic)
     outputItemID = outputItemID,
     recipeType = recipeType,
     reagents = ReagentListFromSchematic(schematic),
+    reagentsResolved = reagentsResolved,
     hyperlink = recipeInfo and recipeInfo.hyperlink,
     isEnchant = isEnchant,
   })
@@ -1344,6 +1408,49 @@ function ProfRecipes.ScanOpenTradeSkill(ctx)
   return ids, true, usedFiltered and "ok_filtered" or "ok"
 end
 
+local function ClearPendingLearnForCatalog(profKey, ids, complete)
+  if not complete or not profKey then return end
+  local have = {}
+  for i = 1, #(ids or {}) do
+    local id = tonumber(ids[i])
+    if id then have[id] = true end
+  end
+  for id, key in pairs(pendingLearn) do
+    if (key == true or key == profKey) and have[id] then
+      pendingLearn[id] = nil
+    end
+  end
+end
+
+local function PendingLearnMissing(profKey, ids)
+  local have = {}
+  for i = 1, #(ids or {}) do
+    local id = tonumber(ids[i])
+    if id then have[id] = true end
+  end
+  for id, key in pairs(pendingLearn) do
+    if (key == true or key == profKey) and not have[id] then
+      return true
+    end
+  end
+  return false
+end
+
+function ProfRecipes.NotePendingLearn(recipeId, profKey)
+  recipeId = tonumber(recipeId)
+  if not recipeId or recipeId <= 0 then return end
+  pendingLearn[recipeId] = profKey or true
+end
+
+function ProfRecipes.HasPendingLearn(recipeId)
+  recipeId = tonumber(recipeId)
+  return recipeId and pendingLearn[recipeId] ~= nil
+end
+
+function ProfRecipes.IsConfirmedCompleteWhy(why)
+  return why == "ok" or why == "ok_filtered" or why == "ok_empty" or why == "gathering"
+end
+
 function ProfRecipes:ApplyLocalScan(profKey, ids, complete, opts)
   if not profKey or ProfRecipes.IsGathering(profKey) then return end
   opts = opts or {}
@@ -1351,36 +1458,58 @@ function ProfRecipes:ApplyLocalScan(profKey, ids, complete, opts)
   if complete and (not ids or #ids == 0) and not opts.allowEmptyComplete then
     complete = false
   end
+  local prev = ProfRecipes.GetEntry(U.NormalizeName(U.PlayerName()), profKey)
+  local prevComplete = prev and prev.complete and not prev.partialSeenAt
+  local prevIds = prev and prev.ids
+  local contentChanged = not prev
+      or (prevComplete ~= (complete and true or false))
+      or not ProfRecipes.IdsEqual(prevIds, ids or {})
+  local firstCapture = complete and (not prevComplete)
   local entry = SetSelfRecipes(profKey, ids or {}, complete and true or false, U.WallTime())
-  GR:SendMessage("PROF_RECIPES_CHANGED", U.NormalizeName(U.PlayerName()), profKey)
-  -- Force guild push after any successful complete scan with recipes.
-  if complete and ids and #ids > 0 then
-    self:BroadcastProfession(profKey, true)
+  if complete then
+    ClearPendingLearnForCatalog(profKey, ids or {}, true)
   end
-  return entry
+  GR:SendMessage("PROF_RECIPES_CHANGED", U.NormalizeName(U.PlayerName()), profKey)
+  if complete and ids and #ids > 0 and not opts.skipBroadcast then
+    self:BroadcastProfession(profKey, false)
+  end
+  -- Chat confirm only on first complete capture or real content change (not every list event).
+  -- Manual refresh with unchanged data is handled by ProfRecipePanel refresh messages.
+  if complete and (firstCapture or contentChanged) then
+    if ids and #ids > 0 then
+      U.Print(string.format(U.L("PROF_RECIPE_CAPTURED"), #ids))
+    elseif opts.allowEmptyComplete and (firstCapture or contentChanged) then
+      U.Print(U.L("PROF_RECIPE_REFRESH_OK_EMPTY"))
+    end
+  end
+  return entry, contentChanged, firstCapture
 end
 
-local function ApplyScanResult(self, profKey, ids, complete, why)
-  if ids == nil then return false, why end
+local function ApplyScanResult(self, profKey, ids, complete, why, opts)
+  opts = opts or {}
+  if ids == nil then return false, why, profKey, false end
   if complete and #ids == 0 and why ~= "gathering" and why ~= "ok_empty" then
-    return false, "empty_suspect"
+    return false, "empty_suspect", profKey, false
   end
   self:ApplyLocalScan(profKey, ids, complete, {
     allowEmptyComplete = (why == "ok_empty" or why == "gathering"),
+    skipBroadcast = opts.skipBroadcast,
+    manualRefresh = opts.manualRefresh,
   })
-  return true, why, profKey
+  local confirmed = complete and ProfRecipes.IsConfirmedCompleteWhy(why)
+  return true, why, profKey, confirmed
 end
 
 -- Scan currently open trade skill (event path).
-function ProfRecipes:ScanAndStore()
+function ProfRecipes:ScanAndStore(opts)
   local ctx = CurrentProfessionContext()
   if not ctx then return false, "no_ctx" end
   local ids, complete, why = ProfRecipes.ScanOpenTradeSkill(ctx)
-  return ApplyScanResult(self, ctx.profKey, ids, complete, why)
+  return ApplyScanResult(self, ctx.profKey, ids, complete, why, opts)
 end
 
 -- Scan a specific profession key (catalog refresh). Prefer open-window filtered list.
-function ProfRecipes:ScanProfession(profKey)
+function ProfRecipes:ScanProfession(profKey, opts)
   if not profKey then return false, "no_key" end
   if ProfRecipes.IsGathering(profKey) then
     return false, "gathering"
@@ -1397,7 +1526,7 @@ function ProfRecipes:ScanProfession(profKey)
     return false, "wrong_prof"
   end
   local ids, complete, why = ProfRecipes.ScanOpenTradeSkill(ctx)
-  return ApplyScanResult(self, profKey, ids, complete, why)
+  return ApplyScanResult(self, profKey, ids, complete, why, opts)
 end
 
 function ProfRecipes:BroadcastProfession(profKey, force)
@@ -1411,10 +1540,13 @@ function ProfRecipes:BroadcastProfession(profKey, force)
   local epoch = tonumber(rec.epoch) or ProfRecipes.EnsureOwnerEpoch()
   local encoded = ProfRecipes.Encode(profKey, rec.rev, rec.scanAt, true, rec.ids, epoch)
   if not encoded then return end
-  if not force and lastSent[profKey] == encoded then return end
+  local fp = ProfRecipes.ContentFingerprint(profKey, rec.ids, true, epoch)
+  if not force and lastSentFp[profKey] == fp then return false, "unchanged" end
   if Comm:Send("PROFR|" .. encoded, "data", "prof") then
-    lastSent[profKey] = encoded
+    lastSentFp[profKey] = fp
+    return true, "sent"
   end
+  return false, "send_fail"
 end
 
 function ProfRecipes:ListCompleteProfessionKeys()
@@ -1509,22 +1641,25 @@ function ProfRecipes:RefreshProfession(profKey, opts)
     return ok, why
   end
 
-  local ok, why = self:ScanProfession(profKey)
+  local scanOpts = { skipBroadcast = true, manualRefresh = true }
+  local ok, why, _, confirmed = self:ScanProfession(profKey, scanOpts)
   if ok then
     if why == "ok_empty" then
       return true, "ok_empty"
     end
-    self:BroadcastProfession(profKey, true)
+    if confirmed and why ~= "ok_empty" then
+      -- One send path for manual refresh (fingerprint-gated).
+      self:BroadcastProfession(profKey, false)
+    end
     return true, why
   end
 
   local function DelayedRescan(delay)
     C_Timer.After(delay or 0.8, function()
       if not ProfRecipes.enabled then return end
-      local ok2, why2 = ProfRecipes:ScanProfession(profKey)
-      if ok2 and why2 ~= "ok_empty" then
-        ProfRecipes:BroadcastProfession(profKey, true)
-        GR:SendMessage("PROF_RECIPES_CHANGED", U.NormalizeName(U.PlayerName()), profKey)
+      local ok2, why2, _, conf2 = ProfRecipes:ScanProfession(profKey, scanOpts)
+      if ok2 and conf2 and why2 ~= "ok_empty" then
+        ProfRecipes:BroadcastProfession(profKey, false)
       end
       GR:SendMessage("PROF_RECIPE_REFRESH_DONE", profKey, ok2, why2 or why)
     end)
@@ -1693,6 +1828,173 @@ function ProfRecipes:TryOpenTradeSkillForKey(profKey)
   return ok and result ~= false
 end
 
+local function AbortScanOps()
+  for key, op in pairs(scanOps) do
+    if op then op.gen = (op.gen or 0) + 1 end
+    scanOps[key] = nil
+  end
+end
+
+local function AbortRefreshSession()
+  recipeRefreshGen = recipeRefreshGen + 1
+  recipeRefreshSession = nil
+  recipeRefreshBusyUntil = 0
+  if recipeRefreshWhy == "requesting" then
+    recipeRefreshWhy = nil
+  end
+end
+
+local function AbortMetaDrain()
+  metaDrainGen = metaDrainGen + 1
+  metaDrainScheduled = false
+end
+
+function ProfRecipes.AbortAllBackgroundWork()
+  AbortScanOps()
+  AbortRefreshSession()
+  AbortMetaDrain()
+  wipe(pendingMetaReq)
+  wipe(metaQueue)
+  wipe(metaQueueSet)
+  wipe(metaAttempt)
+  wipe(metaGiveUp)
+  wipe(pendingLearn)
+end
+
+local INCOMPLETE_SCAN_WHY = {
+  empty_suspect = true,
+  partial_unknown = true,
+  info_unknown = true,
+  spells_fail = true,
+  filters_unverified = true,
+}
+
+local function ScanOpStillOpen(profKey)
+  local open = CurrentProfessionContext()
+  return open and open.profKey == profKey
+end
+
+local function FinishScanOpIfDone(profKey, gen, ok, why, ids, confirmed)
+  local op = scanOps[profKey]
+  if not op or op.gen ~= gen then return end
+  local pendingMissing = PendingLearnMissing(profKey, ids)
+  if confirmed and not pendingMissing then
+    scanOps[profKey] = nil
+    return
+  end
+  if not ScanOpStillOpen(profKey) then
+    scanOps[profKey] = nil
+    return
+  end
+  if (op.triesLeft or 0) <= 0 then
+    scanOps[profKey] = nil
+    return
+  end
+  -- Keep retrying for incomplete OR complete-but-missing-pending.
+  if not ok or INCOMPLETE_SCAN_WHY[why] or (confirmed and pendingMissing) or not confirmed then
+    op.triesLeft = op.triesLeft - 1
+    local nextGen = gen
+    C_Timer.After(SCAN_RETRY_DELAY, function()
+      local cur = scanOps[profKey]
+      if not ProfRecipes.enabled or not cur or cur.gen ~= nextGen then return end
+      if not ScanOpStillOpen(profKey) then
+        scanOps[profKey] = nil
+        return
+      end
+      local ok2, why2, _, conf2 = ProfRecipes:ScanAndStore()
+      local ctx = CurrentProfessionContext()
+      local ids2 = nil
+      if ctx and ctx.profKey == profKey then
+        local rec = ProfRecipes.GetEntry(U.NormalizeName(U.PlayerName()), profKey)
+        ids2 = rec and rec.ids
+      end
+      FinishScanOpIfDone(profKey, nextGen, ok2, why2, ids2, conf2)
+    end)
+    return
+  end
+  scanOps[profKey] = nil
+end
+
+function ProfRecipes:BeginScanOp(profKey, opts)
+  opts = opts or {}
+  if not profKey then return end
+  local prev = scanOps[profKey]
+  local gen = (prev and prev.gen or 0) + 1
+  scanOps[profKey] = {
+    gen = gen,
+    triesLeft = opts.triesLeft or SCAN_MAX_EXTRA,
+  }
+  local delay = opts.delay or SCAN_INITIAL_DELAY
+  C_Timer.After(delay, function()
+    local cur = scanOps[profKey]
+    if not ProfRecipes.enabled or not cur or cur.gen ~= gen then return end
+    if not ScanOpStillOpen(profKey) then
+      scanOps[profKey] = nil
+      return
+    end
+    local ok, why, _, confirmed = ProfRecipes:ScanAndStore()
+    local rec = ProfRecipes.GetEntry(U.NormalizeName(U.PlayerName()), profKey)
+    FinishScanOpIfDone(profKey, gen, ok, why, rec and rec.ids, confirmed)
+  end)
+end
+
+local function NoteRefreshPair(session, sender, profKey)
+  if not session or not sender or not profKey then return end
+  local key = tostring(sender) .. "\0" .. tostring(profKey)
+  if session.pairSet[key] then return end
+  session.pairSet[key] = true
+  session.pairs[#session.pairs + 1] = key
+  if not session.memberSet[sender] then
+    session.memberSet[sender] = true
+    session.nMembers = (session.nMembers or 0) + 1
+  end
+  session.nCats = (session.nCats or 0) + 1
+end
+
+local function ScheduleRefreshSettleCheck(gen)
+  local function tick()
+    local sess = recipeRefreshSession
+    if not sess or sess.gen ~= gen or recipeRefreshWhy ~= "requesting" then return end
+    local now = U.Now()
+    local elapsed = now - sess.startedAt
+    local quiet = (sess.lastRecv > 0) and (now - sess.lastRecv) or 0
+    local have = (sess.nCats or 0) > 0
+    local done = false
+    if elapsed >= REFRESH_MAX then
+      done = true
+    elseif have and elapsed >= REFRESH_MIN_COLLECT and quiet >= REFRESH_QUIET then
+      done = true
+    elseif (not have) and elapsed >= REFRESH_MIN_COLLECT then
+      -- Wait until min; if still nothing by max, finish as no_response via max path.
+      -- At min with no replies: keep waiting until max unless we want early no-response at min.
+      -- Plan: no replies → finish at min (or max). Use min.
+      done = true
+    end
+    if done then
+      if have then
+        ProfRecipes:MarkRecipeRefreshDone("done", {
+          members = sess.nMembers or 0,
+          catalogs = sess.nCats or 0,
+        })
+      else
+        ProfRecipes:MarkRecipeRefreshDone("no_response")
+      end
+      return
+    end
+    local nextIn = 0.5
+    if have then
+      local untilQuiet = REFRESH_QUIET - quiet
+      local untilMin = REFRESH_MIN_COLLECT - elapsed
+      local untilMax = REFRESH_MAX - elapsed
+      nextIn = math.max(0.1, math.min(untilMax, math.max(untilQuiet, untilMin)))
+    else
+      nextIn = math.max(0.1, math.min(REFRESH_MAX - elapsed, REFRESH_MIN_COLLECT - elapsed))
+    end
+    C_Timer.After(nextIn, tick)
+  end
+  C_Timer.After(0.5, tick)
+end
+
 function ProfRecipes:OnEnable()
   if self.enabled then return end
   self.enabled = true
@@ -1700,9 +2002,21 @@ function ProfRecipes:OnEnable()
 
   GR:BindMessage(self, "PROF_RECIPE_UPDATE", function(_, sender, data)
     if U.IsSelfName(sender) then return end
+    local sess = recipeRefreshSession
+    local filterKey = sess and sess.profKey
+    local accept = true
+    if filterKey and filterKey ~= "" and data and data.profKey and data.profKey ~= filterKey then
+      accept = false
+    end
     ProfRecipes:OnRecipeUpdate(sender, data)
-    if recipeRefreshWhy == "requesting" then
-      ProfRecipes:MarkRecipeRefreshDone("done")
+    if accept and recipeRefreshWhy == "requesting" and sess and data and data.profKey and data.complete then
+      -- Count only after accept into cache (OnRecipeUpdate may reject).
+      local entry = Cache()[sender]
+      local rec = entry and entry.recipes and entry.recipes[data.profKey]
+      if rec and rec.complete then
+        NoteRefreshPair(sess, sender, data.profKey)
+        sess.lastRecv = U.Now()
+      end
     end
   end)
 
@@ -1740,7 +2054,8 @@ function ProfRecipes:OnEnable()
   end)
 
   GR:BindMessage(self, "GUILD_UPDATE", function()
-    wipe(lastSent)
+    wipe(lastSentFp)
+    ProfRecipes.AbortAllBackgroundWork()
     -- Derived index must not outlive the active guild scope.
     ProfRecipes.InvalidateGuildRecipeIndex()
   end)
@@ -1751,22 +2066,36 @@ function ProfRecipes:OnEnable()
   U.SafeRegisterEvent(f, "TRADE_SKILL_LIST_UPDATE")
   U.SafeRegisterEvent(f, "TRADE_SKILL_CLOSE")
   U.SafeRegisterEvent(f, "NEW_RECIPE_LEARNED")
-  f:SetScript("OnEvent", function(_, event)
+  f:SetScript("OnEvent", function(_, event, arg1)
     if not ProfRecipes.enabled then return end
-    if event == "TRADE_SKILL_CLOSE" then return end
-    if ProfRecipes._scanDebounce then return end
-    ProfRecipes._scanDebounce = true
-    C_Timer.After(0.5, function()
-      ProfRecipes._scanDebounce = false
-      if not ProfRecipes.enabled then return end
-      ProfRecipes:ScanAndStore()
-    end)
+    if event == "TRADE_SKILL_CLOSE" then
+      AbortScanOps()
+      return
+    end
+    if event == "NEW_RECIPE_LEARNED" then
+      local recipeId = tonumber(arg1)
+      local ctx = CurrentProfessionContext()
+      ProfRecipes.NotePendingLearn(recipeId, ctx and ctx.profKey)
+    end
+    local ctx = CurrentProfessionContext()
+    if not ctx or not ctx.profKey then return end
+    -- Profession switch: bump other ops.
+    for key, op in pairs(scanOps) do
+      if key ~= ctx.profKey and op then
+        op.gen = (op.gen or 0) + 1
+        scanOps[key] = nil
+      end
+    end
+    -- Coalesce into one op per profession.
+    if scanOps[ctx.profKey] then return end
+    ProfRecipes:BeginScanOp(ctx.profKey)
   end)
 end
 
 function ProfRecipes:OnDisable()
   if not self.enabled then return end
   self.enabled = false
+  ProfRecipes.AbortAllBackgroundWork()
   GR:UnbindMessages(self)
   GR:ReleaseEventFrame(self._eventFrame)
   self._eventFrame = nil
@@ -1904,12 +2233,57 @@ function ProfRecipes.DecodeMetaRequest(rest)
   return ids
 end
 
+local function MetaShouldGiveUp(id, now)
+  if metaGiveUp[id] then return true end
+  local att = metaAttempt[id]
+  if not att then return false end
+  if (att.n or 0) >= META_MAX_ATTEMPTS then return true end
+  if att.firstSentAt and (now - att.firstSentAt) >= META_BUDGET_SEC then return true end
+  return false
+end
+
+local function EnqueueMetaIds(ids)
+  for i = 1, #(ids or {}) do
+    local id = tonumber(ids[i])
+    if id and not metaQueueSet[id] and not metaGiveUp[id] and not pendingMetaReq[id] then
+      if #metaQueue >= MAX_RECIPES then
+        break -- drop newest overflow
+      end
+      metaQueue[#metaQueue + 1] = id
+      metaQueueSet[id] = true
+    end
+  end
+end
+
+local function DequeueMetaId(id)
+  if not metaQueueSet[id] then return end
+  metaQueueSet[id] = nil
+  for i = 1, #metaQueue do
+    if metaQueue[i] == id then
+      table.remove(metaQueue, i)
+      break
+    end
+  end
+end
+
+local function ScheduleMetaDrain(delay)
+  if metaDrainScheduled then return end
+  metaDrainScheduled = true
+  local gen = metaDrainGen
+  C_Timer.After(delay or 0.05, function()
+    metaDrainScheduled = false
+    if not ProfRecipes.enabled or gen ~= metaDrainGen then return end
+    ProfRecipes._DrainMetaQueue()
+  end)
+end
+
 -- Resolve metadata for recipe IDs via local client APIs (no knowledge grant).
+-- Returns meta, complete (IsMetaComplete).
 function ProfRecipes.EnsureMetaResolved(recipeId)
   recipeId = tonumber(recipeId)
   if not recipeId or recipeId <= 0 then return nil, false end
   local existing = ProfRecipes.GetMeta(recipeId)
-  if existing and existing.name and existing.name ~= "" then
+  if existing and ProfRecipes.IsMetaComplete(existing) then
     return existing, true
   end
   local api = TS()
@@ -1921,53 +2295,104 @@ function ProfRecipes.EnsureMetaResolved(recipeId)
     return existing, false
   end
   local schematic
+  local schematicOk = false
   if api.GetRecipeSchematic then
     local okSch, sch = pcall(api.GetRecipeSchematic, recipeId, false)
-    if okSch then schematic = sch end
+    if okSch and sch ~= nil then
+      schematic = sch
+      schematicOk = true
+    end
   end
-  CaptureMeta(recipeId, info, schematic)
+  CaptureMeta(recipeId, info, schematic, { schematicOk = schematicOk })
   local meta = ProfRecipes.GetMeta(recipeId)
-  if meta and meta.name and meta.name ~= "" then
-    return meta, true
-  end
-  return meta, false
+  return meta, ProfRecipes.IsMetaComplete(meta)
 end
 
-function ProfRecipes._RequestMetaFromPeers(ids, peerHint)
+function ProfRecipes._DrainMetaQueue()
   if not IsInGuild or not IsInGuild() then return false, "no_guild" end
   if not Comm or not Comm.Send then return false, "no_comm" end
   local now = U.Now()
   if (now - lastMetaReqSend) < PROFRMQ_SEND_CD then
+    ScheduleMetaDrain(PROFRMQ_SEND_CD - (now - lastMetaReqSend) + 0.05)
     return false, "cooldown"
   end
+  -- Expire stale pending markers.
+  for id, exp in pairs(pendingMetaReq) do
+    if exp <= now then pendingMetaReq[id] = nil end
+  end
   local want = {}
-  for i = 1, #(ids or {}) do
-    local id = tonumber(ids[i])
-    if id and not pendingMetaReq[id] then
+  local i = 1
+  while i <= #metaQueue and #want < MAX_META_REQ_IDS do
+    local id = metaQueue[i]
+    local att = metaAttempt[id]
+    if MetaShouldGiveUp(id, now) or (att and (att.n or 0) >= META_MAX_ATTEMPTS) then
+      metaGiveUp[id] = true
+      DequeueMetaId(id)
+      -- do not advance i: remove shifts list
+    elseif pendingMetaReq[id] then
+      i = i + 1
+    else
       want[#want + 1] = id
+      i = i + 1
     end
   end
-  if #want == 0 then return false, "none" end
+  if #want == 0 then
+    if #metaQueue > 0 then
+      ScheduleMetaDrain(PROFRMQ_SEND_CD)
+    end
+    return false, "none"
+  end
   local body = ProfRecipes.EncodeMetaRequest(want)
   if not body then return false, "encode" end
   lastMetaReqSend = now
-  local expire = now + 45
-  for i = 1, #want do
-    pendingMetaReq[want[i]] = expire
+  local expire = now + META_PENDING_EXPIRE
+  for j = 1, #want do
+    local id = want[j]
+    pendingMetaReq[id] = expire
+    local att = metaAttempt[id] or { n = 0 }
+    att.n = (att.n or 0) + 1
+    if not att.firstSentAt then att.firstSentAt = now end
+    metaAttempt[id] = att
   end
   local ok = Comm:Send("PROFRMQ|" .. body, "ctrl", "sync")
   if not ok then
-    for i = 1, #want do pendingMetaReq[want[i]] = nil end
+    for j = 1, #want do pendingMetaReq[want[j]] = nil end
+    -- Roll back attempt counts for failed send.
+    for j = 1, #want do
+      local att = metaAttempt[want[j]]
+      if att then
+        att.n = math.max(0, (att.n or 1) - 1)
+        if att.n == 0 then att.firstSentAt = nil end
+      end
+    end
     return false, "send_fail"
   end
-  -- Drop pending markers after timeout so we do not loop forever.
-  C_Timer.After(45, function()
+  local gen = metaDrainGen
+  C_Timer.After(META_PENDING_EXPIRE, function()
+    if gen ~= metaDrainGen then return end
     local t = U.Now()
     for id, exp in pairs(pendingMetaReq) do
-      if exp <= t then pendingMetaReq[id] = nil end
+      if exp <= t then
+        pendingMetaReq[id] = nil
+        if MetaShouldGiveUp(id, t) then
+          metaGiveUp[id] = true
+          DequeueMetaId(id)
+        end
+      end
     end
+    ScheduleMetaDrain(0.05)
   end)
-  return true, "sent", peerHint
+  if #metaQueue > 0 then
+    ScheduleMetaDrain(PROFRMQ_SEND_CD + 0.05)
+  end
+  return true, "sent"
+end
+
+-- Compat: enqueue missing IDs then drain (only marks pending for IDs actually sent).
+function ProfRecipes._RequestMetaFromPeers(ids, peerHint)
+  EnqueueMetaIds(ids)
+  local ok, why = ProfRecipes._DrainMetaQueue()
+  return ok, why, peerHint
 end
 
 function ProfRecipes.EnsureMetaForIds(ids, peerHint)
@@ -1980,7 +2405,8 @@ function ProfRecipes.EnsureMetaForIds(ids, peerHint)
       local _, ok = ProfRecipes.EnsureMetaResolved(id)
       if ok then
         n = n + 1
-      else
+        DequeueMetaId(id)
+      elseif not metaGiveUp[id] then
         missing[#missing + 1] = id
       end
     end
@@ -2001,7 +2427,9 @@ function ProfRecipes:OnMetaRequest(sender, ids)
   for i = 1, math.min(#ids, MAX_META_REQ_IDS) do
     local id = tonumber(ids[i])
     local meta = id and ProfRecipes.GetMeta(id)
-    if meta and meta.name and meta.name ~= "" then
+    -- Only reply with confirmed local materials (reagentsResolved), so peers
+    -- never treat empty wire reagents as "no mats".
+    if meta and meta.name and meta.name ~= "" and meta.reagentsResolved == true then
       entries[#entries + 1] = {
         recipeId = id,
         name = meta.name,
@@ -2032,7 +2460,6 @@ function ProfRecipes:OnMetaUpdate(sender, entries)
     if id then
       pendingMetaReq[id] = nil
       local prev = ProfRecipes.GetMeta(id)
-      -- Prefer local names; accept peer name as fallback (optionally locale-tagged).
       local name = e.name
       if prev and prev.name and prev.name ~= "" then
         name = prev.name
@@ -2047,6 +2474,8 @@ function ProfRecipes:OnMetaUpdate(sender, entries)
       if type(qmin) == "number" and qmin <= 0 then qmin = nil end
       local qmax = e.qtyMax
       if type(qmax) == "number" and qmax <= 0 then qmax = nil end
+      local reagents = (type(e.reagents) == "table" and #e.reagents > 0) and e.reagents or nil
+      -- Peer empty reagents stay unknown (wire cannot confirm no-mats).
       ProfRecipes.StoreMeta(id, {
         name = name,
         icon = icon,
@@ -2055,14 +2484,21 @@ function ProfRecipes:OnMetaUpdate(sender, entries)
         qtyMax = qmax,
         isEnchant = e.isEnchant,
         locale = e.locale,
-        reagents = (type(e.reagents) == "table" and #e.reagents > 0) and e.reagents or nil,
+        reagents = reagents,
+        reagentsResolved = reagents and true or nil,
       })
+      if ProfRecipes.IsMetaComplete(ProfRecipes.GetMeta(id)) then
+        DequeueMetaId(id)
+        metaAttempt[id] = nil
+        metaGiveUp[id] = nil
+      end
       changed = true
     end
   end
   if changed then
     ProfRecipes.InvalidateGuildRecipeIndex()
     GR:SendMessage("PROF_RECIPE_META_CHANGED", sender)
+    ScheduleMetaDrain(0.05)
   end
 end
 
@@ -2075,6 +2511,21 @@ function ProfRecipes:GetRecipeRefreshStatus()
     return "busy", recipeRefreshWhy or "requesting"
   end
   return "idle", recipeRefreshWhy
+end
+
+-- Sticky settle summary for search UI (nil when expired / none).
+function ProfRecipes:GetRecipeRefreshSummary()
+  local s = recipeRefreshSummary
+  if not s then return nil end
+  if U.Now() >= (s.untilAt or 0) then
+    recipeRefreshSummary = nil
+    return nil
+  end
+  return s
+end
+
+function ProfRecipes:ClearRecipeRefreshSummary()
+  recipeRefreshSummary = nil
 end
 
 -- Guild-wide / filtered recipe catalogue refresh (search UI button).
@@ -2095,17 +2546,24 @@ function ProfRecipes:RequestRecipeDataRefresh(profKey, force)
     ok, why = self:RequestAll(nil, force)
   end
   if ok and why == "sent" then
-    local untilAt = U.Now() + 20
+    recipeRefreshGen = recipeRefreshGen + 1
+    local gen = recipeRefreshGen
+    local untilAt = U.Now() + REFRESH_MAX
     recipeRefreshBusyUntil = untilAt
     recipeRefreshWhy = "requesting"
-    C_Timer.After(20, function()
-      -- Respect delay: stub After may fire early; only time out when due.
-      if recipeRefreshBusyUntil == untilAt and recipeRefreshWhy == "requesting" and U.Now() >= untilAt then
-        recipeRefreshWhy = "timeout"
-        recipeRefreshBusyUntil = 0
-        GR:SendMessage("PROF_RECIPE_REFRESH_STATUS", "timeout")
-      end
-    end)
+    recipeRefreshSummary = nil
+    recipeRefreshSession = {
+      gen = gen,
+      profKey = (profKey and profKey ~= "") and profKey or nil,
+      startedAt = U.Now(),
+      lastRecv = 0,
+      pairSet = {},
+      pairs = {},
+      memberSet = {},
+      nMembers = 0,
+      nCats = 0,
+    }
+    ScheduleRefreshSettleCheck(gen)
     GR:SendMessage("PROF_RECIPE_REFRESH_STATUS", "requesting", profKey)
   elseif why == "cooldown" then
     recipeRefreshWhy = "cooldown"
@@ -2113,18 +2571,48 @@ function ProfRecipes:RequestRecipeDataRefresh(profKey, force)
   return ok, why
 end
 
-function ProfRecipes:MarkRecipeRefreshDone(why)
+function ProfRecipes:MarkRecipeRefreshDone(why, stats)
+  local gen = recipeRefreshSession and recipeRefreshSession.gen
   recipeRefreshBusyUntil = 0
   recipeRefreshWhy = why or "done"
-  GR:SendMessage("PROF_RECIPE_REFRESH_STATUS", recipeRefreshWhy)
+  recipeRefreshSession = nil
+  local members = stats and stats.members or 0
+  local catalogs = stats and stats.catalogs or 0
+  if why == "done" then
+    recipeRefreshSummary = {
+      why = "done",
+      members = members,
+      catalogs = catalogs,
+      untilAt = U.Now() + REFRESH_SUMMARY_HOLD,
+    }
+  elseif why == "no_response" then
+    recipeRefreshSummary = {
+      why = "no_response",
+      members = 0,
+      catalogs = 0,
+      untilAt = U.Now() + REFRESH_SUMMARY_HOLD,
+    }
+  end
+  GR:SendMessage("PROF_RECIPE_REFRESH_STATUS", recipeRefreshWhy, members, catalogs)
+  return gen
 end
 
 ProfRecipes.MAX_QTY = MAX_QTY
 ProfRecipes.MAX_RECIPES = MAX_RECIPES
 ProfRecipes.MAX_META_REQ_IDS = MAX_META_REQ_IDS
+ProfRecipes.META_MAX_ATTEMPTS = META_MAX_ATTEMPTS
+ProfRecipes.META_BUDGET_SEC = META_BUDGET_SEC
+ProfRecipes.REFRESH_MIN_COLLECT = REFRESH_MIN_COLLECT
+ProfRecipes.REFRESH_QUIET = REFRESH_QUIET
+ProfRecipes.REFRESH_MAX = REFRESH_MAX
+ProfRecipes.REFRESH_SUMMARY_HOLD = REFRESH_SUMMARY_HOLD
 ProfRecipes.WIRE_VER = WIRE_VER
 ProfRecipes.PROFR_WIRE_VER = PROFR_WIRE_VER
 ProfRecipes.PROFR_WIRE_VER_LEGACY = PROFR_WIRE_VER_LEGACY
 ProfRecipes.META_WIRE_VER = META_WIRE_VER
 ProfRecipes.FLAG_COMPLETE = FLAG_COMPLETE
 ProfRecipes.GATHERING_KEYS = GATHERING_KEYS
+ProfRecipes._metaQueue = metaQueue
+ProfRecipes._metaGiveUp = metaGiveUp
+ProfRecipes._pendingLearn = pendingLearn
+ProfRecipes._lastSentFp = lastSentFp
