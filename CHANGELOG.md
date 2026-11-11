@@ -3,7 +3,7 @@
 ## Unreleased
 
 - The Discord button now copies the guild's new invite link
-- Guild messages are no longer lost when the game limits or pauses addon messages
+- Guild messages are no longer lost when the game limits how fast addons may send
 - Level-ups above level 80 are shown
 - Map icons of your old guild disappear right away when you change guilds
 - Fixed a possible error when targeting other players
