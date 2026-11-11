@@ -34,7 +34,15 @@ local function NewFrame()
       SetWidth = function() end,
       SetShown = function() end,
       GetFont = function() return nil end,
-      SetFont = function() end,
+      SetFont = function() return true end,
+      SetFontObject = function() end,
+      SetTextColor = function() end,
+      SetJustifyH = function() end,
+      SetJustifyV = function() end,
+      SetWordWrap = function() end,
+      SetMaxLines = function() end,
+      SetShadowColor = function() end,
+      SetShadowOffset = function() end,
     }
   end
   f.CreateTexture = function()
@@ -62,8 +70,10 @@ local death = bob.GR:GetModule("Death")
 local beforeLvl = Sim.DeepCopy(bob.GR.db.levelUp)
 local beforeDeath = Sim.DeepCopy(bob.GR.db.death)
 
-pcall(function() lvl:Preview() end)
-pcall(function() death:Preview() end)
+local okLvl, errLvl = pcall(function() lvl:Preview() end)
+local okDeath, errDeath = pcall(function() death:Preview() end)
+check("lvl Preview ok", okLvl, errLvl)
+check("death Preview ok", okDeath, errDeath)
 
 check("lvl showToasts unchanged", bob.GR.db.levelUp.showToasts == beforeLvl.showToasts)
 check("lvl point unchanged", bob.GR.db.levelUp.point and bob.GR.db.levelUp.point[5] == beforeLvl.point[5])

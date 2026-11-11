@@ -10,6 +10,7 @@ local fadeAfter
 local layoutEdit = false
 local displayDone
 local muteNextSound = false
+local previewGen = 0
 
 local function Cfg()
   GR.db.levelUp = GR.db.levelUp or {}
@@ -64,6 +65,23 @@ local function FinishDisplay()
   if d then d() end
 end
 
+-- Drop orphan preview/edit timers without Resume (sibling takeover).
+function LevelUp:CancelPreview()
+  previewGen = previewGen + 1
+  CancelToastTimers()
+  displayDone = nil
+  if not layoutEdit and toast then
+    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(toast) end
+    toast:SetAlpha(1)
+    toast:Hide()
+  end
+end
+
+local function CancelSiblingPreview()
+  local death = GR:GetModule("Death")
+  if death and death.CancelPreview then death:CancelPreview() end
+end
+
 local function EnsureToast()
   if toast then
     ApplyToastLayout(toast)
@@ -92,6 +110,11 @@ local function EnsureToast()
 end
 
 local function DisplayToast(item, done)
+  item = item or {}
+  if not layoutEdit and not item._preview and not Cfg().showToasts then
+    if done then done() end
+    return
+  end
   if not layoutEdit and AngryMurlocsDeathToast and AngryMurlocsDeathToast.Hide then
     AngryMurlocsDeathToast:Hide()
   end
@@ -112,7 +135,7 @@ local function DisplayToast(item, done)
   f:SetAlpha(1)
   f:Show()
 
-  if not muteNextSound and not layoutEdit and not (item and item._preview) then
+  if not muteNextSound and not layoutEdit and not item._preview then
     if GR.Sounds and GR.Sounds.Play then GR.Sounds.Play("lvl") end
   end
   muteNextSound = false
@@ -154,6 +177,7 @@ end
 
 -- Visual preview: no SV mutation, silent. Does not change showToasts/point.
 function LevelUp:Preview()
+  CancelSiblingPreview()
   if layoutEdit then
     muteNextSound = true
     DisplayToast({
@@ -170,12 +194,15 @@ function LevelUp:Preview()
   else
     FinishDisplay()
   end
+  previewGen = previewGen + 1
+  local token = previewGen
   muteNextSound = true
   DisplayToast({
     name = U.ShortName(U.PlayerName()),
     level = UnitLevel("player") or 1,
     _preview = true,
   }, function()
+    if token ~= previewGen then return end
     if GR.ToastQueue and not layoutEdit then
       GR.ToastQueue.Resume()
     end
@@ -191,8 +218,11 @@ end
 
 function LevelUp:BeginLayoutEdit()
   -- Caller (Options) must Pause + FinishCurrent first.
+  CancelSiblingPreview()
+  previewGen = previewGen + 1
   layoutEdit = true
   CancelToastTimers()
+  displayDone = nil
   muteNextSound = true
   DisplayToast({
     name = U.ShortName(U.PlayerName()),
