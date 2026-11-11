@@ -690,13 +690,7 @@ end
 local function OpenWhisper()
   local name = state.player
   if not name or IsSelf(name) or not state.comboValid then return end
-  local target = ChatTarget(name)
-  if ChatFrame_SendTell then
-    ChatFrame_SendTell(target)
-  elseif ChatFrameEditBox and ChatFrameEditBox.SetText then
-    if ChatFrameEditBox.Show then ChatFrameEditBox:Show() end
-    ChatFrameEditBox:SetText("/w " .. target .. " ")
-  end
+  U.OpenWhisper(ChatTarget(name))
 end
 
 local function BuildCurrentRequestText()
@@ -775,22 +769,13 @@ local function ApplyPreviewToChat()
   local target = ChatTarget(name)
   state.draftText = text
   HidePreview()
-  if ChatFrameEditBox and ChatFrameEditBox.GetText then
-    local existing = ChatFrameEditBox:GetText() or ""
-    if existing ~= "" and existing:match("%S") then
-      U.Print(U.L("PROF_RECIPE_CHAT_BUSY"))
-      catalog.preview:Show()
-      UpdatePreviewChrome()
-      return
-    end
+  if U.ChatBusy() then
+    U.Print(U.L("PROF_RECIPE_CHAT_BUSY"))
+    catalog.preview:Show()
+    UpdatePreviewChrome()
+    return
   end
-  if ChatFrame_SendTell then
-    ChatFrame_SendTell(target)
-  end
-  if ChatFrameEditBox and ChatFrameEditBox.SetText then
-    if ChatFrameEditBox.Show then ChatFrameEditBox:Show() end
-    ChatFrameEditBox:SetText(text)
-  end
+  U.OpenWhisper(target, text)
 end
 
 local function ClearFetchPending()

@@ -1107,14 +1107,7 @@ local function EnsureWhisperMenu(parent)
     local name = whisperMenu.targetName
     HideWhisperMenu()
     if not name or name == "" then return end
-    local short = U.ShortName(name)
-    if ChatFrame_SendTell then
-      ChatFrame_SendTell(short)
-    elseif ChatFrameEditBox and ChatFrameEditBox.SetText then
-      -- Forever fallback
-      if ChatFrameEditBox.Show then ChatFrameEditBox:Show() end
-      ChatFrameEditBox:SetText("/w " .. short .. " ")
-    end
+    U.OpenWhisper(U.ShortName(name))
   end)
   return whisperMenu
 end
