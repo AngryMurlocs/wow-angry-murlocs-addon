@@ -436,6 +436,21 @@ local function DispatchParsed(tag, rest, sender)
     end
     Count("recv_PROFRM")
     GR:SendMessage("PROF_RECIPE_META_UPDATE", sender, entries)
+  elseif tag == "PROFRC" then
+    -- Recipe category batch (WoW categoryID + localized name). Older clients ignore.
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    if #cleaned > 20000 then
+      Reject("too_long", "PROFRC " .. tostring(sender))
+      return
+    end
+    local recipes = GR:GetModule("ProfRecipes")
+    local entries, why = recipes and recipes.DecodeCategoryBatch and recipes.DecodeCategoryBatch(cleaned)
+    if not entries then
+      Reject("invalid", "PROFRC " .. tostring(why) .. " " .. tostring(sender))
+      return
+    end
+    Count("recv_PROFRC")
+    GR:SendMessage("PROF_RECIPE_CATEGORY_UPDATE", sender, entries)
   elseif tag == "DEATH" then
     local parts = U.SplitKeepEmpty(rest, "|")
     local cause = parts[5]

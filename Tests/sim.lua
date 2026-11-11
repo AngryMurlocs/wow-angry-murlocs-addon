@@ -21,6 +21,7 @@ local FILES = {
   "Core/Diag.lua",
   "Core/Comm.lua",
   "Core/WantedLogic.lua",
+  "Core/RecipeCategories.lua",
 }
 
 local function DeepCopy(v)

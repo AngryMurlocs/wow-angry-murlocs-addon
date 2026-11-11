@@ -17,6 +17,7 @@ Core\Events.lua
 Core\Diag.lua
 Core\Comm.lua
 Core\WantedLogic.lua
+Core\RecipeCategories.lua
 AngryMurlocs.lua
 Modules\Positions.lua
 Modules\MapPins.lua
