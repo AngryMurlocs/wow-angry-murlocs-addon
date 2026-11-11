@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.7
 
 - Death messages use your language for cause labels when guildmates send structured deaths; older addon versions still get a readable cause string
 - Browse each profession's recipes in collapsible categories
