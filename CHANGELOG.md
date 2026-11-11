@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Browse each profession's recipes in collapsible categories
+
 ## 0.11.6
 
 - Recipe data refresh waits for guild replies, then shows how many members and catalogues arrived
