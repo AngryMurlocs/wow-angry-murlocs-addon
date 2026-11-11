@@ -208,6 +208,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     AngryMurlocsDB = AngryMurlocsDB or {}
     CopyDefaults(defaults, AngryMurlocsDB)
     GR.db = AngryMurlocsDB
+    -- Leftover debug data from 0.11.x and older
     GR.db._agentDebug = nil
     GR.db.migrations = GR.db.migrations or {}
     local mig = GR.db.migrations
