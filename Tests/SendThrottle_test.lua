@@ -1,5 +1,5 @@
--- Outgoing addon messages survive the client's send throttle and the
--- "outgoing addon messages restricted" state instead of being lost.
+-- Outgoing addon messages survive the client's send throttle instead of
+-- being lost, and nothing holds the queue back while sending works.
 -- From repo root: luajit Tests/SendThrottle_test.lua
 local Sim = dofile("Tests/sim.lua")
 
@@ -65,18 +65,20 @@ do
   check("queue empty", alice.GR.Comm:QueueSize() == 0)
 end
 
--- Restricted: nothing is sent while restricted; everything goes out afterwards.
+-- The "outgoing messages restricted" flag is not used as a gate: on Forever it
+-- reported true while sending worked. A failed send is dropped, the rest goes.
 do
   local sim = Sim.New(2)
-  local restricted = true
   local alice
+  local n = 0
   alice = sim:AddClient("Alice", { env = {
     Enum = { SendAddonMessageResult = RESULT },
     C_ChatInfo = {
       RegisterAddonMessagePrefix = function() return true end,
-      AreOutgoingAddonChatMessagesRestricted = function() return restricted end,
+      AreOutgoingAddonChatMessagesRestricted = function() return true end,
       SendAddonMessage = function(prefix, msg, channel)
-        if restricted then return RESULT.GeneralError end
+        n = n + 1
+        if n == 2 then return RESULT.GeneralError end
         sim:Deliver(alice, prefix, msg, channel)
         return RESULT.Success
       end,
@@ -86,11 +88,9 @@ do
 
   for i = 1, 3 do alice.GR.Comm:Send("TST|" .. i, "data", "misc") end
   sim:Run(5)
-  check("nothing sent while restricted", #Tagged(sim) == 0, #Tagged(sim))
-  check("still queued", alice.GR.Comm:QueueSize() == 3, alice.GR.Comm:QueueSize())
-  restricted = false
-  sim:Run(5)
-  check("all sent after restriction ends", #Tagged(sim) == 3, #Tagged(sim))
+  local got = Tagged(sim)
+  check("restricted flag does not hold the queue", alice.GR.Comm:QueueSize() == 0, alice.GR.Comm:QueueSize())
+  check("failed send dropped, others sent", #got == 2 and got[1] == 1 and got[2] == 3, table.concat(got, ","))
 end
 
 -- Older clients return nothing from SendAddonMessage: still counts as sent.

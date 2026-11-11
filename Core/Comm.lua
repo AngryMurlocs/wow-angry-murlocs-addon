@@ -100,15 +100,6 @@ end
 -- Wait after the client reports a send throttle before trying again.
 local THROTTLE_BACKOFF = 1.0
 
--- Retail-based clients (Forever) can block addon messages for a while
--- (Midnight restrictions). Keep the queue and wait instead of losing messages.
-local function OutgoingRestricted()
-  local fn = C_ChatInfo and C_ChatInfo.AreOutgoingAddonChatMessagesRestricted
-  if type(fn) ~= "function" then return false end
-  local ok, restricted = pcall(fn)
-  return ok and restricted == true
-end
-
 -- Modern clients return Enum.SendAddonMessageResult; older ones return nothing
 -- or a boolean. Returns "ok", "throttled" or "failed".
 local function SendResult(result)
@@ -136,7 +127,10 @@ end
 
 local function Drain()
   local now = U.Now()
-  if (now - lastSendAt) >= SEND_INTERVAL and not OutgoingRestricted() then
+  -- No pre-check with C_ChatInfo.AreOutgoingAddonChatMessagesRestricted: on
+  -- Forever it answered true in the open world while sending worked, which
+  -- held the whole queue back (0.11.3 ingame test). The send result decides.
+  if (now - lastSendAt) >= SEND_INTERVAL then
     local item = queue:Pop(now)
     while item and not Comm:Allowed(item.category) do
       Reject("privacy", item.category)
