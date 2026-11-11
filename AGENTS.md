@@ -118,5 +118,3 @@ Der Agent entscheidet, wann eine Version sinnvoll ist, und schlägt sie dem User
    ```
    Unter Windows in der Git Bash ausführen, die mit Git für Windows installiert wird.
 7. Dem User mitteilen: Der Tag ist gesetzt, der Mirror bringt ihn zu GitHub und CurseForge baut daraus das Paket. Das dauert ein paar Minuten.
-
-`DEV.md` ist eine allgemeine deutschsprachige Referenz zur WoW-Addon-Entwicklung (TOC, Events, Secure Templates/Combat Lockdown, Unterschiede zwischen den Clients). Sie ist nicht projektspezifisch.

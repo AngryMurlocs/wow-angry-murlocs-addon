@@ -6,7 +6,6 @@ manual-changelog:
 ignore:
   - .gitignore
   - README.md
-  - DEV.md
   - AGENTS.md
   - CLAUDE.md
   - CONTRIBUTING.md
