@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- The Discord button now copies the guild's new invite link
+
 ## 0.11.3
 
 - Fixed a file problem that could make the game show the addon as out of date
