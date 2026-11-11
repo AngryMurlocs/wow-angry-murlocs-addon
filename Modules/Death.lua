@@ -102,29 +102,10 @@ local function EnsureToast()
     RaiseToast(toast)
     return toast
   end
-  toast = CreateFrame("Frame", "AngryMurlocsDeathToast", UIParent, BackdropTemplate and "BackdropTemplate" or nil)
-  toast:SetSize(520, 56)
+  -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
+  toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.52, 0.38, 0.46 },
+    { textSize = 15, titleSize = 22, maxLines = 4, anchor = "top" })
   RaiseToast(toast)
-  if toast.SetBackdrop then
-    toast:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    toast:SetBackdropColor(0.15, 0.02, 0.02, 0.9)
-    toast:SetBackdropBorderColor(0.6, 0.1, 0.1, 1)
-  end
-  toast.text = toast:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  toast.text:SetPoint("CENTER", 0, 4)
-  toast.text:SetWidth(500)
-  do
-    local path, _, flags = toast.text:GetFont()
-    if path then toast.text:SetFont(path, 20, flags) end
-  end
-
-  toast.hint = toast:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  toast.hint:SetPoint("BOTTOM", 0, 6)
   toast.hint:SetText(U.L("TOAST_DRAG_HINT"))
 
   U.MakeMovable(toast, {
@@ -170,8 +151,7 @@ local function FormatDeathLine(victim, cause, killer, spell, zone)
   else
     body = string.format(U.L("DEATH_TOAST_ENV"), victim, spell, zone)
   end
-  -- Badge always from code so old locale copies still show TOT/DEAD first.
-  return string.format("|cffff3333%s|r  %s", U.L("DEATH_BADGE"), body)
+  return body
 end
 
 local function DisplayDeathToast(item, done)
@@ -186,6 +166,8 @@ local function DisplayDeathToast(item, done)
     UIFrameFadeRemoveFrame(f)
   end
   displayDone = done
+  -- Badge on its own larger line above the text (TOT / DEAD)
+  if f.title then f.title:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r") end
   f.text:SetText(FormatDeathLine(item.victim, item.cause, item.killer, item.spell, item.zone))
   f:SetAlpha(1)
   f:Show()
