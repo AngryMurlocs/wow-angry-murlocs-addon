@@ -32,7 +32,7 @@ Wichtig:
    Typen: `feat`, `fix`, `change`, `remove`, `docs`, `chore`, `ci`, `test`, `refactor`, `release`.
 3. **Changelog:** Was Spieler merken, kommt als kurze Zeile unter `## Unreleased` ganz oben in `CHANGELOG.md`.
 4. **Merge Request nach `main`.** Die Pipeline führt die Tests aus und prüft den Titel.
-5. **Go 1:** Bevor etwas auf `main` landet, zeigt der Agent die Commits, die mitgehen, und die neuen Changelog-Zeilen. Gemergt wird erst nach deinem Ja, **ohne Squash**.
+5. **Go 1:** Jeder MR ist ein Sammel-MR. Bevor etwas auf `main` landet, zeigt der Agent die Commits, die mitgehen, und die neuen Changelog-Zeilen. Er fragt außerdem, ob du noch weitere Änderungen oder Wünsche hast, die mit hinein sollen. Gemergt wird erst nach deinem Ja, **ohne Squash**.
 6. **Release** (neue Version), sobald es sich lohnt, siehe unten.
 
 ## Changelog schreiben
@@ -61,7 +61,7 @@ Die Versionsnummer steht an vier Stellen und muss überall gleich sein: in `Angr
 ## Release
 
 1. Der Agent schlägt eine Version vor und erstellt einen MR `release: X.Y.Z`. Darin wird `## Unreleased` zu `## X.Y.Z`, und die Versionsnummer ist überall gesetzt.
-2. **Go 2:** Er zeigt dir alle Commits seit der letzten Version, den neuen Changelog-Abschnitt und die neue Versionsnummer.
+2. **Go 2:** Er zeigt dir alle Commits seit der letzten Version, den neuen Changelog-Abschnitt und die neue Versionsnummer. Er fragt, ob noch etwas mit in das Release soll.
 3. Nach deinem Ja merged er und setzt den Tag `vX.Y.Z`. Die Tag-Message ist der neue Changelog-Abschnitt.
 4. GitLab spiegelt den Tag zu GitHub, CurseForge baut das Paket, und nach ein paar Minuten ist die Version auf der Addon-Seite.
 

@@ -63,7 +63,7 @@ Mehrere Leute arbeiten parallel am Projekt. Der Agent erledigt Git selbst und en
    - Doku, CI, Tests und reine Umbauten bekommen keine Zeile.
 4. **Prüfen:** `luajit Tests/run_all.lua` muss grün sein.
 5. **MR nach `main`:** Vorher `git fetch origin` und `git merge origin/main` (bei Änderungen erneut testen). Danach `git push -u origin HEAD` und `glab mr create --target-branch main --title "<type>: <English title>" --fill --remove-source-branch --yes`. Die Pipeline prüft Tests und Titelformat und muss grün werden.
-6. **Go 1, Merge:** Dem User zeigen, **welche Commits mitgehen** (`git log --oneline origin/main..HEAD`) und **welche Changelog-Zeilen neu sind**. Erst nach seinem ausdrücklichen Ja mergen: `glab mr merge --yes`, **ohne Squash**, damit jeder Commit erhalten bleibt. Danach `git switch main`, `git pull --ff-only` und den lokalen Branch mit `git branch -d` löschen.
+6. **Go 1, Merge:** Jeder MR ist ein **Sammel-MR**: Der Branch nimmt so lange weitere Commits auf, bis der User mergen will. Das dem User immer ausdrücklich sagen. Dann zeigen, **welche Commits mitgehen** (`git log --oneline origin/main..HEAD`) und **welche Changelog-Zeilen neu sind**, und **fragen, ob er noch weitere Änderungen oder Wünsche für diesen MR hat**. Hat er welche, kommen sie als weitere Commits in denselben MR, danach folgt eine neue Vorschau. Erst nach seinem ausdrücklichen Ja zum Merge mergen: `glab mr merge --yes`, **ohne Squash**, damit jeder Commit erhalten bleibt. Danach `git switch main`, `git pull --ff-only` und den lokalen Branch mit `git branch -d` löschen.
 7. **Wenn etwas fehlschlägt:** nicht mergen und nicht taggen. Die Arbeit bleibt auf dem Branch. Dem User verständlich erklären, was fehlt.
 
 Ohne Tag ist `main` unveröffentlicht. Doku-, CI- oder Test-Änderungen gehen deshalb ganz normal (mit Go) nach `main`, ohne Version.
@@ -92,7 +92,7 @@ Der Agent entscheidet, wann eine Version sinnvoll ist, und schlägt sie dem User
    - den neuen Changelog-Abschnitt, genau so, wie er veröffentlicht wird
    - die neue Versionsnummer und die gewählte Stufe mit kurzer Begründung
 
-   Erst nach seinem ausdrücklichen Ja weitermachen.
+   Auch hier sagen, dass es ein Sammel-MR ist, und fragen, ob noch weitere Änderungen mit in dieses Release sollen. Erst nach seinem ausdrücklichen Ja weitermachen.
 5. Den MR mergen (ohne Squash, siehe Schritt 6 oben), dann `git switch main` und `git pull --ff-only`.
 6. Annotierten Tag setzen. Die Tag-Message ist der neue Changelog-Abschnitt. Getaggt wird der Merge des Release-MR. Hat in der Zwischenzeit jemand anderes gemergt, ist `HEAD` nicht mehr dieser Merge. Dann die SHA des Release-Merges statt `HEAD` nehmen:
    ```sh
