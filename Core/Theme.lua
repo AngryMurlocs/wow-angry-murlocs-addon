@@ -258,8 +258,8 @@ local function ToastFont(fs, size, fallbackTemplate)
   fs:SetShadowOffset(1, -1)
 end
 
--- titleSize: optional larger first line (f.title) above the text, e.g. the
--- death badge. Title and text are kept together as one centered block.
+-- titleSize: optional larger first line (f.title), e.g. the death badge. Then
+-- the block is anchored at the top center of the box instead of centered.
 function T.CreateArtToast(globalName, art, box, textSize, titleSize, maxLines)
   local W, H = T.TOAST_W, T.TOAST_H
   local f = CreateFrame("Frame", globalName, UIParent)
@@ -276,7 +276,9 @@ function T.CreateArtToast(globalName, art, box, textSize, titleSize, maxLines)
   local text = f:CreateFontString(nil, "OVERLAY")
   ToastFont(text, textSize or 16, GameFontHighlight)
   text:SetTextColor(T.TOAST_TEXT[1], T.TOAST_TEXT[2], T.TOAST_TEXT[3])
-  text:SetPoint("CENTER", f, "TOPLEFT", cx, -(cy + (titleSize and titleSize / 2 or 0)))
+  if not titleSize then
+    text:SetPoint("CENTER", f, "TOPLEFT", cx, -cy)
+  end
   text:SetWidth(bw)
   text:SetJustifyH("CENTER")
   text:SetJustifyV("MIDDLE")
@@ -288,7 +290,10 @@ function T.CreateArtToast(globalName, art, box, textSize, titleSize, maxLines)
     local title = f:CreateFontString(nil, "OVERLAY")
     ToastFont(title, titleSize, GameFontNormalLarge)
     title:SetTextColor(T.TOAST_TEXT[1], T.TOAST_TEXT[2], T.TOAST_TEXT[3])
-    title:SetPoint("BOTTOM", text, "TOP", 0, 2)
+    -- Anchored top center of the box, the text follows below, so the block
+    -- uses the full height of the dark panel.
+    title:SetPoint("TOP", f, "TOPLEFT", cx, -(cy - bh / 2) - 2)
+    text:SetPoint("TOP", title, "BOTTOM", 0, -2)
     title:SetWidth(bw)
     title:SetJustifyH("CENTER")
     f.title = title
