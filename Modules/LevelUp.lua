@@ -71,7 +71,8 @@ local function EnsureToast()
     return toast
   end
   -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
-  toast = GR.Theme.CreateArtToast("AngryMurlocsLevelUpToast", "levelup", { 0.5375, 0.577, 0.375, 0.345 }, 18)
+  toast = GR.Theme.CreateArtToast("AngryMurlocsLevelUpToast", "levelup", { 0.5375, 0.577, 0.375, 0.345 },
+    { textSize = 16, titleSize = 24, maxLines = 2 })
   RaiseToast(toast)
   toast.hint:SetText(U.L("TOAST_DRAG_HINT"))
 
@@ -105,7 +106,9 @@ local function DisplayToast(item, done)
 
   displayDone = done
   local lvl = tonumber(item.level) or 1
-  f.text:SetText(string.format(U.L("LVL_TOAST"), item.name, lvl))
+  -- Name on its own larger line, the rest below
+  if f.title then f.title:SetText("|cff00ff88" .. tostring(item.name or "?") .. "|r") end
+  f.text:SetText(string.format(U.L("LVL_TOAST"), lvl))
   f:SetAlpha(1)
   f:Show()
 
