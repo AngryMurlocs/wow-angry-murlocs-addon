@@ -258,7 +258,9 @@ local function ToastFont(fs, size, fallbackTemplate)
   fs:SetShadowOffset(1, -1)
 end
 
-function T.CreateArtToast(globalName, art, box, textSize)
+-- titleSize: optional larger first line (f.title) above the text, e.g. the
+-- death badge. Title and text are kept together as one centered block.
+function T.CreateArtToast(globalName, art, box, textSize, titleSize, maxLines)
   local W, H = T.TOAST_W, T.TOAST_H
   local f = CreateFrame("Frame", globalName, UIParent)
   f:SetSize(W, H)
@@ -274,13 +276,23 @@ function T.CreateArtToast(globalName, art, box, textSize)
   local text = f:CreateFontString(nil, "OVERLAY")
   ToastFont(text, textSize or 16, GameFontHighlight)
   text:SetTextColor(T.TOAST_TEXT[1], T.TOAST_TEXT[2], T.TOAST_TEXT[3])
-  text:SetPoint("CENTER", f, "TOPLEFT", cx, -cy)
+  text:SetPoint("CENTER", f, "TOPLEFT", cx, -(cy + (titleSize and titleSize / 2 or 0)))
   text:SetWidth(bw)
   text:SetJustifyH("CENTER")
   text:SetJustifyV("MIDDLE")
   if text.SetWordWrap then text:SetWordWrap(true) end
-  if text.SetMaxLines then text:SetMaxLines(3) end
+  if text.SetMaxLines then text:SetMaxLines(maxLines or 3) end
   f.text = text
+
+  if titleSize then
+    local title = f:CreateFontString(nil, "OVERLAY")
+    ToastFont(title, titleSize, GameFontNormalLarge)
+    title:SetTextColor(T.TOAST_TEXT[1], T.TOAST_TEXT[2], T.TOAST_TEXT[3])
+    title:SetPoint("BOTTOM", text, "TOP", 0, 2)
+    title:SetWidth(bw)
+    title:SetJustifyH("CENTER")
+    f.title = title
+  end
 
   local hint = f:CreateFontString(nil, "OVERLAY")
   ToastFont(hint, 10, GameFontDisableSmall)

@@ -103,7 +103,7 @@ local function EnsureToast()
     return toast
   end
   -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
-  toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.54, 0.38, 0.39 })
+  toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.52, 0.38, 0.46 }, 15, 22, 4)
   RaiseToast(toast)
   toast.hint:SetText(U.L("TOAST_DRAG_HINT"))
 
@@ -150,8 +150,7 @@ local function FormatDeathLine(victim, cause, killer, spell, zone)
   else
     body = string.format(U.L("DEATH_TOAST_ENV"), victim, spell, zone)
   end
-  -- Badge always from code so old locale copies still show TOT/DEAD first.
-  return string.format("|cffff3333%s|r  %s", U.L("DEATH_BADGE"), body)
+  return body
 end
 
 local function DisplayDeathToast(item, done)
@@ -166,6 +165,8 @@ local function DisplayDeathToast(item, done)
     UIFrameFadeRemoveFrame(f)
   end
   displayDone = done
+  -- Badge on its own larger line above the text (TOT / DEAD)
+  if f.title then f.title:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r") end
   f.text:SetText(FormatDeathLine(item.victim, item.cause, item.killer, item.spell, item.zone))
   f:SetAlpha(1)
   f:Show()
