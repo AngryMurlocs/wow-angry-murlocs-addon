@@ -18,6 +18,7 @@ Core\Diag.lua
 Core\Comm.lua
 Core\WantedLogic.lua
 Core\RecipeCategories.lua
+Core\RecipeListView.lua
 AngryMurlocs.lua
 Modules\Positions.lua
 Modules\MapPins.lua

@@ -27,11 +27,15 @@ local state = {
   filter = "",
   desired = 1,
   matsBring = true,
-  page = 1,
+  page = 1, -- legacy; paging removed for member list
   crafters = nil, -- { names } when multi-crafter
   fetchPending = nil,
   quietFetch = false,
   listScrollY = 0,
+  expandedByCatalog = {}, -- [player\0profKey] = { [categoryKey]=true }
+  visibleRows = nil,
+  recipeCount = 0,
+  categoryCount = 0,
   comboValid = true,
   draftFingerprint = nil,
   draftStale = false,
@@ -211,6 +215,19 @@ local function MarkDraftStaleIfNeeded()
   end
 end
 
+local function CatalogExpandKey()
+  return tostring(state.player or "") .. "\0" .. tostring(state.profKey or "")
+end
+
+local function GetExpandedMap()
+  state.expandedByCatalog = state.expandedByCatalog or {}
+  local k = CatalogExpandKey()
+  if not state.expandedByCatalog[k] then
+    state.expandedByCatalog[k] = {}
+  end
+  return state.expandedByCatalog[k]
+end
+
 local function FilteredIds()
   local R = Recipes()
   local rec = R and R.GetEntry and R.GetEntry(state.player, state.profKey)
@@ -252,6 +269,63 @@ local function FilteredIds()
   local out = {}
   for i = 1, #ranked do out[i] = ranked[i].id end
   return out, rec
+end
+
+local function BuildGroupedVisibleRows()
+  local R = Recipes()
+  local RC = GR.RecipeCategories
+  local RLV = GR.RecipeListView
+  local rec = R and R.GetEntry and R.GetEntry(state.player, state.profKey)
+  local ids = (rec and rec.ids) or {}
+  local q = state.filter or ""
+  local searching = q ~= ""
+  local rows = {}
+  for i = 1, #ids do
+    local id = ids[i]
+    local meta = R and R.GetMeta and R.GetMeta(id)
+    local name = (meta and meta.name) or RecipeName(id)
+    local outputName = nil
+    if meta and meta.outputItemID and R.ResolveItemName then
+      outputName = select(1, R.ResolveItemName(meta.outputItemID, nil))
+    end
+    local ok, rank = true, 1
+    if R and R.MatchRecipeQuery then
+      ok, rank = R.MatchRecipeQuery(q, {
+        recipeId = id,
+        name = name,
+        outputItemID = meta and meta.outputItemID,
+        outputName = outputName,
+      })
+    elseif searching then
+      local ql = string.lower(q)
+      ok = string.find(string.lower(name), ql, 1, true) ~= nil
+          or string.find(tostring(id), ql, 1, true) ~= nil
+    end
+    if ok then
+      rows[#rows + 1] = {
+        recipeId = id,
+        name = name,
+        rank = rank or 1,
+      }
+    end
+  end
+  local groups = {}
+  if RC and RC.Group then
+    groups = RC.Group(rows, function(row)
+      if R and R.ResolveRecipeCategory then
+        return R.ResolveRecipeCategory(row.recipeId, state.profKey)
+      end
+      return "other", U.L("PROF_RECIPE_CAT_OTHER")
+    end)
+    if searching and RC.SortGroupRecipes then
+      RC.SortGroupRecipes(groups, true)
+    end
+  end
+  local flat = (RC and RC.Flatten and RC.Flatten(groups, GetExpandedMap(), searching)) or {}
+  state.visibleRows = flat
+  state.recipeCount = #rows
+  state.categoryCount = #groups
+  return flat, groups, #rows, RLV
 end
 
 local function FormatDataAge(rec)
@@ -569,41 +643,98 @@ RefreshDetail = function()
   MarkDraftStaleIfNeeded()
 end
 
-RefreshList = function()
-  if not catalog or not state.open or state.view ~= "list" then return end
-  local ids = FilteredIds()
-  local total = #ids
-  local pages = math.max(1, math.ceil(total / NUM_LIST_ROWS))
-  if state.page > pages then state.page = pages end
-  if state.page < 1 then state.page = 1 end
-  local first = (state.page - 1) * NUM_LIST_ROWS + 1
-  local last = math.min(total, state.page * NUM_LIST_ROWS)
-
-  catalog.pageText:SetText(total > 0
-    and string.format(U.L("PROF_PAGE_RANGE"), first, last, total, state.page, pages)
-    or "")
-  if state.page <= 1 then catalog.prevBtn:Disable() else catalog.prevBtn:Enable() end
-  if state.page >= pages then catalog.nextBtn:Disable() else catalog.nextBtn:Enable() end
-
-  catalog.listChild:SetHeight(math.max(last - first + 1, 1) * LIST_ROW_H)
-
+local function BindCatalogListRows()
+  if not catalog or not catalog.listChild then return end
+  local visible = state.visibleRows or {}
+  local total = #visible
+  local RLV = GR.RecipeListView
+  catalog.listChild:SetHeight((RLV and RLV.ContentHeight and RLV.ContentHeight(total, LIST_ROW_H))
+    or math.max(total, 1) * LIST_ROW_H)
+  local scrollY = state.listScrollY or 0
+  if catalog.listScroll and catalog.listScroll.GetVerticalScrollRange then
+    local maxY = catalog.listScroll:GetVerticalScrollRange() or 0
+    if scrollY > maxY then scrollY = maxY end
+  end
+  if scrollY < 0 then scrollY = 0 end
+  state.listScrollY = scrollY
+  local first = 1
+  if RLV and RLV.FirstVisibleIndex then
+    first = RLV.FirstVisibleIndex(scrollY, LIST_ROW_H, total)
+  else
+    first = math.floor(scrollY / LIST_ROW_H) + 1
+  end
   for i = 1, NUM_LIST_ROWS do
     local row = listRows[i]
-    local id = ids[first + i - 1]
-    if id and (first + i - 1) <= last then
-      row.recipeId = id
-      row.nameFS:SetText(RecipeName(id))
-      local tex = RecipeIcon(id)
-      row.icon:SetTexture(tex)
-      local selected = state.selectedId == id
-      T.ApplyRowChrome(row, i, selected)
-      row:Show()
+    local idx = first + i - 1
+    local data = visible[idx]
+    if data then
+      row:ClearAllPoints()
+      row:SetPoint("TOPLEFT", 0, -((idx - 1) * LIST_ROW_H))
+      row.rowIndex = idx
+      if data.kind == "category" then
+        row.kind = "category"
+        row.categoryKey = data.key
+        row.recipeId = nil
+        row.icon:SetTexture("Interface\\Buttons\\UI-MinusButton-UP")
+        if data.expanded then
+          row.nameFS:SetText(string.format("▼ %s", data.name or data.key or "?"))
+        else
+          row.nameFS:SetText(string.format("▶ %s", data.name or data.key or "?"))
+        end
+        if row.countFS then
+          row.countFS:SetText(tostring(data.count or 0))
+          row.countFS:Show()
+        end
+        row.nameFS:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
+        T.ApplyRowChrome(row, idx, false)
+        row:Show()
+      else
+        local recipe = data.recipe
+        local id = recipe and recipe.recipeId
+        row.kind = "recipe"
+        row.categoryKey = nil
+        row.recipeId = id
+        row.icon:SetTexture(RecipeIcon(id))
+        row.nameFS:SetText(recipe and recipe.name or RecipeName(id))
+        if row.countFS then row.countFS:Hide() end
+        row.nameFS:SetPoint("LEFT", row.icon, "RIGHT", 16, 0)
+        local selected = state.selectedId == id
+        T.ApplyRowChrome(row, idx, selected)
+        row:Show()
+      end
     else
+      row.kind = nil
+      row.categoryKey = nil
       row.recipeId = nil
+      row.rowIndex = nil
       row:Hide()
     end
   end
+end
+
+RefreshList = function()
+  if not catalog or not state.open or state.view ~= "list" then return end
+  BuildGroupedVisibleRows()
+  local totalRecipes = state.recipeCount or 0
+  local totalCats = state.categoryCount or 0
+  if catalog.pageText then
+    if totalRecipes > 0 then
+      catalog.pageText:SetText(string.format(U.L("PROF_RECIPE_CAT_FOOTER"), totalRecipes, totalCats))
+    else
+      catalog.pageText:SetText("")
+    end
+  end
+  if catalog.prevBtn then catalog.prevBtn:Hide() end
+  if catalog.nextBtn then catalog.nextBtn:Hide() end
+  CaptureListScroll()
+  BindCatalogListRows()
   RestoreListScroll()
+  -- Re-bind after scroll restore (range may change with content height).
+  C_Timer.After(0, function()
+    if not catalog or not state.open or state.view ~= "list" then return end
+    CaptureListScroll()
+    BindCatalogListRows()
+  end)
 end
 
 RefreshHeader = function()
@@ -660,8 +791,8 @@ RefreshHeader = function()
     catalog.emptyText:Show()
   else
     catalog.headerStatus:SetText(FormatDataAge(rec))
-    local ids = FilteredIds()
-    if #ids == 0 and state.filter ~= "" then
+    BuildGroupedVisibleRows()
+    if (state.recipeCount or 0) == 0 and state.filter ~= "" then
       catalog.emptyText:SetText(U.L("PROF_RECIPE_EMPTY_FILTER"))
       catalog.emptyText:Show()
     else
@@ -979,38 +1110,33 @@ local function EnsureCatalog(parent)
   catalog.searchBox:SetAutoFocus(false)
   catalog.searchBox:SetScript("OnTextChanged", function(self)
     state.filter = self:GetText() or ""
-    state.page = 1
     RefreshList()
     RefreshHeader()
   end)
 
   catalog.pageText = listPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   catalog.pageText:SetPoint("LEFT", catalog.searchBox, "RIGHT", 12, 0)
-  catalog.pageText:SetWidth(220)
+  catalog.pageText:SetWidth(260)
   catalog.pageText:SetJustifyH("LEFT")
 
   catalog.prevBtn = CreateFrame("Button", nil, listPane, "UIPanelButtonTemplate")
   catalog.prevBtn:SetSize(24, 18)
   catalog.prevBtn:SetPoint("TOPRIGHT", -56, -52)
-  catalog.prevBtn:SetText("<")
-  catalog.prevBtn:SetScript("OnClick", function()
-    state.page = math.max(1, state.page - 1)
-    RefreshList()
-  end)
+  catalog.prevBtn:Hide()
 
   catalog.nextBtn = CreateFrame("Button", nil, listPane, "UIPanelButtonTemplate")
   catalog.nextBtn:SetSize(24, 18)
   catalog.nextBtn:SetPoint("LEFT", catalog.prevBtn, "RIGHT", 4, 0)
-  catalog.nextBtn:SetText(">")
-  catalog.nextBtn:SetScript("OnClick", function()
-    state.page = state.page + 1
-    RefreshList()
-  end)
+  catalog.nextBtn:Hide()
 
   local scroll = CreateFrame("ScrollFrame", "AngryMurlocsRecipeListScroll", listPane, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", searchLabel, "BOTTOMLEFT", 0, -8)
   scroll:SetPoint("BOTTOMRIGHT", -28, 8)
   catalog.listScroll = scroll
+  scroll:SetScript("OnVerticalScroll", function(self, offset)
+    state.listScrollY = offset or 0
+    BindCatalogListRows()
+  end)
 
   local child = CreateFrame("Frame", nil, scroll)
   child:SetSize(560, NUM_LIST_ROWS * LIST_ROW_H)
@@ -1028,11 +1154,22 @@ local function EnsureCatalog(parent)
     row.icon = icon
     local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     fs:SetPoint("LEFT", icon, "RIGHT", 4, 0)
-    fs:SetPoint("RIGHT", -4, 0)
+    fs:SetPoint("RIGHT", -48, 0)
     fs:SetJustifyH("LEFT")
     row.nameFS = fs
+    local countFS = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    countFS:SetPoint("RIGHT", -6, 0)
+    countFS:SetJustifyH("RIGHT")
+    countFS:Hide()
+    row.countFS = countFS
     row:SetScript("OnEnter", function(self)
       T.RowHoverEnter(self)
+      if self.kind == "category" then
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(self.nameFS and self.nameFS:GetText() or "", 1, 1, 1)
+        GameTooltip:Show()
+        return
+      end
       if not self.recipeId then return end
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:AddLine(RecipeName(self.recipeId), 1, 1, 1)
@@ -1043,6 +1180,17 @@ local function EnsureCatalog(parent)
       GameTooltip_Hide()
     end)
     row:SetScript("OnClick", function(self)
+      if self.kind == "category" and self.categoryKey then
+        local map = GetExpandedMap()
+        if map[self.categoryKey] then
+          map[self.categoryKey] = nil
+        else
+          map[self.categoryKey] = true
+        end
+        CaptureListScroll()
+        RefreshList()
+        return
+      end
       if not self.recipeId then return end
       EnterDetail(self.recipeId)
     end)
@@ -1364,6 +1512,12 @@ function UI:AttachRecipePanel(parent)
     end
     UI:RefreshRecipeCatalog()
   end)
+  GR:BindMessage(UI, "PROF_RECIPE_META_CHANGED", function()
+    if state.open then UI:RefreshRecipeCatalog() end
+  end)
+  GR:BindMessage(UI, "PROF_RECIPE_CATEGORY_CHANGED", function()
+    if state.open then UI:RefreshRecipeCatalog() end
+  end)
   GR:BindMessage(UI, "PROF_RECIPE_REFRESH_DONE", function(_, profKey, ok, why)
     if not state.open then return end
     local quiet = state.quietFetch
@@ -1476,4 +1630,24 @@ function UI:OpenRecipeDetail(recipeId, profKey, crafters)
   catalog:Show()
   ShowDetailView()
   RefreshDetail()
+end
+
+-- Test helper: build visible catalog rows without opening the frame.
+function UI._TestBuildMemberCatalogRows(playerName, profKey, filter, expandedMap)
+  local prev = {
+    player = state.player,
+    profKey = state.profKey,
+    filter = state.filter,
+  }
+  state.player = playerName
+  state.profKey = profKey
+  state.filter = filter or ""
+  state.expandedByCatalog = state.expandedByCatalog or {}
+  state.expandedByCatalog[tostring(playerName or "") .. "\0" .. tostring(profKey or "")] = expandedMap or {}
+  local flat = BuildGroupedVisibleRows()
+  local recipeCount, categoryCount = state.recipeCount, state.categoryCount
+  state.player = prev.player
+  state.profKey = prev.profKey
+  state.filter = prev.filter
+  return flat, recipeCount, categoryCount, #listRows
 end

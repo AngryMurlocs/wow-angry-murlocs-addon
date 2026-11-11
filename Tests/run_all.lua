@@ -13,6 +13,7 @@ local tests = {
   "Tests/GuildOfficer_test.lua",
   "Tests/ProfFilter_test.lua",
   "Tests/RecipeCategories_test.lua",
+  "Tests/RecipeListView_test.lua",
   "Tests/ProfRecipes_test.lua",
   "Tests/Freshness_test.lua",
   "Tests/PinFade_test.lua",

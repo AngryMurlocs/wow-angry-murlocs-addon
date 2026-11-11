@@ -299,6 +299,46 @@ do
   end
 end
 
+-- Member catalog categories: closed headers, search reveals, pool size fixed
+do
+  local scope = bob.GR.Util.GetScopeDB()
+  scope.prof.cache["Alice-Realm"] = {
+    list = { { key = "alch", skill = 1 } },
+    recipes = {
+      alch = { ids = { 101, 102, 103 }, rev = 1, scanAt = 10, recvAt = 10, complete = true, epoch = 1 },
+    },
+  }
+  bob.GR.db.prof = bob.GR.db.prof or {}
+  bob.GR.db.prof.recipeMeta = {
+    [101] = { name = "Alpha Potion", categoryId = 10, categoryName = "Potions" },
+    [102] = { name = "Beta Elixir", categoryId = 11, categoryName = "Elixirs" },
+    [103] = { name = "Gamma Potion", categoryId = 10, categoryName = "Potions" },
+  }
+  check("catalog test helper", ui._TestBuildMemberCatalogRows ~= nil)
+  if ui._TestBuildMemberCatalogRows then
+    local flat, nRecipes, nCats, pool = ui._TestBuildMemberCatalogRows("Alice-Realm", "alch", "", {})
+    check("catalog closed headers only", flat and #flat == 2, flat and #flat)
+    check("catalog recipe count", nRecipes == 3, nRecipes)
+    check("catalog category count", nCats == 2, nCats)
+    check("catalog pool capped", pool == 14, pool)
+    local expanded = { ["10"] = true }
+    flat = ui._TestBuildMemberCatalogRows("Alice-Realm", "alch", "", expanded)
+    local recipesShown = 0
+    for i = 1, #flat do
+      if flat[i].kind == "recipe" then recipesShown = recipesShown + 1 end
+    end
+    check("catalog expand potions shows 2", recipesShown == 2, recipesShown)
+    flat = ui._TestBuildMemberCatalogRows("Alice-Realm", "alch", "Gamma", {})
+    local found = false
+    for i = 1, #flat do
+      if flat[i].kind == "recipe" and flat[i].recipe and flat[i].recipe.name == "Gamma Potion" then
+        found = true
+      end
+    end
+    check("catalog search finds closed group recipe", found)
+  end
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")
