@@ -1,4 +1,4 @@
-﻿## Interface: 16001
+## Interface: 16001
 ## Title: AngryMurlocs
 ## Notes: Angry Murlocs guild helper — map pins, professions, Wanted sightings
 ## Notes-deDE: Angry Murlocs Gilden-Helfer — Pins, Berufe, Wanted-Sichtungen

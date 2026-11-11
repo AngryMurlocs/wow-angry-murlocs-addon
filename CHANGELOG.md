@@ -1,4 +1,4 @@
-﻿# AngryMurlocs Changelog
+# AngryMurlocs Changelog
 
 ## 0.11.2
 

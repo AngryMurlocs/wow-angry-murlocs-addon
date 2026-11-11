@@ -31,6 +31,12 @@ local toc = ReadFile("AngryMurlocs.toc"):match("## Version:%s*([^\r\n]+)")
 local lua = ReadFile("AngryMurlocs.lua"):match('GR%.VERSION%s*=%s*"([^"]+)"')
 local readme = ReadFile("README.md"):match("%*%*Version:%*%*%s*([^\r\n]+)")
 
+-- Windows editors may save a byte order mark; CurseForge then shows the first
+-- heading wrong.
+for _, path in ipairs({ "CHANGELOG.md", "README.md", "AngryMurlocs.toc" }) do
+  check(path .. " has no byte order mark", ReadFile(path):sub(1, 3) ~= "\239\187\191")
+end
+
 local headings = {}
 for line in ReadFile("CHANGELOG.md"):gmatch("[^\r\n]+") do
   local h = line:match("^## (.+)$")
