@@ -74,12 +74,26 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 - [ ] Klick **Icon** → Rezeptliste dieses Mitglieds; Klick **Name** → Anflüstern.
 - [ ] Sort / Seitenfuß / Leerzustände wie zuvor.
 
+### Rezept-Unterkategorien (Unreleased — Client noch ungeprüft)
+
+Voraussetzung: Forever-Build + Locale notieren. Lua-Suite deckt Logik ab; Darstellung/Scroll hier bestätigen.
+
+- [ ] Mitgliederkatalog: Beruf → geschlossene Kategorieköpfe mit Zähler; Aufklappen nur dieser Gruppe; Footer „X Rezepte · Y Kategorien“.
+- [ ] Suche im Katalog findet Treffer aus geschlossenen Gruppen; Suche leeren stellt Aufklappzustand wieder her.
+- [ ] Detail → Zurück: Gruppen + Scrollposition erhalten.
+- [ ] Unten Gruppe schließen / Suche bei Scroll ändern: keine leeren Löcher, keine Geister-IDs.
+- [ ] Rezeptsuche: Beruf wählen → gleiche Unterkategorien; zwei Hersteller → eine Rezeptzeile; globale Suche ohne Beruf bleibt flat + Rank.
+- [ ] Wechsel Beruf-Kategorien ↔ globale Suche: kein State-Leak; Gildenwechsel leert Gruppenzustand.
+- [ ] Kategorie-Nachzug verschiebt Rezept aus „Sonstiges“ ohne Mat-Request-Sturm.
+- [ ] DE/EN Labels; UI-Skalierung; großer Katalog (Pool bleibt begrenzt).
+- [ ] Eigenes + fremdes Rezept: `categoryID` + lokalisierter Name verfügbar (sonst Restfall dokumentieren).
+
 ### Rezeptsuche + Detail (gemeinsam)
 
 Voraussetzung: Forever `C_TradeSkillUI` (Interface 16001). Nur erfasste Cache-Rezepte.
 
 - [ ] Rezeptsuche idle (leeres Feld / nur Leerzeichen, Alle Berufe): Crafting-Berufskategorien; keine Sammelberufe; Klick → Rezepte; Scroll/Filter-Reset beim Wechsel.
-- [ ] Tippen oder Beruf gewählt: eine Zeile je Rezept (Icon, Name, Beruf, Herstellerzahl); 3 Hersteller = 1 Zeile; Crafter-Count pro Kategorie unique.
+- [ ] Tippen (ohne Beruf): flache Trefferliste; Beruf gewählt: Unterkategorien mit Aufklappen; 3 Hersteller = 1 Rezeptzeile.
 - [ ] Abdeckungszeile: „Rezeptdaten von X Charakteren · Y vollständige Berufskataloge“ (kein Gilden-Allwissen).
 - [ ] Button **Rezeptdaten aktualisieren**: Status laden/fertig/Timeout; Tippen in Suche sendet **keine** Anfrage.
 - [ ] Suche: „Healing Test“ findet „Test Healing Potion“; `item:118` / Itemlink; `recipe:ID`; Umlaute.

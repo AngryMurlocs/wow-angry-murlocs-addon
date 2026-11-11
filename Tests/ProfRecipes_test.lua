@@ -1070,5 +1070,67 @@ do
   R:OnDisable()
 end
 
+-- Category resolve: name without category, late fill, no mat path
+do
+  GR.db.prof.recipeMeta = {}
+  R.StoreMeta(4242, { name = "Legacy Potion", reagents = { { itemID = 1, qty = 1 } }, reagentsResolved = true })
+  local key, name, resolved = R.ResolveRecipeCategory(4242, "alch")
+  check("legacy name without cat -> other", key == "other" and resolved == false, key)
+
+  local ensureCalls = 0
+  local realEnsure = R.EnsureMetaResolved
+  R.EnsureMetaResolved = function(...)
+    ensureCalls = ensureCalls + 1
+    return realEnsure(...)
+  end
+  local bodies = {}
+  local realSend = GR.Comm.Send
+  GR.Comm.Send = function(_, body)
+    bodies[#bodies + 1] = body
+    return true
+  end
+  key, name, resolved = R.ResolveRecipeCategory(4242, "alch")
+  check("resolve does not call EnsureMetaResolved", ensureCalls == 0, ensureCalls)
+  check("resolve does not send PROFRMQ", #bodies == 0, #bodies)
+  R.EnsureMetaResolved = realEnsure
+  GR.Comm.Send = realSend
+
+  -- Incomplete client: only categoryID, no name yet
+  _G.C_TradeSkillUI = {
+    GetRecipeInfo = function(id)
+      if id == 4242 then return { categoryID = 55, name = "Legacy Potion" } end
+    end,
+    GetCategoryInfo = function() return nil end,
+  }
+  check("id without name not resolved", R.EnsureCategoryResolved(4242) == false)
+  local meta = R.GetMeta(4242)
+  check("id cached without name", meta and tonumber(meta.categoryId) == 55)
+  key, name, resolved = R.ResolveRecipeCategory(4242, "alch")
+  check("still other without name", resolved == false and key == "other")
+
+  _G.C_TradeSkillUI.GetCategoryInfo = function(cid)
+    if cid == 55 then return { name = "Potions", categoryID = 55 } end
+  end
+  check("later name resolves", R.EnsureCategoryResolved(4242) == true)
+  key, name, resolved = R.ResolveRecipeCategory(4242, "alch")
+  check("resolved key is id", resolved == true and key == "55" and name == "Potions", key)
+
+  -- Mat refresh preserves category
+  R.StoreMeta(4242, { name = "Legacy Potion", reagents = { { itemID = 9, qty = 2 } }, reagentsResolved = true })
+  meta = R.GetMeta(4242)
+  check("mat refresh keeps category", meta.categoryId == 55 and meta.categoryName == "Potions")
+  _G.C_TradeSkillUI = nil
+end
+
+do
+  local enc = R.EncodeCategoryBatch({
+    { recipeId = 1, categoryId = 10, categoryName = "Potions" },
+    { recipeId = 2, categoryId = 11, categoryName = "Elixirs" },
+  })
+  check("cat encode", type(enc) == "string" and enc:match("^1|") ~= nil)
+  local dec, why = R.DecodeCategoryBatch(enc)
+  check("cat decode", dec and #dec == 2 and dec[1].categoryName == "Potions", why)
+end
+
 print(string.format("%d failures", fails))
 if fails > 0 then os.exit(1) end

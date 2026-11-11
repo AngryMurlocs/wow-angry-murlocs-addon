@@ -26,6 +26,7 @@ local MAX_META_REQ_IDS = 24
 local MAX_META_NAME = 64
 local MAX_META_REAGENTS = 12
 local META_WIRE_VER = 1
+local CAT_WIRE_VER = 1
 local META_MAX_ATTEMPTS = 3
 local META_BUDGET_SEC = 90
 -- Must fit 3 attempts inside META_BUDGET_SEC (spacing ≈ expire, with send CD 20).
@@ -387,6 +388,13 @@ function ProfRecipes.StoreMeta(recipeId, info)
   if type(reagents) == "table" and #reagents > 0 then
     reagentsResolved = true
   end
+  local categoryId = info.categoryId
+  if categoryId ~= nil then
+    categoryId = tonumber(categoryId)
+    if not categoryId or categoryId <= 0 then categoryId = nil end
+  else
+    categoryId = prev.categoryId
+  end
   meta[recipeId] = {
     name = PickMetaField(info.name, prev.name),
     icon = PickMetaField(info.icon, prev.icon),
@@ -399,6 +407,8 @@ function ProfRecipes.StoreMeta(recipeId, info)
     hyperlink = PickMetaField(info.hyperlink, prev.hyperlink),
     isEnchant = info.isEnchant ~= nil and info.isEnchant or prev.isEnchant,
     locale = PickMetaField(info.locale, prev.locale),
+    categoryId = categoryId,
+    categoryName = PickMetaField(info.categoryName, prev.categoryName),
   }
 end
 
@@ -976,6 +986,19 @@ local function CaptureMeta(recipeId, recipeInfo, schematic, opts)
   if not outputItemID and schematic then
     outputItemID = schematic.outputItemID
   end
+  local categoryId = recipeInfo and tonumber(recipeInfo.categoryID)
+  if categoryId and categoryId <= 0 then categoryId = nil end
+  -- Category name filled below once TS() is available; CaptureMeta runs after load.
+  local categoryName = nil
+  if categoryId then
+    local api = _G.C_TradeSkillUI
+    if api and type(api.GetCategoryInfo) == "function" then
+      local ok, cinfo = pcall(api.GetCategoryInfo, categoryId)
+      if ok and type(cinfo) == "table" and type(cinfo.name) == "string" and cinfo.name ~= "" then
+        categoryName = cinfo.name
+      end
+    end
+  end
   -- reagentsResolved only when schematic was successfully inspected (incl. confirmed empty).
   local reagentsResolved = opts.schematicOk == true
   ProfRecipes.StoreMeta(recipeId, {
@@ -989,11 +1012,25 @@ local function CaptureMeta(recipeId, recipeInfo, schematic, opts)
     reagentsResolved = reagentsResolved,
     hyperlink = recipeInfo and recipeInfo.hyperlink,
     isEnchant = isEnchant,
+    categoryId = categoryId,
+    categoryName = categoryName,
   })
 end
 
 local function TS()
   return _G.C_TradeSkillUI
+end
+
+local function LookupCategoryName(categoryId)
+  categoryId = tonumber(categoryId)
+  if not categoryId or categoryId <= 0 then return nil end
+  local api = TS()
+  if not api or type(api.GetCategoryInfo) ~= "function" then return nil end
+  local ok, info = pcall(api.GetCategoryInfo, categoryId)
+  if not ok or type(info) ~= "table" then return nil end
+  local name = info.name
+  if type(name) == "string" and name ~= "" then return name end
+  return nil
 end
 
 -- Iterate GetProfessions() slots without ipairs holes (nil primary slots).
@@ -2047,6 +2084,11 @@ function ProfRecipes:OnEnable()
     ProfRecipes:OnMetaUpdate(sender, entries)
   end)
 
+  GR:BindMessage(self, "PROF_RECIPE_CATEGORY_UPDATE", function(_, sender, entries)
+    if U.IsSelfName(sender) then return end
+    ProfRecipes:OnCategoryUpdate(sender, entries)
+  end)
+
   GR:BindMessage(self, "SHARE_PROF_CHANGED", function()
     if GR.db and GR.db.privacy.shareProfessions then
       ProfRecipes:BroadcastAll(true)
@@ -2233,6 +2275,50 @@ function ProfRecipes.DecodeMetaRequest(rest)
   return ids
 end
 
+-- Wire PROFRC: ver|id|catId|catName;…  (category only; older clients ignore tag)
+function ProfRecipes.EncodeCategoryBatch(entries)
+  if type(entries) ~= "table" or #entries == 0 then return nil end
+  local parts = {}
+  local n = math.min(#entries, MAX_META_REQ_IDS)
+  for i = 1, n do
+    local e = entries[i]
+    local id = tonumber(e and e.recipeId or e and e.id)
+    local catId = tonumber(e and e.categoryId)
+    local catName = SanitizeMetaName(e and e.categoryName)
+    if id and id > 0 and catId and catId > 0 and catName ~= "" then
+      parts[#parts + 1] = string.format("%d|%d|%s", id, catId, catName)
+    end
+  end
+  if #parts == 0 then return nil end
+  return tostring(CAT_WIRE_VER) .. "|" .. table.concat(parts, ";")
+end
+
+function ProfRecipes.DecodeCategoryBatch(rest)
+  rest = tostring(rest or ""):gsub("[%c]", "")
+  if #rest > 20000 then return nil, "too_long" end
+  local ver, body = rest:match("^(%d+)|(.*)$")
+  ver = tonumber(ver)
+  if ver ~= CAT_WIRE_VER then return nil, "ver" end
+  if not body or body == "" then return nil, "empty" end
+  local out = {}
+  for record in string.gmatch(body, "([^;]+)") do
+    local id, catId, catName = record:match("^(%d+)|(%d+)|([^|]*)$")
+    id, catId = tonumber(id), tonumber(catId)
+    if id and id > 0 and catId and catId > 0 and catName and catName ~= "" then
+      out[#out + 1] = {
+        recipeId = id,
+        categoryId = catId,
+        categoryName = catName,
+      }
+      if #out > MAX_META_REQ_IDS then
+        return nil, "too_many"
+      end
+    end
+  end
+  if #out == 0 then return nil, "empty" end
+  return out
+end
+
 local function MetaShouldGiveUp(id, now)
   if metaGiveUp[id] then return true end
   local att = metaAttempt[id]
@@ -2306,6 +2392,54 @@ function ProfRecipes.EnsureMetaResolved(recipeId)
   CaptureMeta(recipeId, info, schematic, { schematicOk = schematicOk })
   local meta = ProfRecipes.GetMeta(recipeId)
   return meta, ProfRecipes.IsMetaComplete(meta)
+end
+
+-- Category-only resolve: never loads schematics / reagents / PROFRMQ.
+-- Returns true when both categoryId and localized categoryName are cached.
+function ProfRecipes.EnsureCategoryResolved(recipeId)
+  recipeId = tonumber(recipeId)
+  if not recipeId or recipeId <= 0 then return false end
+  local meta = ProfRecipes.GetMeta(recipeId)
+  local catId = meta and tonumber(meta.categoryId)
+  local catName = meta and meta.categoryName
+  if catId and catId > 0 and type(catName) == "string" and catName ~= "" then
+    return true
+  end
+  local api = TS()
+  if (not catId or catId <= 0) and api and type(api.GetRecipeInfo) == "function" then
+    local okInfo, info = pcall(api.GetRecipeInfo, recipeId)
+    if okInfo and type(info) == "table" then
+      catId = tonumber(info.categoryID)
+    end
+  end
+  if not catId or catId <= 0 then return false end
+  if not catName or catName == "" then
+    catName = LookupCategoryName(catId)
+  end
+  if type(catName) ~= "string" or catName == "" then
+    ProfRecipes.StoreMeta(recipeId, { categoryId = catId })
+    return false
+  end
+  ProfRecipes.StoreMeta(recipeId, { categoryId = catId, categoryName = catName })
+  return true
+end
+
+-- Returns categoryKey, categoryName, resolved.
+-- Unknown / incomplete → "other", localized Sonstiges, false.
+function ProfRecipes.ResolveRecipeCategory(recipeId, profKey)
+  recipeId = tonumber(recipeId)
+  local otherName = U.L("PROF_RECIPE_CAT_OTHER")
+  if not recipeId or recipeId <= 0 then
+    return "other", otherName, false
+  end
+  ProfRecipes.EnsureCategoryResolved(recipeId)
+  local meta = ProfRecipes.GetMeta(recipeId)
+  local catId = meta and tonumber(meta.categoryId)
+  local catName = meta and meta.categoryName
+  if catId and catId > 0 and type(catName) == "string" and catName ~= "" then
+    return tostring(catId), catName, true
+  end
+  return "other", otherName, false
 end
 
 function ProfRecipes._DrainMetaQueue()
@@ -2447,6 +2581,23 @@ function ProfRecipes:OnMetaRequest(sender, ids)
   local encoded = ProfRecipes.EncodeMetaBatch(entries)
   if not encoded then return end
   Comm:Send("PROFRM|" .. encoded, "data", "prof")
+  -- Piggyback WoW category id+name; older clients ignore unknown PROFRC.
+  local catEntries = {}
+  for i = 1, #entries do
+    local id = tonumber(entries[i].recipeId)
+    local meta = id and ProfRecipes.GetMeta(id)
+    if meta and tonumber(meta.categoryId) and meta.categoryName and meta.categoryName ~= "" then
+      catEntries[#catEntries + 1] = {
+        recipeId = id,
+        categoryId = meta.categoryId,
+        categoryName = meta.categoryName,
+      }
+    end
+  end
+  local catBody = ProfRecipes.EncodeCategoryBatch(catEntries)
+  if catBody then
+    Comm:Send("PROFRC|" .. catBody, "data", "prof")
+  end
 end
 
 function ProfRecipes:OnMetaUpdate(sender, entries)
@@ -2499,6 +2650,33 @@ function ProfRecipes:OnMetaUpdate(sender, entries)
     ProfRecipes.InvalidateGuildRecipeIndex()
     GR:SendMessage("PROF_RECIPE_META_CHANGED", sender)
     ScheduleMetaDrain(0.05)
+  end
+end
+
+function ProfRecipes:OnCategoryUpdate(sender, entries)
+  if U.IsSelfName(sender) then return end
+  if type(entries) ~= "table" then return end
+  local changed = false
+  for i = 1, #entries do
+    local e = entries[i]
+    local id = e and tonumber(e.recipeId)
+    local catId = e and tonumber(e.categoryId)
+    local catName = e and e.categoryName
+    if id and catId and catId > 0 and type(catName) == "string" and catName ~= "" then
+      local prev = ProfRecipes.GetMeta(id)
+      -- Do not wipe an existing resolved category with empty peer data (already gated).
+      if not (prev and tonumber(prev.categoryId) and prev.categoryName and prev.categoryName ~= "") then
+        ProfRecipes.StoreMeta(id, { categoryId = catId, categoryName = catName })
+        changed = true
+      elseif tonumber(prev.categoryId) ~= catId or prev.categoryName ~= catName then
+        -- Prefer peer name only when we already share the same id, or fill name for known id.
+        ProfRecipes.StoreMeta(id, { categoryId = catId, categoryName = catName })
+        changed = true
+      end
+    end
+  end
+  if changed then
+    GR:SendMessage("PROF_RECIPE_CATEGORY_CHANGED", sender)
   end
 end
 
@@ -2610,6 +2788,7 @@ ProfRecipes.WIRE_VER = WIRE_VER
 ProfRecipes.PROFR_WIRE_VER = PROFR_WIRE_VER
 ProfRecipes.PROFR_WIRE_VER_LEGACY = PROFR_WIRE_VER_LEGACY
 ProfRecipes.META_WIRE_VER = META_WIRE_VER
+ProfRecipes.CAT_WIRE_VER = CAT_WIRE_VER
 ProfRecipes.FLAG_COMPLETE = FLAG_COMPLETE
 ProfRecipes.GATHERING_KEYS = GATHERING_KEYS
 ProfRecipes._metaQueue = metaQueue
