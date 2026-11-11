@@ -106,6 +106,17 @@ do
   check("flood kill still accepted", q:Push("kill", "WK", "death", 0) and q:Pop(0).payload == "WK")
 end
 
+-- PushFront: a throttled item goes back to the front of its lane
+do
+  local q = Queue.New()
+  q:Push("data", "A", "misc", 0)
+  q:Push("data", "B", "misc", 0)
+  local a = q:Pop(0)
+  check("pushfront ok", q:PushFront(a) == true)
+  check("pushfront keeps order", q:Pop(0).payload == "A" and q:Pop(0).payload == "B")
+  check("pushfront bad item", q:PushFront({ prio = "nope" }) == false)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")

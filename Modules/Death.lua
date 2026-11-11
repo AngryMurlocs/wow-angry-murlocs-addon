@@ -660,28 +660,6 @@ local diagFrame
 local diagRegistered = {}
 local diagEvents = {}
 
--- #region agent log
-local function AgentDeathLog(hypothesisId, message, data)
-  if not GR.db then return end
-  if not GR._agentDebugCleared then
-    GR._agentDebugCleared = true
-    GR.db._agentDebug = {}
-    if U and U.Print then U.Print("AMDBG: DiagSafeArg post-fix active") end
-  end
-  local logs = GR.db._agentDebug
-  logs[#logs + 1] = {
-    sessionId = "e387d6",
-    runId = "post-fix",
-    hypothesisId = hypothesisId,
-    location = "Modules/Death.lua:DiagArgs",
-    message = message,
-    data = data,
-    timestamp = (GetServerTime and GetServerTime() or time()) * 1000,
-  }
-  while #logs > 50 do table.remove(logs, 1) end
-end
--- #endregion
-
 -- Forever: UNIT_COMBAT amount can be secret; table.concat rejects secrets.
 local function DiagSafeArg(v)
   if type(issecretvalue) == "function" and issecretvalue(v) then
@@ -699,48 +677,10 @@ end
 
 local function DiagArgs(...)
   local parts = {}
-  -- #region agent log
-  local argMeta = {}
-  local hasSecretRaw = false
-  local replaced = 0
-  local secretIdx = {}
-  local hasRestrictions = C_Secrets and C_Secrets.HasSecretRestrictions and C_Secrets.HasSecretRestrictions() or false
-  local hasIsSecret = type(issecretvalue) == "function"
-  -- #endregion
   for i = 1, math.min(select("#", ...), 8) do
-    local v = select(i, ...)
-    local asStr, wasSecret = DiagSafeArg(v)
-    -- #region agent log
-    local rawSecret = hasIsSecret and issecretvalue(v) or false
-    if rawSecret then
-      hasSecretRaw = true
-      secretIdx[#secretIdx + 1] = i
-    elseif wasSecret then
-      secretIdx[#secretIdx + 1] = i
-    end
-    if wasSecret then replaced = replaced + 1 end
-    argMeta[i] = {
-      typ = type(v),
-      rawSecret = rawSecret and 1 or 0,
-      replaced = wasSecret and 1 or 0,
-      preview = wasSecret and asStr or tostring(asStr):sub(1, 24),
-    }
-    -- #endregion
-    parts[#parts + 1] = asStr
+    parts[#parts + 1] = (DiagSafeArg((select(i, ...))))
   end
   local s = table.concat(parts, " | "):gsub("[%c]", " ")
-  -- #region agent log
-  AgentDeathLog("fix", "DiagArgs after fix", {
-    n = #parts,
-    hasRestrictions = hasRestrictions and 1 or 0,
-    hasIsSecret = hasIsSecret and 1 or 0,
-    hasSecretRaw = hasSecretRaw and 1 or 0,
-    replaced = replaced,
-    secretIdx = table.concat(secretIdx, ","),
-    concatOk = 1,
-    args = argMeta,
-  })
-  -- #endregion
   if #s > 160 then s = s:sub(1, 160) end
   return s
 end
@@ -751,12 +691,6 @@ local function SetDeathCapture(on)
       diagFrame = CreateFrame("Frame")
       diagFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "UNIT_COMBAT" and (...) ~= "player" then return end
-        -- #region agent log
-        AgentDeathLog("C", "diag event", {
-          event = tostring(event or "?"),
-          argc = select("#", ...),
-        })
-        -- #endregion
         diagEvents[#diagEvents + 1] = { t = U.Now(), text = event .. " " .. DiagArgs(...) }
         while #diagEvents > DIAG_KEEP do table.remove(diagEvents, 1) end
       end)

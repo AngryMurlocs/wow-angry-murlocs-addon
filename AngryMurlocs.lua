@@ -2,7 +2,7 @@ local GR = AngryMurlocs
 local U = GR.Util
 
 GR.VERSION = "0.11.3"
-GR.DISCORD_INVITE = "https://discord.gg/2Yh4gn8aQt"
+GR.DISCORD_INVITE = "https://discord.murlocs.eu"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
 
@@ -208,6 +208,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     AngryMurlocsDB = AngryMurlocsDB or {}
     CopyDefaults(defaults, AngryMurlocsDB)
     GR.db = AngryMurlocsDB
+    -- Leftover debug data from 0.11.x and older
     GR.db._agentDebug = nil
     GR.db.migrations = GR.db.migrations or {}
     local mig = GR.db.migrations

@@ -173,18 +173,22 @@ local function MaybeAlert(targetKey, zone, reporter)
 end
 
 local function OnTargetChanged()
-  if not UnitExists or not UnitExists("target") then return end
-  if not UnitIsPlayer or not UnitIsPlayer("target") then return end
+  local Plain = U.Plain
+  if not UnitExists or not Plain(UnitExists("target")) then return end
+  if not UnitIsPlayer or not Plain(UnitIsPlayer("target")) then return end
 
   local name, realm = UnitName("target")
-  if not name or name == "" then return end
+  name, realm = Plain(name), Plain(realm)
+  if type(name) ~= "string" or name == "" then return end
   if UnitFullName then
     local n, r = UnitFullName("target")
-    if n then
+    n, r = Plain(n), Plain(r)
+    if type(n) == "string" and n ~= "" then
       name = n
       realm = r
     end
   end
+  if type(realm) ~= "string" then realm = nil end
   local full
   if realm and realm ~= "" then
     full = name .. "-" .. realm
@@ -197,7 +201,8 @@ local function OnTargetChanged()
 
   if UnitClass then
     local _, classFile = UnitClass("target")
-    if classFile then
+    classFile = Plain(classFile)
+    if type(classFile) == "string" then
       Wanted:SetClassFile(key, classFile)
     end
   end
@@ -220,6 +225,13 @@ local function OnTargetChanged()
   MaybeAlert(key, zone, me)
 end
 
+-- Guarded entry for PLAYER_TARGET_CHANGED (also used by tests): a client API
+-- surprise must not raise a Lua error on every target change.
+function Wanted:_OnTargetChangedForTest()
+  local ok, err = pcall(OnTargetChanged)
+  if not ok then self:Reject("target_error", tostring(err)) end
+end
+
 function Wanted:OnEnable()
   if self.enabled then return end
   self.enabled = true
@@ -237,7 +249,7 @@ function Wanted:OnEnable()
   U.SafeRegisterEvent(targetFrame, "PLAYER_TARGET_CHANGED")
   targetFrame:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_TARGET_CHANGED" then
-      OnTargetChanged()
+      Wanted:_OnTargetChangedForTest()
     end
   end)
 

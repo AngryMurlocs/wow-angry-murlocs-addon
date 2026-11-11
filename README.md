@@ -10,7 +10,7 @@ Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Beruf
 
 - Gilden-Kartenpins mit **klassenbezogenen Murloc-Köpfen** (Zoom-feste Größe, Default **18**; Styles: Heads / Body / Rings; Ausfaden vor dem Verschwinden nach 60 s). Mehrere Spieler auf einem Punkt stehen nebeneinander statt übereinander.
 - Berufsliste mit Gilden-Sync, **Online** (Addon kürzlich gehört), Sortierung und Paging (Top 40 von N)
-- Wanted-Liste mit Zählung **pro Opfer** (kein Doppelzählen über Live/Relay/Sync), Sync mit sichtbarem Status, lokales Ausblenden
+- Wanted-Liste mit Zählung **pro Opfer** (kein Doppelzählen über Live/Relay/Sync), Sync mit sichtbarem Status
 - Wanted-**Sichtungen** beim Anwählen: Frische frisch (&lt;60 s) / aktuell (&lt;5 Min) / veraltet
 - Todes- und Level-Up-Toasts (gemeinsame Queue, Cooldown, Kampf wartet)
 - Privacy-Schalter (Position, Tod/Wanted, Berufe, Sichtungen, Level-Ups) und `/am diag` (nur lokal)
@@ -79,7 +79,7 @@ Addon-Optionen (Seitenleiste): Freigaben, Karte, Level-Up / Tod / Sichtungen, Ob
 
 - Ehrliche Wanted-Zählung pro Opfer, keine Ziel-Beschuldigung
 - Sync mit einem Antwortenden, Seiten, Status und Sperre
-- Lokales Ausblenden statt Löschen
+- Lokales Ausblenden statt Löschen (inzwischen wieder entfernt)
 - Privacy: eigene Tode nur bei „Gilden-Tode teilen“, Berufe-Cache pro Gilde
 - `/am diag` für lokale Diagnose
 
