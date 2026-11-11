@@ -1,0 +1,4 @@
+source: https://github.com/Ketho/BlizzardInterfaceResources.git (branch forever)
+commit: d1ee569878094270c0ad8d8b00de0762158fd578
+build: "1.60.1", "70532", "Oct 20 2026", 16001
+functions: 12869  events: 1814  templates: 4061  enums: 7572

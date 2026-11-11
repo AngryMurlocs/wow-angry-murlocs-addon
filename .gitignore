@@ -26,3 +26,6 @@ tools/
 
 # Cursor / agent scratch
 .cursor/
+
+# Forever API source checkout (Tests/forever_api/update.lua)
+Tests/forever_api/.cache/
