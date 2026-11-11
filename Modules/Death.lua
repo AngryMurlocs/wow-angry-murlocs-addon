@@ -102,29 +102,9 @@ local function EnsureToast()
     RaiseToast(toast)
     return toast
   end
-  toast = CreateFrame("Frame", "AngryMurlocsDeathToast", UIParent, BackdropTemplate and "BackdropTemplate" or nil)
-  toast:SetSize(520, 56)
+  -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
+  toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.54, 0.38, 0.39 })
   RaiseToast(toast)
-  if toast.SetBackdrop then
-    toast:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      edgeSize = 12,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    toast:SetBackdropColor(0.15, 0.02, 0.02, 0.9)
-    toast:SetBackdropBorderColor(0.6, 0.1, 0.1, 1)
-  end
-  toast.text = toast:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  toast.text:SetPoint("CENTER", 0, 4)
-  toast.text:SetWidth(500)
-  do
-    local path, _, flags = toast.text:GetFont()
-    if path then toast.text:SetFont(path, 20, flags) end
-  end
-
-  toast.hint = toast:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  toast.hint:SetPoint("BOTTOM", 0, 6)
   toast.hint:SetText(U.L("TOAST_DRAG_HINT"))
 
   U.MakeMovable(toast, {

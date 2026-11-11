@@ -237,3 +237,56 @@ function T.StatusCard(parent, width, height)
   card:EnableMouse(true)
   return card
 end
+
+-- Illustrated toast frames (death / level-up). The art lives in Media/Toasts as
+-- 1024x512 textures with the 3:1 image in the top 341 rows. `box` is the calm
+-- dark panel of the art where the text goes, as fractions of the image:
+-- center x, center y, width, height.
+T.TOAST_W = 720
+T.TOAST_H = 240
+T.TOAST_FONT = "Interface\\AddOns\\AngryMurlocs\\Media\\Fonts\\Cinzel-Bold.ttf"
+T.TOAST_TEXT = { 0.914, 0.886, 0.831 } -- #E9E2D4
+
+local TOAST_ART_V = 341 / 512
+
+local function ToastFont(fs, size, fallbackTemplate)
+  local ok = fs:SetFont(T.TOAST_FONT, size, "")
+  if ok == false and fallbackTemplate then
+    fs:SetFontObject(fallbackTemplate)
+  end
+  fs:SetShadowColor(0, 0, 0, 1)
+  fs:SetShadowOffset(1, -1)
+end
+
+function T.CreateArtToast(globalName, art, box, textSize)
+  local W, H = T.TOAST_W, T.TOAST_H
+  local f = CreateFrame("Frame", globalName, UIParent)
+  f:SetSize(W, H)
+
+  local bg = f:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints()
+  bg:SetTexture("Interface\\AddOns\\AngryMurlocs\\Media\\Toasts\\" .. art)
+  bg:SetTexCoord(0, 1, 0, TOAST_ART_V)
+  f.bg = bg
+
+  local cx, cy, bw, bh = box[1] * W, box[2] * H, box[3] * W, box[4] * H
+
+  local text = f:CreateFontString(nil, "OVERLAY")
+  ToastFont(text, textSize or 16, GameFontHighlight)
+  text:SetTextColor(T.TOAST_TEXT[1], T.TOAST_TEXT[2], T.TOAST_TEXT[3])
+  text:SetPoint("CENTER", f, "TOPLEFT", cx, -cy)
+  text:SetWidth(bw)
+  text:SetJustifyH("CENTER")
+  text:SetJustifyV("MIDDLE")
+  if text.SetWordWrap then text:SetWordWrap(true) end
+  if text.SetMaxLines then text:SetMaxLines(3) end
+  f.text = text
+
+  local hint = f:CreateFontString(nil, "OVERLAY")
+  ToastFont(hint, 10, GameFontDisableSmall)
+  hint:SetTextColor(T.TOAST_TEXT[1], T.TOAST_TEXT[2], T.TOAST_TEXT[3], 0.7)
+  hint:SetPoint("BOTTOM", f, "TOPLEFT", cx, -(cy + bh / 2))
+  f.hint = hint
+
+  return f
+end
