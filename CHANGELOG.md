@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## 0.11.3
+
+- Fixed a file problem that could make the game show the addon as out of date
+
 ## 0.11.2
 
 - Death and level-up messages stay off when you turn them off, even if they were already waiting; previews no longer interrupt each other

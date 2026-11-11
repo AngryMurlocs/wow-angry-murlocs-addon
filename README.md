@@ -2,7 +2,7 @@
 
 Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
 
-**Version:** 0.11.2
+**Version:** 0.11.3
 
 **Download:** [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) · **Quellcode:** [GitHub](https://github.com/AngryMurlocs/wow-angry-murlocs-addon)
 
