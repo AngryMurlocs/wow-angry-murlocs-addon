@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.1
 
 - New look for death and level-up messages, with murloc artwork and a new font
 - Death messages are easier to read: who died, the cause and the place each get their own line
