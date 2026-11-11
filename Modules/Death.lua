@@ -19,24 +19,55 @@ local displayDone
 local muteNextSound = false
 local previewGen = 0
 
-local ENV_KEYS = {
-  FALLING = "DEATH_ENV_FALL",
-  FALL = "DEATH_ENV_FALL",
-  ["2"] = "DEATH_ENV_FALL",
-  DROWNING = "DEATH_ENV_DROWN",
-  DROWN = "DEATH_ENV_DROWN",
-  ["1"] = "DEATH_ENV_DROWN",
-  FATIGUE = "DEATH_ENV_FATIGUE",
-  EXHAUSTED = "DEATH_ENV_FATIGUE",
-  EXHAUSTION = "DEATH_ENV_FATIGUE",
-  ["0"] = "DEATH_ENV_FATIGUE",
-  LAVA = "DEATH_ENV_LAVA",
-  ["3"] = "DEATH_ENV_LAVA",
-  SLIME = "DEATH_ENV_SLIME",
-  ["4"] = "DEATH_ENV_SLIME",
-  FIRE = "DEATH_ENV_FIRE",
-  ["5"] = "DEATH_ENV_FIRE",
+-- Wire / attribution spellKind codes (not locale keys). RAW = use legacy spell text.
+local SPELLKIND_LOCALE = {
+  MELEE = "DEATH_MELEE",
+  RANGED = "DEATH_RANGED",
+  UNKNOWN_ATTACK = "DEATH_UNKNOWN_ATTACK",
+  ENV_FALL = "DEATH_ENV_FALL",
+  ENV_DROWN = "DEATH_ENV_DROWN",
+  ENV_FATIGUE = "DEATH_ENV_FATIGUE",
+  ENV_LAVA = "DEATH_ENV_LAVA",
+  ENV_SLIME = "DEATH_ENV_SLIME",
+  ENV_FIRE = "DEATH_ENV_FIRE",
+  ENV_OTHER = "DEATH_ENV_OTHER",
 }
+
+local MELEE_ENV_KINDS = {
+  MELEE = true,
+  ENV_FALL = true,
+  ENV_DROWN = true,
+  ENV_FATIGUE = true,
+  ENV_LAVA = true,
+  ENV_SLIME = true,
+  ENV_FIRE = true,
+  ENV_OTHER = true,
+}
+
+local ENV_TO_KIND = {
+  FALLING = "ENV_FALL",
+  FALL = "ENV_FALL",
+  ["2"] = "ENV_FALL",
+  DROWNING = "ENV_DROWN",
+  DROWN = "ENV_DROWN",
+  ["1"] = "ENV_DROWN",
+  FATIGUE = "ENV_FATIGUE",
+  EXHAUSTED = "ENV_FATIGUE",
+  EXHAUSTION = "ENV_FATIGUE",
+  ["0"] = "ENV_FATIGUE",
+  LAVA = "ENV_LAVA",
+  ["3"] = "ENV_LAVA",
+  SLIME = "ENV_SLIME",
+  ["4"] = "ENV_SLIME",
+  FIRE = "ENV_FIRE",
+  ["5"] = "ENV_FIRE",
+}
+
+-- Per-surface dedupe: key = normalize(victim)|eventId
+local seenToast = {}
+local seenFeed = {}
+local eventIdSerial = 0
+local pendingEventId -- reused across resolve retries for one death
 
 local function Cfg()
   GR.db.death = GR.db.death or {}
@@ -131,24 +162,79 @@ local function EnsureToast()
   return toast
 end
 
-local function SpellForCause(cause, spell)
-  if cause == "unknown" then return "" end
-  if cause == "player" or cause == "mob" then
-    if type(spell) ~= "string" or spell == "" or spell == U.L("UNKNOWN_KILLER") then
-      return U.L("DEATH_UNKNOWN_ATTACK")
+local function EnvKindFromType(envType)
+  return ENV_TO_KIND[tostring(envType or ""):upper()] or "ENV_OTHER"
+end
+
+local function ResolveSpellIdLocal(spellId)
+  spellId = tonumber(spellId)
+  if not spellId then return nil end
+  if C_Spell and type(C_Spell.GetSpellInfo) == "function" then
+    local ok, info = pcall(C_Spell.GetSpellInfo, spellId)
+    if ok and type(info) == "table" then
+      local name = info.name
+      if type(issecretvalue) == "function" and issecretvalue(name) then name = nil end
+      if type(name) == "string" then
+        name = name:match("^%s*(.-)%s*$")
+        if name ~= "" then return name end
+      end
     end
-    return spell
   end
-  if type(spell) ~= "string" or spell == "" then
-    return U.L("DEATH_CAUSE_ENV")
+  if type(GetSpellInfo) == "function" then
+    local ok, name = pcall(GetSpellInfo, spellId)
+    if ok and type(name) == "string" then
+      if type(issecretvalue) == "function" and issecretvalue(name) then return nil end
+      name = name:match("^%s*(.-)%s*$")
+      if name ~= "" then return name end
+    end
   end
-  return spell
+  return nil
+end
+
+-- Locked attack-line resolve (receiver locale). See AGENTS.md synced notifications.
+-- 1) confirmed melee/env kind → U.L
+-- 2) spell-like → spellId first, then kind / legacy prose / unknown
+-- 3) RAW / prose-only → legacy spell text
+local function ResolveAttackLine(cause, spellKind, spellId, legacySpell)
+  if cause == "unknown" then return "" end
+  spellKind = tostring(spellKind or "")
+  if spellKind ~= "" and MELEE_ENV_KINDS[spellKind] then
+    local key = SPELLKIND_LOCALE[spellKind]
+    return key and U.L(key) or U.L("DEATH_ENV_OTHER")
+  end
+  local legacy = type(legacySpell) == "string" and legacySpell or ""
+  if legacy == U.L("UNKNOWN_KILLER") then legacy = "" end
+  local hasId = tonumber(spellId) ~= nil
+  local spellLike = hasId or spellKind == "RANGED" or spellKind == "UNKNOWN_ATTACK"
+    or (cause == "player" or cause == "mob")
+  if spellLike and (hasId or spellKind == "RANGED" or spellKind == "UNKNOWN_ATTACK" or legacy == "") then
+    if hasId then
+      local name = ResolveSpellIdLocal(spellId)
+      if name then return name end
+    end
+    if spellKind == "RANGED" or spellKind == "UNKNOWN_ATTACK" then
+      return U.L(SPELLKIND_LOCALE[spellKind])
+    end
+    if legacy ~= "" then return legacy end
+    if cause == "env" then return U.L("DEATH_CAUSE_ENV") end
+    return U.L("DEATH_UNKNOWN_ATTACK")
+  end
+  if legacy ~= "" then return legacy end
+  if cause == "env" then return U.L("DEATH_CAUSE_ENV") end
+  if cause == "player" or cause == "mob" then return U.L("DEATH_UNKNOWN_ATTACK") end
+  return ""
+end
+
+local function KillerForDisplay(killer)
+  if type(killer) ~= "string" or killer == "" or killer == "?" then
+    return U.L("UNKNOWN_KILLER")
+  end
+  return killer
 end
 
 local function FormatDeathLine(victim, cause, killer, spell, zone)
   zone = (zone and zone ~= "") and zone or "?"
-  killer = killer or U.L("UNKNOWN_KILLER")
-  spell = SpellForCause(cause, spell)
+  killer = KillerForDisplay(killer)
   local body
   if cause == "unknown" then
     body = string.format(U.L("DEATH_TOAST_UNKNOWN"), victim, zone)
@@ -160,6 +246,51 @@ local function FormatDeathLine(victim, cause, killer, spell, zone)
     body = string.format(U.L("DEATH_TOAST_ENV"), victim, spell, zone)
   end
   return body
+end
+
+local function NewEventId()
+  eventIdSerial = eventIdSerial + 1
+  local t = math.floor((U.WallTime() or 0) * 1000) % 1000000000
+  local r = math.random(1, 0x7FFFFFFF)
+  return string.format("%x-%x-%x", t, r, eventIdSerial)
+end
+
+function Death.DedupeKey(victim, eventId)
+  if type(eventId) ~= "string" or eventId == "" then return nil end
+  local v = U.NormalizeName(victim) or tostring(victim or "")
+  if v == "" then return nil end
+  return v .. "|" .. eventId
+end
+
+function Death.TryClaimToast(victim, eventId)
+  local key = Death.DedupeKey(victim, eventId)
+  if not key then return true end -- no id: allow (legacy heuristic elsewhere)
+  if seenToast[key] then return false end
+  seenToast[key] = true
+  return true
+end
+
+function Death.TryClaimFeed(victim, eventId)
+  local key = Death.DedupeKey(victim, eventId)
+  if not key then return true end
+  if seenFeed[key] then return false end
+  seenFeed[key] = true
+  return true
+end
+
+function Death.ResetSeenForTest()
+  wipe(seenToast)
+  wipe(seenFeed)
+  eventIdSerial = 0
+  pendingEventId = nil
+end
+
+function Death.SpellKindLocaleKeys()
+  return SPELLKIND_LOCALE
+end
+
+function Death.ResolveAttackLine(cause, spellKind, spellId, legacySpell)
+  return ResolveAttackLine(cause, spellKind, spellId, legacySpell)
 end
 
 local function DisplayDeathToast(item, done)
@@ -181,7 +312,8 @@ local function DisplayDeathToast(item, done)
   displayDone = done
   -- Badge on its own larger line above the text (TOT / DEAD)
   if f.title then f.title:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r") end
-  f.text:SetText(FormatDeathLine(item.victim, item.cause, item.killer, item.spell, item.zone))
+  local attack = ResolveAttackLine(item.cause, item.spellKind, item.spellId, item.spell)
+  f.text:SetText(FormatDeathLine(item.victim, item.cause, item.killer, attack, item.zone))
   f:SetAlpha(1)
   f:Show()
 
@@ -211,60 +343,59 @@ local function DisplayDeathToast(item, done)
   end)
 end
 
-local function ShowDeathToast(victim, cause, killer, spell, zone)
+-- item: victim, cause, killer, spellKind, spellId, spell (legacy prose), zone, eventId
+local function ShowDeathToast(item)
+  item = item or {}
   if not Cfg().showToasts then return end
+  if item.eventId and item.eventId ~= "" then
+    if not Death.TryClaimToast(item.victim, item.eventId) then return end
+  end
   if GR.ToastQueue then
     GR.ToastQueue.Enqueue({
       kind = "death",
-      victim = victim,
-      cause = cause,
-      killer = killer,
-      spell = spell,
-      zone = zone,
+      victim = item.victim,
+      cause = item.cause,
+      killer = item.killer,
+      spell = item.spell,
+      spellKind = item.spellKind,
+      spellId = item.spellId,
+      zone = item.zone,
+      eventId = item.eventId,
     })
     return
   end
-  DisplayDeathToast({ victim = victim, cause = cause, killer = killer, spell = spell, zone = zone })
+  DisplayDeathToast(item)
 end
 
-local function CacheEnvHint(spell)
-  if type(spell) ~= "string" or spell == "" then return end
-  envHint.spell = spell
+local function CacheEnvHint(kind)
+  if type(kind) ~= "string" or kind == "" then return end
+  envHint.spell = kind
   envHint.t = U.Now()
 end
 
-local function EnvLabelFromType(envType)
-  local key = ENV_KEYS[tostring(envType or ""):upper()]
-  return key and U.L(key) or U.L("DEATH_ENV_OTHER")
-end
-
-local function MirrorTimerToSpell(timer)
+local function MirrorTimerToKind(timer)
   local t = tostring(timer or ""):upper()
-  if t == "BREATH" then
-    return U.L("DEATH_ENV_DROWN")
-  end
-  if t == "EXHAUSTION" or t == "FATIGUE" then
-    return U.L("DEATH_ENV_FATIGUE")
-  end
+  if t == "BREATH" then return "ENV_DROWN" end
+  if t == "EXHAUSTION" or t == "FATIGUE" then return "ENV_FATIGUE" end
   return nil
 end
 
 local function OnMirrorTimerStart(timer, value, _, scale, paused)
-  local spell = MirrorTimerToSpell(timer)
-  if not spell then return end
+  local kind = MirrorTimerToKind(timer)
+  if not kind then return end
   if type(issecretvalue) == "function" and (issecretvalue(value) or issecretvalue(scale) or issecretvalue(paused)) then return end
   -- A visible breath bar is not drowning damage. Only a depleted, running
   -- timer is even a hint; it never establishes a killing blow by itself.
   if type(value) == "number" and value <= 0 and type(scale) == "number" and scale < 0
     and (paused == nil or paused == false or paused == 0) then
-    CacheEnvHint(spell)
-  elseif envHint.spell == spell then
+    CacheEnvHint(kind)
+  elseif envHint.spell == kind then
     envHint.spell, envHint.t = nil, 0
   end
 end
 
 local function OnMirrorTimerStop(timer)
-  if envHint.spell == MirrorTimerToSpell(timer) then
+  if envHint.spell == MirrorTimerToKind(timer) then
     envHint.spell, envHint.t = nil, 0
   end
 end
@@ -272,8 +403,8 @@ end
 local function PollFalling()
   if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then return end
   if IsFalling and IsFalling() then
-    CacheEnvHint(U.L("DEATH_ENV_FALL"))
-  elseif envHint.spell == U.L("DEATH_ENV_FALL") then
+    CacheEnvHint("ENV_FALL")
+  elseif envHint.spell == "ENV_FALL" then
     envHint.spell, envHint.t = nil, 0
   end
 end
@@ -363,27 +494,22 @@ local function IsRecapDamageEvent(evName)
   return evName:match("_DAMAGE$") ~= nil or evName == "DAMAGE_SHIELD" or evName == "DAMAGE_SPLIT"
 end
 
-local function SpellFromRecap(f)
+-- Structured attack facts from a recap hit (no U.L; keep spellId).
+local function AttackFromRecap(f)
   local evName = tostring(f.event or "")
   if evName == "ENVIRONMENTAL_DAMAGE" then
-    return EnvLabelFromType(f.environmentalType)
+    return { spellKind = EnvKindFromType(f.environmentalType), spellId = nil, spell = nil }
   end
-  if evName == "SWING_DAMAGE" then return U.L("DEATH_MELEE") end
-  if f.spellName then return f.spellName end
-  if f.spellId then
-    if C_Spell and type(C_Spell.GetSpellInfo) == "function" then
-      local ok, info = pcall(C_Spell.GetSpellInfo, f.spellId)
-      info = ok and Plain(info) or nil
-      local name = type(info) == "table" and PlainName(info.name)
-      if name then return name end
-    end
-    if type(GetSpellInfo) == "function" then
-      local ok, name = pcall(GetSpellInfo, f.spellId)
-      name = ok and PlainName(name) or nil
-      if name then return name end
-    end
+  if evName == "SWING_DAMAGE" then
+    return { spellKind = "MELEE", spellId = f.spellId, spell = nil }
   end
-  return U.L(evName == "RANGE_DAMAGE" and "DEATH_RANGED" or "DEATH_UNKNOWN_ATTACK")
+  local kind = nil
+  if not f.spellName then
+    kind = (evName == "RANGE_DAMAGE") and "RANGED" or "UNKNOWN_ATTACK"
+  elseif evName == "RANGE_DAMAGE" and not f.spellId then
+    kind = "RANGED"
+  end
+  return { spellKind = kind, spellId = f.spellId, spell = f.spellName }
 end
 
 -- Pure mapping: Recap event list -> attribution (testable without WoW APIs).
@@ -411,22 +537,24 @@ local function AttributionFromRecapEvents(events)
 
   local guid = tostring(pick.sourceGUID or "")
   local name = pick.sourceName
-  local spell = SpellFromRecap(pick)
+  local atk = AttackFromRecap(pick)
 
   -- A recap containing only explicitly nonlethal hits is incomplete. Its last
   -- known attacker is a suspect, not a killing-blow source for toast or Wanted.
   if not pick.lethal and pick.overkill ~= nil and pick.overkill < 0 then
     return {
-      killer = U.L("UNKNOWN_KILLER"), isPlayer = false, cause = "unknown",
-      spell = "", reliable = false, source = "recap", suspect = name,
+      killer = nil, isPlayer = false, cause = "unknown",
+      spell = "", spellKind = nil, spellId = nil,
+      reliable = false, source = "recap", suspect = name,
       lethal = false, timestamp = pick.timestamp,
     }
   end
 
   if pick.event == "ENVIRONMENTAL_DAMAGE" then
     return {
-      killer = U.L("UNKNOWN_KILLER"), isPlayer = false, cause = "env",
-      spell = spell, reliable = false, source = "recap",
+      killer = nil, isPlayer = false, cause = "env",
+      spell = atk.spell, spellKind = atk.spellKind, spellId = atk.spellId,
+      reliable = false, source = "recap",
       lethal = pick.lethal, timestamp = pick.timestamp,
     }
   end
@@ -436,7 +564,9 @@ local function AttributionFromRecapEvents(events)
       killer = name,
       isPlayer = true,
       cause = "player",
-      spell = SpellForCause("player", spell),
+      spell = atk.spell,
+      spellKind = atk.spellKind,
+      spellId = atk.spellId,
       reliable = true,
       source = "recap",
       lethal = pick.lethal,
@@ -446,10 +576,12 @@ local function AttributionFromRecapEvents(events)
 
   if guid:find("^Creature%-") or guid:find("^Vehicle%-") or guid:find("^Pet%-") then
     return {
-      killer = name or U.L("UNKNOWN_KILLER"),
+      killer = name,
       isPlayer = false,
       cause = "mob",
-      spell = SpellForCause("mob", spell),
+      spell = atk.spell,
+      spellKind = atk.spellKind,
+      spellId = atk.spellId,
       reliable = false,
       source = "recap",
       lethal = pick.lethal,
@@ -459,10 +591,12 @@ local function AttributionFromRecapEvents(events)
 
   -- An incomplete identity does not prove either a mob or an environmental kill.
   return {
-    killer = U.L("UNKNOWN_KILLER"),
+    killer = nil,
     isPlayer = false,
     cause = "unknown",
     spell = "",
+    spellKind = nil,
+    spellId = nil,
     reliable = false,
     source = "recap",
     suspect = name,
@@ -496,8 +630,9 @@ local function ResolveDeath(deathWall)
     -- never sufficient to override an explicitly lethal mob/player hit.
     if not hint or recap.lethal or recap.cause == "env" then return recap end
     return {
-      killer = U.L("UNKNOWN_KILLER"), isPlayer = false, cause = "unknown",
-      spell = "", reliable = false, source = "hint", envHint = hint,
+      killer = nil, isPlayer = false, cause = "unknown",
+      spell = "", spellKind = nil, spellId = nil,
+      reliable = false, source = "hint", envHint = hint,
     }
   end
 
@@ -506,10 +641,12 @@ local function ResolveDeath(deathWall)
     for _, unit in ipairs({ "attacking", "target" }) do
       if UnitExists(unit) and (unit == "attacking" or (UnitCanAttack and UnitCanAttack("player", unit))) then
         return {
-          killer = U.L("UNKNOWN_KILLER"),
+          killer = nil,
           isPlayer = false,
           cause = "unknown",
           spell = "",
+          spellKind = nil,
+          spellId = nil,
           reliable = false,
           suspect = UnitKillerName(unit),
           envHint = hint,
@@ -520,10 +657,12 @@ local function ResolveDeath(deathWall)
   end
 
   return {
-    killer = U.L("UNKNOWN_KILLER"),
+    killer = nil,
     isPlayer = false,
     cause = "unknown",
     spell = "",
+    spellKind = nil,
+    spellId = nil,
     reliable = false,
     envHint = hint,
     source = "fallback",
@@ -726,16 +865,37 @@ function Death:BroadcastLocalDeath(info, snapshot)
   info = info or ResolveDeath(snapshot.wallTime)
   local ctx, zone, mapId = snapshot.ctx, snapshot.zone, snapshot.mapId
   local cause = info.cause or "unknown"
-  local spell = SpellForCause(cause, info.spell)
+  local spellKind = info.spellKind
+  local spellId = info.spellId
+  -- Compat: always fill legacy spell with sender-locale display prose for old peers.
+  local legacySpell = ResolveAttackLine(cause, spellKind, spellId, info.spell)
+  local eventId = snapshot.eventId or pendingEventId or NewEventId()
+  snapshot.eventId = eventId
+  pendingEventId = nil
   local me = U.ShortName(U.PlayerName())
+  local fullName = U.NormalizeName(U.PlayerName())
+  local killerWire = (cause == "unknown" or not info.killer or info.killer == "") and "?" or Sanitize(info.killer)
 
-  ShowDeathToast(me, cause, info.killer, spell, zone)
-  GR:SendMessage("DEATH_UPDATE", U.NormalizeName(U.PlayerName()), {
-    killer = info.killer or "?",
+  ShowDeathToast({
+    victim = me,
+    cause = cause,
+    killer = info.killer,
+    spell = legacySpell,
+    spellKind = spellKind,
+    spellId = spellId,
+    zone = zone,
+    eventId = eventId,
+  })
+  GR:SendMessage("DEATH_UPDATE", fullName, {
+    killer = killerWire,
     isPlayer = cause == "player",
     zone = zone,
+    mapId = mapId,
     cause = cause,
-    spell = spell,
+    spell = legacySpell,
+    spellKind = spellKind,
+    spellId = spellId,
+    eventId = eventId,
   })
 
   local verdict = "no_player"
@@ -761,19 +921,24 @@ function Death:BroadcastLocalDeath(info, snapshot)
   SnapshotDeath(info, ctx, zone, verdict)
 
   if not IsInGuild() then return end
+  -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId
   Comm:Send(string.format(
-    "DEATH|%s|%d|%s|%d|%s|%s",
-    cause == "unknown" and "?" or Sanitize(info.killer),
+    "DEATH|%s|%d|%s|%d|%s|%s|%s|%s|%s",
+    killerWire,
     cause == "player" and 1 or 0,
     Sanitize(zone),
     mapId or 0,
     Sanitize(cause),
-    Sanitize(spell)
+    Sanitize(legacySpell),
+    Sanitize(eventId),
+    Sanitize(spellKind or ""),
+    spellId and tostring(math.floor(tonumber(spellId) or 0)) or ""
   ), "kill", "death")
 end
 
 local function CancelPendingDeath()
   deathSerial = deathSerial + 1
+  pendingEventId = nil
   if resolveTimer then resolveTimer:Cancel() resolveTimer = nil end
 end
 
@@ -785,6 +950,8 @@ local function QueueLocalDeath()
   CancelPendingDeath()
   local serial = deathSerial
   local snapshot = CaptureDeathContext()
+  snapshot.eventId = NewEventId()
+  pendingEventId = snapshot.eventId
   local delays = { 0.15, 0.35, 0.5 }
   local attempt = 0
   local function TryResolve()
@@ -918,13 +1085,16 @@ function Death:OnEnable()
     if U.IsSelfName(victim) then return end
     data = data or {}
     local cause = data.cause or (data.isPlayer and "player" or "mob")
-    ShowDeathToast(
-      U.ShortName(victim),
-      cause,
-      data.killer or "?",
-      SpellForCause(cause, data.spell),
-      data.zone or ""
-    )
+    ShowDeathToast({
+      victim = U.ShortName(victim),
+      cause = cause,
+      killer = data.killer,
+      spell = data.spell,
+      spellKind = data.spellKind,
+      spellId = data.spellId,
+      zone = data.zone or "",
+      eventId = data.eventId,
+    })
   end)
 
   Death._inDuel = false

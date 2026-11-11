@@ -93,20 +93,28 @@ do
   a.env.C_Spell = { GetSpellInfo = function(id) if id == 133 then return { name = "Fireball" } end end }
   local hit = Hit("Mage", "Creature-0-1-0-0-1-0")
   hit.spellName, hit.spellId = nil, 133
-  check("spell ID resolves missing spell name", map({ hit }).spell == "Fireball")
+  local atk = map({ hit })
+  check("spell ID kept on attribution", atk and atk.spellId == 133 and (atk.spell == nil or atk.spell == ""), atk and atk.spellId)
+  check("spell ID resolves at display", d.ResolveAttackLine("mob", atk.spellKind, 133, nil) == "Fireball")
   a.env.C_Spell = false
-  check("unavailable spell API gives unknown attack", map({ hit }).spell == a.GR.Util.L("DEATH_UNKNOWN_ATTACK"))
+  atk = map({ hit })
+  check("unavailable spell API keeps kind", atk and atk.spellKind == "UNKNOWN_ATTACK", atk and atk.spellKind)
+  check("unavailable spell API display unknown",
+    d.ResolveAttackLine("mob", "UNKNOWN_ATTACK", 133, "") == a.GR.Util.L("DEATH_UNKNOWN_ATTACK"))
   hit.event = "RANGE_DAMAGE"
-  check("ranged attack is never guessed melee", map({ hit }).spell == a.GR.Util.L("DEATH_RANGED"))
+  atk = map({ hit })
+  check("ranged attack is never guessed melee", atk and atk.spellKind == "RANGED", atk and atk.spellKind)
   hit.event = "SWING_DAMAGE"
-  check("actual swing is melee", map({ hit }).spell == a.GR.Util.L("DEATH_MELEE"))
+  atk = map({ hit })
+  check("actual swing is melee kind", atk and atk.spellKind == "MELEE", atk and atk.spellKind)
+  check("actual swing display melee", d.ResolveAttackLine("mob", "MELEE", nil, nil) == a.GR.Util.L("DEATH_MELEE"))
 end
 do
   local _, a, _, d = Pair()
   check("no data is unknown", d.ResolveDeath().cause == "unknown")
   World(a, { combat = true, units = { target = { name = "UninvolvedWolf", hostile = true } } })
   check("target mob is not a proven killer", d.ResolveDeath().cause == "unknown")
-  check("target mob has no invented melee attack", d.ResolveDeath().spell == "")
+  check("target mob has no invented melee attack", d.ResolveDeath().spell == "" or d.ResolveDeath().spell == nil)
 end
 do
   local sim, a, _, d = Pair()

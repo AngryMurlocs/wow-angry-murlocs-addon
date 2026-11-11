@@ -51,6 +51,15 @@ end
 for _, s in ipairs({ "IDLE", "PENDING", "WAITING", "NOREPLY", "NOGUILD", "FAILED" }) do
   used["SYNC_STATE_" .. s] = "Modules/WantedSync.lua (dynamic)"
 end
+-- Death spellKind → locale keys (U.L(key) dynamic; not grepped as literals)
+for _, key in ipairs({
+  "DEATH_MELEE", "DEATH_RANGED", "DEATH_UNKNOWN_ATTACK",
+  "DEATH_ENV_FALL", "DEATH_ENV_DROWN", "DEATH_ENV_FATIGUE",
+  "DEATH_ENV_LAVA", "DEATH_ENV_SLIME", "DEATH_ENV_FIRE", "DEATH_ENV_OTHER",
+  "DEATH_CAUSE_ENV",
+}) do
+  used[key] = "Modules/Death.lua (spellKind)"
+end
 _G.AngryMurlocs = nil
 local logic = dofile("Core/WantedLogic.lua")
 logic = logic or (_G.AngryMurlocs and _G.AngryMurlocs.WantedLogic)

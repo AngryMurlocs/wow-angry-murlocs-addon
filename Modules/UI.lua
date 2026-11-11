@@ -379,7 +379,16 @@ local function PushActivity(entry)
     entry = { kind = "note", player = entry, at = U.WallTime() }
   end
   entry.at = entry.at or U.WallTime()
-  if activity[1] and ActivitySame(activity[1], entry) then return end
+  -- ID-backed death rows: dedupe only via Death.TryClaimFeed (victim|eventId).
+  -- ActivitySame must not collapse two distinct deaths in the same receive second.
+  if entry.kind == "death" and type(entry.eventId) == "string" and entry.eventId ~= "" then
+    local death = GR:GetModule("Death")
+    if death and death.TryClaimFeed then
+      if not death.TryClaimFeed(entry.player, entry.eventId) then return end
+    end
+  elseif activity[1] and ActivitySame(activity[1], entry) then
+    return
+  end
   table.insert(activity, 1, entry)
   while #activity > ACTIVITY_MAX do
     activity[#activity] = nil
@@ -390,6 +399,18 @@ local function PushActivity(entry)
 end
 
 -- Exported for tests.
+function UI.PushActivityForTest(entry)
+  return PushActivity(entry)
+end
+
+function UI.ActivityForTest()
+  return activity
+end
+
+function UI.ResetActivityForTest()
+  wipe(activity)
+end
+
 function UI.MatchesProfessionFilter(name, entry, opts)
   opts = opts or {}
   local filter = opts.text and opts.text ~= "" and string.lower(opts.text) or nil
@@ -2792,8 +2813,15 @@ function UI:OnEnable()
     })
   end)
 
-  GR:BindMessage(self, "DEATH_UPDATE", function(_, victim)
-    PushActivity({ kind = "death", player = victim or "?", at = U.WallTime() })
+  GR:BindMessage(self, "DEATH_UPDATE", function(_, victim, data)
+    data = data or {}
+    PushActivity({
+      kind = "death",
+      player = victim or "?",
+      at = U.WallTime(),
+      eventId = data.eventId,
+      zone = data.zone,
+    })
   end)
 
   GR:BindMessage(self, "LVL_UPDATE", function(_, sender, level)

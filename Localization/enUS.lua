@@ -375,3 +375,9 @@ L["WANTED_RANK_SCOURGE"] = "Guild Scourge"
 L["LVL_TOAST"] = "Reached level |cffffffff%d|r!"
 L["LVL_DRAG_HINT"] = "Drag to move"
 L["TOAST_DRAG_HINT"] = "Drag to move"
+
+-- Frozen English copy for U.L fallback (deDE mutates AngryMurlocsLocale in place).
+AngryMurlocsLocaleEN = {}
+for k, v in pairs(L) do
+  AngryMurlocsLocaleEN[k] = v
+end
