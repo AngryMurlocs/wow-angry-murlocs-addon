@@ -452,11 +452,18 @@ local function DispatchParsed(tag, rest, sender)
     Count("recv_PROFRC")
     GR:SendMessage("PROF_RECIPE_CATEGORY_UPDATE", sender, entries)
   elseif tag == "DEATH" then
+    -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId
+    -- parts[6] spell = legacy sender-locale prose for old clients; new peers prefer
+    -- eventId/spellKind/spellId when usable (see Modules/Death.lua ResolveAttackLine).
     local parts = U.SplitKeepEmpty(rest, "|")
     local cause = parts[5]
     if cause ~= "player" and cause ~= "mob" and cause ~= "env" and cause ~= "unknown" then
       cause = (tonumber(parts[2]) == 1) and "player" or "mob"
     end
+    local spellKind = U.SanitizeText(parts[8] or "", 32)
+    if spellKind == "" then spellKind = nil end
+    local eventId = U.SanitizeText(parts[7] or "", 48)
+    if eventId == "" then eventId = nil end
     GR:SendMessage("DEATH_UPDATE", sender, {
       killer = U.SanitizeText(parts[1] or "?", 48),
       isPlayer = cause == "player",
@@ -464,6 +471,9 @@ local function DispatchParsed(tag, rest, sender)
       mapId = tonumber(parts[4]),
       cause = cause,
       spell = U.SanitizeText(parts[6] or "", 48),
+      eventId = eventId,
+      spellKind = spellKind,
+      spellId = tonumber(parts[9]),
       time = U.Now(),
     })
   elseif tag == "WANTED" or tag == "SYNCREQ" then

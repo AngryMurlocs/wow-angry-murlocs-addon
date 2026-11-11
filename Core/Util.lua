@@ -12,7 +12,10 @@ end
 
 function U.L(key)
   local locale = AngryMurlocsLocale
-  return (locale and locale[key]) or key
+  if locale and locale[key] ~= nil then return locale[key] end
+  local en = AngryMurlocsLocaleEN
+  if en and en[key] ~= nil then return en[key] end
+  return key
 end
 
 function U.PlayerName()
