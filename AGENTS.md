@@ -43,6 +43,20 @@ Es gibt keinen Build-Schritt. Gepackt wird über den BigWigs-Packager (`.pkgmeta
 
 **Lokalisierung:** `Localization/enUS.lua` definiert `AngryMurlocsLocale`. `deDE.lua` überschreibt Schlüssel nur bei `GetLocale() == "deDE"`. Zugriff erfolgt über `U.L("KEY")`. Neue Schlüssel immer in beiden Dateien anlegen.
 
+## WoW Forever: Kompatibilität
+
+Ziel-Client ist **WoW Forever** (Interface `16001`). Forever ist technisch der **Retail-Client** mit den Einschränkungen aus „Midnight“, kein Classic-Client:
+- Viele alte Classic-Funktionen fehlen, z. B. `GetItemInfo`, `GetSpellInfo`, `CombatLogGetCurrentEventInfo` und `ChatFrame_SendTell`. Stattdessen die `C_*`-Varianten bzw. `ChatFrameUtil.*` nutzen.
+- Das Kampflog ist gesperrt. Im Kampf sind manche Werte „secret“: Vergleichen, Verketten oder `#` darauf werfen einen Fehler. Werte aus Einheiten-APIs mit `U.Plain()` prüfen.
+- `RegisterEvent` mit einem unbekannten Ereignis wirft einen Fehler, deshalb immer `U.SafeRegisterEvent` nutzen.
+- `C_ChatInfo.SendAddonMessage` gibt `Enum.SendAddonMessageResult` zurück. Das Ergebnis entscheidet, nicht `AreOutgoingAddonChatMessagesRestricted`: Das meldete in Forever „gesperrt“, obwohl Senden ging.
+
+**Pflichtprüfung:** `Tests/ForeverApi_test.lua` (läuft in `run_all.lua` und in der Pipeline) gleicht jeden Funktionsaufruf, jede `C_`-Funktion, jedes Ereignis, jede Frame-Vorlage und jeden `Enum`-Wert mit der Kopie in `Tests/forever_api/` ab. Grundlage ist der Dump des echten Clients aus [Ketho/BlizzardInterfaceResources, Branch `forever`](https://github.com/Ketho/BlizzardInterfaceResources/tree/forever).
+- **Schlägt der Test fehl**, gibt es die Funktion in Forever nicht. Eine Forever-Variante verwenden. Nur wenn die Funktion bewusst als abgesicherter Fallback für andere Clients drin ist (vorher mit `type(x) == "function"` o. Ä. geprüft), kommt sie mit Begründung in `Tests/forever_api/allowed_missing.txt`.
+- **Kopie aktualisieren:** `luajit Tests/forever_api/update.lua` holt den neuesten Stand (braucht `git`) und schreibt die Listen neu. Immer als eigener MR (`chore: update Forever API snapshot to <Build>`), damit der Diff zeigt, was Blizzard geändert hat.
+- **Frühwarnung:** Der Pipeline-Job `test:forever-api-latest` prüft bei jedem MR zusätzlich gegen den neuesten Stand. Er blockiert nicht. Ist er gelb, hat Blizzard etwas geändert: Kopie aktualisieren und die Funde beheben.
+- Der Test findet nur **fehlende** APIs. Ob sich eine API in Forever anders verhält, zeigt nur ein Test im Spiel. Gemessenes Verhalten (Drossel, secret-Werte, SavedVariables) dokumentiert das [Forever-Addon-Kit](https://github.com/Thunderz96/forever-addon-kit).
+
 ## Repository & Veröffentlichung
 
 - **origin** ist das private GitLab der Gilde. Dort wird gearbeitet: Branches, Merge Requests, Pipeline. Für MRs und Pipelines `glab` nutzen, nicht `gh`. Die GitLab-Adresse gehört in keine Datei im Repo, denn das Repo ist öffentlich gespiegelt.
@@ -61,7 +75,7 @@ Mehrere Leute arbeiten parallel am Projekt. Der Agent erledigt Git selbst und en
    - Nur das Nötigste: Mehrere Commits ergeben oft eine einzige Zeile.
    - Gut: `- Death toast no longer guesses the killer when it is unclear`. Schlecht: `- Death.lua: prefer lethal Recap hits over CLEU fallback`.
    - Doku, CI, Tests und reine Umbauten bekommen keine Zeile.
-4. **Prüfen:** `luajit Tests/run_all.lua` muss grün sein. Dateien immer als UTF-8 **ohne BOM** speichern. Unter Windows deshalb keine Dateien mit PowerShell `Set-Content`/`Out-File` schreiben, die setzen ein BOM. Eine `.toc` mit BOM kann WoW nicht richtig lesen.
+4. **Prüfen:** `luajit Tests/run_all.lua` muss grün sein, inklusive der Forever-API-Prüfung (siehe oben). Dateien immer als UTF-8 **ohne BOM** speichern. Unter Windows deshalb keine Dateien mit PowerShell `Set-Content`/`Out-File` schreiben, die setzen ein BOM. Eine `.toc` mit BOM kann WoW nicht richtig lesen.
 5. **MR nach `main`:** Vorher `git fetch origin` und `git merge origin/main` (bei Änderungen erneut testen). Danach `git push -u origin HEAD` und `glab mr create --target-branch main --title "<type>: <English title>" --fill --remove-source-branch --yes`. Die Pipeline prüft Tests und Titelformat und muss grün werden.
 6. **Go 1, Merge:** Jeder MR ist ein **Sammel-MR**: Der Branch nimmt so lange weitere Commits auf, bis der User mergen will. Das dem User immer ausdrücklich sagen. Dann zeigen, **welche Commits mitgehen** (`git log --oneline origin/main..HEAD`) und **welche Changelog-Zeilen neu sind**, und **fragen, ob er noch weitere Änderungen oder Wünsche für diesen MR hat**. Hat er welche, kommen sie als weitere Commits in denselben MR, danach folgt eine neue Vorschau. Erst nach seinem ausdrücklichen Ja zum Merge mergen: `glab mr merge --yes`, **ohne Squash**, damit jeder Commit erhalten bleibt. Danach `git switch main`, `git pull --ff-only` und den lokalen Branch mit `git branch -d` löschen.
 7. **Wenn etwas fehlschlägt:** nicht mergen und nicht taggen. Die Arbeit bleibt auf dem Branch. Dem User verständlich erklären, was fehlt.
@@ -104,5 +118,3 @@ Der Agent entscheidet, wann eine Version sinnvoll ist, und schlägt sie dem User
    ```
    Unter Windows in der Git Bash ausführen, die mit Git für Windows installiert wird.
 7. Dem User mitteilen: Der Tag ist gesetzt, der Mirror bringt ihn zu GitHub und CurseForge baut daraus das Paket. Das dauert ein paar Minuten.
-
-`DEV.md` ist eine allgemeine deutschsprachige Referenz zur WoW-Addon-Entwicklung (TOC, Events, Secure Templates/Combat Lockdown, Unterschiede zwischen den Clients). Sie ist nicht projektspezifisch.

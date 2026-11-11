@@ -99,9 +99,11 @@ end
 
 -- Wait after the client reports a send throttle before trying again.
 local THROTTLE_BACKOFF = 1.0
+-- Wait while the client blocks addon messages (AddOnMessageLockdown).
+local LOCKDOWN_BACKOFF = 5.0
 
 -- Modern clients return Enum.SendAddonMessageResult; older ones return nothing
--- or a boolean. Returns "ok", "throttled" or "failed".
+-- or a boolean. Returns "ok", "throttled", "lockdown" or "failed".
 local function SendResult(result)
   if result == nil or result == true then return "ok" end
   if result == false then return "failed" end
@@ -111,6 +113,7 @@ local function SendResult(result)
     if result == codes.AddonMessageThrottle or result == codes.ChannelThrottle then
       return "throttled"
     end
+    if result == codes.AddOnMessageLockdown then return "lockdown" end
     return "failed"
   end
   return result == 0 and "ok" or "failed"
@@ -141,11 +144,11 @@ local function Drain()
       local status = RawSend(item.payload)
       if status == "ok" then
         Count("sent_" .. item.prio)
-      elseif status == "throttled" then
+      elseif status == "throttled" or status == "lockdown" then
         -- Try the same message again later; order stays the same.
         queue:PushFront(item)
-        lastSendAt = now + THROTTLE_BACKOFF
-        Count("throttled")
+        lastSendAt = now + (status == "lockdown" and LOCKDOWN_BACKOFF or THROTTLE_BACKOFF)
+        Count(status)
       else
         Reject("send_failed", item.prio)
       end

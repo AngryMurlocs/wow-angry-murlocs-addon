@@ -35,6 +35,14 @@ Wichtig:
 5. **Go 1:** Jeder MR ist ein Sammel-MR. Bevor etwas auf `main` landet, zeigt der Agent die Commits, die mitgehen, und die neuen Changelog-Zeilen. Er fragt außerdem, ob du noch weitere Änderungen oder Wünsche hast, die mit hinein sollen. Gemergt wird erst nach deinem Ja, **ohne Squash**.
 6. **Release** (neue Version), sobald es sich lohnt, siehe unten.
 
+## WoW Forever
+
+Das Addon läuft auf **WoW Forever**. Das ist technisch der Retail-Client, viele alte Classic-Funktionen gibt es dort nicht. Deshalb prüft `Tests/ForeverApi_test.lua` bei jedem Testlauf und in jeder Pipeline, ob alle genutzten WoW-Funktionen, Ereignisse, Frame-Vorlagen und Enum-Werte in Forever existieren. Grundlage ist eine Kopie der [Forever-Daten von Ketho](https://github.com/Ketho/BlizzardInterfaceResources/tree/forever) in `Tests/forever_api/`.
+
+- **Test rot:** Die Funktion gibt es in Forever nicht, also eine Forever-Variante nutzen. Bewusste, abgesicherte Ausnahmen stehen mit Begründung in `Tests/forever_api/allowed_missing.txt`.
+- **Pipeline-Job `test:forever-api-latest` gelb:** Blizzard hat etwas geändert. Die Kopie mit `luajit Tests/forever_api/update.lua` in einem eigenen MR aktualisieren.
+- Details für Agents: [AGENTS.md](AGENTS.md), Abschnitt „WoW Forever: Kompatibilität“.
+
 ## Changelog schreiben
 
 Der Changelog ist für Spieler, nicht für Entwickler:

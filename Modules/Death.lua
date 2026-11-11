@@ -4,16 +4,6 @@ local Comm = GR.Comm
 
 local Death = GR:NewModule("Death")
 
--- Last damaging hit on the player (killing-blow candidate)
-local lastHit = {
-  name = nil,
-  isPlayer = false,
-  cause = "env", -- player | mob | env
-  spell = nil,
-  envType = nil,
-  t = 0,
-}
-
 -- Forever (no CLEU): recent env hint from mirror timers / IsFalling
 local envHint = {
   spell = nil,
@@ -237,15 +227,6 @@ local function ShowDeathToast(victim, cause, killer, spell, zone)
   DisplayDeathToast({ victim = victim, cause = cause, killer = killer, spell = spell, zone = zone })
 end
 
-local function CacheHit(name, isPlayer, cause, spell, envType)
-  lastHit.name = name
-  lastHit.isPlayer = isPlayer and true or false
-  lastHit.cause = cause or "mob"
-  lastHit.spell = spell
-  lastHit.envType = envType
-  lastHit.t = U.Now()
-end
-
 local function CacheEnvHint(spell)
   if type(spell) ~= "string" or spell == "" then return end
   envHint.spell = spell
@@ -255,69 +236,6 @@ end
 local function EnvLabelFromType(envType)
   local key = ENV_KEYS[tostring(envType or ""):upper()]
   return key and U.L(key) or U.L("DEATH_ENV_OTHER")
-end
-
-local function IsPlayerSource(sourceGUID, sourceFlags)
-  if sourceGUID and tostring(sourceGUID):find("^Player%-") then
-    return true
-  end
-  if sourceFlags and bit and bit.band and COMBATLOG_OBJECT_TYPE_PLAYER then
-    return bit.band(sourceFlags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0
-  end
-  return false
-end
-
-local function SpellFromCleu(subevent, ...)
-  -- vararg starts at first post-dest field (index 12 of full CLEU)
-  if subevent == "SWING_DAMAGE" or subevent == "SWING_MISSED" then
-    return U.L("DEATH_MELEE")
-  end
-  if subevent == "ENVIRONMENTAL_DAMAGE" then
-    local envType = ...
-    return EnvLabelFromType(envType)
-  end
-  -- SPELL_*, RANGE_*, SPELL_PERIODIC_*: spellId, spellName, spellSchool
-  local spellId, spellName = ...
-  if type(spellName) == "string" and spellName ~= "" then
-    return spellName
-  end
-  if type(spellId) == "string" and spellId ~= "" then
-    return spellId -- legacy CLEU oddity
-  end
-  return U.L("DEATH_MELEE")
-end
-
-local function HandleCleu(subevent, sourceGUID, sourceName, sourceFlags, destGUID, ...)
-  if not subevent then return end
-  local playerGUID = UnitGUID("player")
-  if destGUID and playerGUID and destGUID ~= playerGUID then return end
-
-  if subevent == "ENVIRONMENTAL_DAMAGE" then
-    local envType = ...
-    local spell = SpellFromCleu(subevent, ...)
-    CacheHit(U.L("DEATH_CAUSE_ENV"), false, "env", spell, envType)
-    return
-  end
-
-  local isDamage = tostring(subevent):find("_DAMAGE") or subevent == "SWING_DAMAGE" or tostring(subevent):find("_MISSED")
-  if not isDamage then return end
-  if not sourceName or sourceName == "" then return end
-
-  local spell = SpellFromCleu(subevent, ...)
-  local player = IsPlayerSource(sourceGUID, sourceFlags)
-  CacheHit(sourceName, player, player and "player" or "mob", spell, nil)
-end
-
-local function OnCombatLog()
-  if not CombatLogGetCurrentEventInfo then return end
-  local args = { CombatLogGetCurrentEventInfo() }
-  -- 2=subevent, 4=sourceGUID, 5=sourceName, 6=sourceFlags, 8=destGUID; 12+ payload
-  HandleCleu(args[2], args[4], args[5], args[6], args[8], unpack(args, 12))
-end
-
-local function OnCombatLogLegacy(...)
-  local args = { ... }
-  HandleCleu(args[2], args[4], args[5], args[6], args[8], unpack(args, 12))
 end
 
 local function MirrorTimerToSpell(timer)
@@ -566,22 +484,10 @@ local function ReadRecapAttribution(deathWall)
   return info
 end
 
--- reliable = CLEU lastHit or Death Recap with Player-* GUID.
+-- reliable = Death Recap with Player-* GUID. Forever has no usable combat log.
 -- Target / unit-token guesses are never reliable: target switches, DoTs, pets,
 -- NPC and environment deaths would blame whoever happens to be targeted.
 local function ResolveDeath(deathWall)
-  if lastHit.t > 0 and (U.Now() - lastHit.t) < 15 then
-    local cause = lastHit.cause or (lastHit.isPlayer and "player" or "mob")
-    return {
-      killer = lastHit.name or U.L("UNKNOWN_KILLER"),
-      isPlayer = lastHit.isPlayer,
-      cause = cause,
-      spell = SpellForCause(cause, lastHit.spell),
-      reliable = true,
-      source = "cleu",
-    }
-  end
-
   -- Forever (no CLEU): Death Recap is the honest killer source for toast + Wanted.
   local hint = FreshEnvHint()
   local recap = ReadRecapAttribution(deathWall)
@@ -643,14 +549,6 @@ end
 -- Diagnostics: candidate killer sources, registered only while /am diag is on.
 local DIAG_EVENTS = {
   "UNIT_COMBAT",
-  "CHAT_MSG_COMBAT_HOSTILE_DEATH",
-  "CHAT_MSG_COMBAT_HOSTILEPLAYER_HITS",
-  "CHAT_MSG_COMBAT_HOSTILEPLAYER_MISSES",
-  "CHAT_MSG_SPELL_HOSTILEPLAYER_DAMAGE",
-  "CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE",
-  "CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS",
-  "CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE",
-  "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE",
   "CHAT_MSG_COMBAT_MISC_INFO",
   "CHAT_MSG_SYSTEM",
 }
@@ -880,7 +778,6 @@ local function CancelPendingDeath()
 end
 
 local function ClearDeathEvidence()
-  lastHit.t = 0
   envHint.spell, envHint.t = nil, 0
 end
 

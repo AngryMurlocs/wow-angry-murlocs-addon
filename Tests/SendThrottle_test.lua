@@ -13,7 +13,7 @@ local function check(name, cond, extra)
   end
 end
 
-local RESULT = { Success = 0, AddonMessageThrottle = 3, GeneralError = 9 }
+local RESULT = { Success = 0, AddonMessageThrottle = 3, ChannelThrottle = 8, GeneralError = 9, AddOnMessageLockdown = 11 }
 
 local function Tagged(sim)
   local out = {}
@@ -91,6 +91,33 @@ do
   local got = Tagged(sim)
   check("restricted flag does not hold the queue", alice.GR.Comm:QueueSize() == 0, alice.GR.Comm:QueueSize())
   check("failed send dropped, others sent", #got == 2 and got[1] == 1 and got[2] == 3, table.concat(got, ","))
+end
+
+-- Lockdown (Forever answers AddOnMessageLockdown while addon messages are
+-- blocked): messages stay queued and go out once sending works again.
+do
+  local sim = Sim.New(4)
+  local alice
+  alice = sim:AddClient("Alice", { env = {
+    Enum = { SendAddonMessageResult = RESULT },
+    C_ChatInfo = {
+      RegisterAddonMessagePrefix = function() return true end,
+      SendAddonMessage = function(prefix, msg, channel)
+        if sim.clock < 12 then return RESULT.AddOnMessageLockdown end
+        sim:Deliver(alice, prefix, msg, channel)
+        return RESULT.Success
+      end,
+    },
+  } })
+  sim:AddClient("Bob")
+
+  for i = 1, 3 do alice.GR.Comm:Send("TST|" .. i, "data", "misc") end
+  sim:Run(10)
+  check("nothing sent during lockdown", #Tagged(sim) == 0, #Tagged(sim))
+  check("kept during lockdown", alice.GR.Comm:QueueSize() == 3, alice.GR.Comm:QueueSize())
+  sim:Run(20)
+  local got = Tagged(sim)
+  check("all sent after lockdown", #got == 3 and got[1] == 1 and got[3] == 3, table.concat(got, ","))
 end
 
 -- Older clients return nothing from SendAddonMessage: still counts as sent.

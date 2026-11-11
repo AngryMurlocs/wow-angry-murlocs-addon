@@ -27,6 +27,8 @@ local tests = {
   "Tests/GuildChangePositions_test.lua",
   "Tests/SecretTarget_test.lua",
   "Tests/FragTimeout_test.lua",
+  "Tests/Whisper_test.lua",
+  "Tests/ForeverApi_test.lua",
 }
 
 local failed = {}

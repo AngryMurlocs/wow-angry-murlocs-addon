@@ -1,0 +1,11 @@
+# WoW API names the addon uses although Forever does not have them.
+# Only for calls that check the function exists first (fallbacks for other
+# clients). One name per line, then "#" and the reason.
+
+CanEditOfficerNote            # officer check fallback; C_GuildInfo is tried first (Core/Util.lua)
+GetNumSkillLines              # old skill list fallback; GetProfessions is tried first (Modules/Professions.lua)
+GetSkillLineInfo              # same as GetNumSkillLines
+GetItemCount                  # bag count fallback next to C_Item.GetItemCount; checked with type() (Modules/ProfRecipes.lua)
+GetItemInfo                   # item name/icon fallback next to C_Item; checked before the call (Modules/ProfRecipes.lua)
+GetDeathRecapLink             # diagnostics only, checked with type() (Modules/Death.lua)
+InterfaceOptions_AddCategory  # old settings fallback when Settings API is missing (Modules/Options.lua)

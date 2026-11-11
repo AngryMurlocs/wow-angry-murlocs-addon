@@ -90,6 +90,52 @@ function U.Plain(v)
   return v
 end
 
+-- Chat line the player is typing in, if any. Forever moved the old
+-- ChatFrame_* helpers to ChatFrameUtil and has no ChatFrameEditBox.
+function U.ActiveChatEditBox()
+  local util = ChatFrameUtil
+  if util and type(util.GetActiveWindow) == "function" then
+    local ok, box = pcall(util.GetActiveWindow)
+    if ok and box then return box end
+    return nil
+  end
+  return ChatFrameEditBox
+end
+
+-- True when the open chat line already has text we must not overwrite.
+function U.ChatBusy()
+  local box = U.ActiveChatEditBox()
+  if not box or type(box.GetText) ~= "function" then return false end
+  local ok, text = pcall(box.GetText, box)
+  return ok and type(text) == "string" and text:match("%S") ~= nil
+end
+
+-- Opens a whisper to `target`, optionally with `text` ready to send.
+-- Returns false when the client offers no way to do it.
+function U.OpenWhisper(target, text)
+  if not target or target == "" then return false end
+  local util = ChatFrameUtil
+  if text and text ~= "" then
+    local withMsg = (util and util.SendTellWithMessage) or ChatFrame_SendTellWithMessage
+    if type(withMsg) == "function" and pcall(withMsg, target, text) then return true end
+  end
+  local tell = (util and util.SendTell) or ChatFrame_SendTell
+  if type(tell) == "function" and pcall(tell, target) then
+    if text and text ~= "" then
+      local box = U.ActiveChatEditBox() or ChatFrameEditBox
+      if box and box.SetText then box:SetText(text) end
+    end
+    return true
+  end
+  local box = ChatFrameEditBox
+  if box and box.SetText then
+    if box.Show then box:Show() end
+    box:SetText((text and text ~= "") and text or ("/w " .. target .. " "))
+    return true
+  end
+  return false
+end
+
 function U.PlayerClassFile()
   local _, classFile = UnitClass("player")
   return classFile or "PRIEST"
