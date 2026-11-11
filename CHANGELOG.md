@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.6
 
 - Recipe data refresh waits for guild replies, then shows how many members and catalogues arrived
 - Missing recipe names and materials keep loading in batches until complete or given up

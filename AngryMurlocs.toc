@@ -2,7 +2,7 @@
 ## Title: AngryMurlocs
 ## Notes: Angry Murlocs guild helper — map pins, professions, Wanted sightings
 ## Notes-deDE: Angry Murlocs Gilden-Helfer — Pins, Berufe, Wanted-Sichtungen
-## Version: 0.11.5
+## Version: 0.11.6
 ## SavedVariables: AngryMurlocsDB
 
 Localization\enUS.lua
