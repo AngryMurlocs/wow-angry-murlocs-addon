@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- New look for death and level-up messages, with murloc artwork and a new font
+- Death messages show the cause on a second line
+
 ## 0.11.0
 
 - The death message no longer guesses who or what killed you. If it is unclear, it says so.
