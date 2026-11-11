@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.5
 
 - Whisper buttons in the professions list and recipe catalog work again
 - Guild messages wait while the game blocks addon messages instead of getting lost
