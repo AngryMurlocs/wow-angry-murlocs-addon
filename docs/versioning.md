@@ -1,100 +1,52 @@
-# AngryMurlocs — Versionierung
+# AngryMurlocs: Versionierung
 
-Projektkonvention für SemVer in der **0.x**-Phase und für Release-Analyse.
-Operativer Tag/Push-Flow: Skill `angrymurlocs-release`, Rule `release-tag-format`.
+Diese Datei beschreibt die Regeln für Versionsnummern. Den Ablauf Schritt für Schritt beschreiben [AGENTS.md](../AGENTS.md) (für Agents) und [CONTRIBUTING.md](../CONTRIBUTING.md) (für Menschen).
 
-Grundlagen: [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html),
-[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+Grundlagen: [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html), [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
 
-## Addon-Version vs Interface
+## Addon-Version und Interface
 
 | Feld | Bedeutung |
 |------|-----------|
 | `AngryMurlocs.toc` → `## Version:` | **Addon-Version** `X.Y.Z` |
-| `AngryMurlocs.lua` → `GR.VERSION` | Laufzeit-Anzeige derselben Addon-Version |
-| `README.md` → `**Version:**` | Doku derselben Addon-Version |
-| `CHANGELOG.md` → top `## X.Y.Z` | Changelog-Abschnitt für Release/Tag |
-| Git-Tag `vX.Y.Z` | Annotated Release-Marker (CF triggert auf Tag-Push) |
-| `## Interface:` in `.toc` | **Client-Interface** (z. B. Forever `16001`) — **keine** Addon-Versionsnummer |
+| `AngryMurlocs.lua` → `GR.VERSION` | dieselbe Version zur Laufzeit (Anzeige, Versionshinweis an Gildenmitglieder) |
+| `README.md` → `**Version:**` | dieselbe Version in der Doku |
+| `CHANGELOG.md` → oberster `## X.Y.Z` | Changelog-Abschnitt des Release; darüber darf `## Unreleased` stehen |
+| Git-Tag `vX.Y.Z` | annotierter Release-Marker; die Tag-Message ist der Changelog-Abschnitt |
+| `## Interface:` in `.toc` | **Client-Interface** (Forever `16001`), keine Addon-Version |
 
-Ein Git-Tag allein beweist keine CurseForge-Veröffentlichung; CF folgt dem Tag-Push über den Packager.
+`Tests/Version_test.lua` prüft, ob die vier Stellen übereinstimmen. Mit dem Argument `release` prüft es zusätzlich, dass kein `## Unreleased` mehr übrig ist.
 
-## Öffentlicher Vertrag
+Ein Tag ist eine Veröffentlichung: Der Push-Mirror bringt ihn zu GitHub, und CurseForge baut daraus ein Paket. Commits auf `main` ohne Tag veröffentlichen nichts.
 
-Zum öffentlichen Vertrag zählen (Änderungen hier können patch/minor/breaking auslösen):
+## Welche Stufe?
 
-- Slash-Befehle und dokumentierte Bedienung (README)
-- Privacy-Schalter und was geteilt / nicht geteilt wird
+Bewertet wird die Gesamtheit aller Änderungen seit dem letzten Tag. Pro Release wird die **höchste** nötige Stufe **einmal** angewendet.
+
+| Stufe | Wann | Beispiele |
+|-------|------|-----------|
+| **patch** `X.Y.(Z+1)` | Bugfix, kleine Änderung, kleines neues Feature, Anpassung eines bestehenden Features | Toast-Text korrigiert, neue Sortierung in der Liste, Pin-Größe anpassbar |
+| **minor** `X.(Y+1).0` | ganz großes neues Feature | neues Modul oder neues Fenster mit eigener Funktion, neues Gilden-Feature |
+| **major** `(X+1).0.0` | großer Kompatibilitätsbruch | ältere Addon-Versionen in der Gilde können nicht mehr mit der neuen Daten austauschen (Protokoll), gespeicherte Daten werden inkompatibel oder gehen verloren, Slash-Befehle oder Privacy-Verhalten ändern sich grundlegend |
+
+- Das gilt auch in der 0.x-Phase: Der nächste große Bruch macht aus `0.y.z` die Version `1.0.0`.
+- Zahlen sind nicht auf 9 begrenzt (`0.9.0` → `0.10.0` ist gültig).
+- Reine Doku-, Test-, CI- oder Umbau-Änderungen brauchen keine Version. Sie gehen ohne Tag auf `main` und reisen mit der nächsten Version mit.
+
+## Was zum öffentlichen Vertrag gehört
+
+Änderungen an diesen Punkten sind Kandidaten für **major**:
+
+- Comm- und Protokoll-Format (Opcodes, Felder, Prefix `GildenRadar`), also der Datenaustausch mit älteren Versionen
+- SavedVariables-Schema (`AngryMurlocsDB`) und zugesagte Migrationen
 - Wanted-Zählregeln, Sync-Verhalten, Death-/Recap-Attribution
-- Comm-/Protocol-Wire (Opcodes, Schema)
-- SavedVariables-Schema und zugesagte Migrationen
-- Sichtbare UI-/Minimap-/Settings-Bedienung, soweit dokumentiert oder spielerrelevant
+- Slash-Befehle und dokumentierte Bedienung
+- Privacy-Schalter: was geteilt wird und was nicht
 
-Zählen **nicht** automatisch als Vertragsbruch:
+Kein Vertragsbruch sind reine Dateiaufteilungen, interne Umbauten und Änderungen nur an Doku oder Tests.
 
-- Reine Modul-Dateisplits / interne Enable-Hygiene
-- Docs-/Test-only ohne Verhaltensänderung
-- `.cursor` / Tools / interne Skill-Dateien
+## Commits
 
-## Zwei Klassifizierungen
+Englisch, Form `type(scope): description`. Typen: `feat`, `fix`, `change`, `remove`, `docs`, `chore`, `ci`, `test`, `refactor`, `release`. Ein Vertragsbruch wird mit `!` markiert (`feat(sync)!: …`) und im Commit-Text kurz erklärt. Release-Commits heißen `release: X.Y.Z`.
 
-### A — Inhaltstyp
-
-`fix` | `feat` | `perf` | `refactor` | `docs` | `test` | `build` | `ci` | `chore` | `style`
-
-Zusatzflags (unabhängig): `security`, `deprecation`, `breaking`.
-
-Commit-Form: `type(scope): Beschreibung`. Vertragsbruch: `type(scope)!: …` und/oder `BREAKING CHANGE:` im Body.
-
-### B — Release-Auswirkung
-
-`none` | `patch` | `minor` | `major`
-
-- `none`: kein Versionsbump (reine Docs/Tests/interne Wartung ohne Publish-Effekt)
-- Pro Release die **höchste** erforderliche Stufe **einmal** anwenden (nicht pro Commit)
-- Zahlen sind nicht auf 9 begrenzt (`0.9.0` → `0.10.0` ist gültig)
-
-## 0.x-Projektregel (verbindliche Konvention)
-
-SemVer behandelt 0.y.z als Anfangsentwicklung ohne stabile öffentliche API. Für AngryMurlocs gilt:
-
-| Fall | Angewendeter Zahlen-Bump | Technische Auswirkung |
-|------|--------------------------|------------------------|
-| Kompatible Fehlerkorrektur | `0.y.(z+1)` → **patch** | patch |
-| Neue sichtbare Funktion / kompatible Erweiterung | `0.(y+1).0` → **minor** | minor |
-| Vertragsbruch | `0.(y+1).0` → **minor** | **major** notieren + Flag `breaking` + Migration erläutern |
-| Erste stabile Freigabe | bewusst **`1.0.0`** | eigener Auftrag, keine Auto-Erhöhung wegen Breaking |
-
-Damit bleibt in 0.x die technische Stufe `major` vom angewendeten Bump `minor` getrennt. Tools, die Breaking in 0.x automatisch auf `1.0.0` setzen, weichen von dieser Projektregel ab.
-
-Ab **1.0.0** (wenn bewusst eingeführt): klassisches SemVer — patch / minor / major wie Spec.
-
-## Vorabversionen
-
-Nur bei Bedarf / bestehender Praxis: `X.Y.Z-alpha.N`, `-beta.N`, `-rc.N` (SemVer-Pre-Release).
-Abschluss der Vorabphase: dieselbe Zielnummer ohne Pre-Release freigeben — **nicht** nochmals erhöhen.
-
-## Versionsquellen und Konsistenz
-
-Vor einem Release müssen übereinstimmen:
-
-1. `## Version:` in `AngryMurlocs.toc`
-2. `GR.VERSION` in `AngryMurlocs.lua`
-3. `**Version:**` in `README.md`
-4. Top-`## X.Y.Z` in `CHANGELOG.md`
-5. Annotated Tag `vX.Y.Z` (nach Tag-Schritt)
-
-Hilfsskript (reine Mechanik, keine Diff-Klassifikation):
-
-```powershell
-powershell -NoProfile -File tools/next-version.ps1 -Bump patch
-powershell -NoProfile -File tools/next-version.ps1 -Bump minor
-```
-
-## Betriebsarten (Skill)
-
-1. **Analyse** (Default): nur lesen; Änderungstabelle; empfohlene nächste Version; kein Bump.
-2. **Vorbereitung**: bei explizitem Auftrag TOC/Lua/README/CHANGELOG anpassen und prüfen.
-3. **Veröffentlichen**: annotated Tag + SSH-Push — eigener Auftrag (siehe `angrymurlocs-release`).
-
-Vergleichsbasis für Analyse auf `main`: letzter Release-Commit `Release AngryMurlocs X.Y.Z.` und/oder annotated Tag `vX.Y.Z` dieses Addons. Numerisch höchster Tag eines anderen Kontexts ist irrelevant (Einzelpaket). Bei widersprüchlichen Quellen: Unsicherheit ausweisen, keine Historie erfinden.
+Die Commit-Typen bestimmen die Version **nicht** automatisch. Die Stufe legt der Agent bzw. Mensch beim Release nach der Tabelle oben fest, und der User bestätigt sie vor dem Tag.
