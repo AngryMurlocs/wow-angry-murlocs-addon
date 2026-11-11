@@ -20,6 +20,7 @@ local tests = {
   "Tests/Sounds_test.lua",
   "Tests/ToastPreview_test.lua",
   "Tests/L10n_test.lua",
+  "Tests/Version_test.lua",
 }
 
 local failed = {}

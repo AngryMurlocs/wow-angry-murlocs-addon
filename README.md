@@ -4,6 +4,8 @@ Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Beruf
 
 **Version:** 0.11.0
 
+**Download:** [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) · **Quellcode:** [GitHub](https://github.com/AngryMurlocs/wow-angry-murlocs-addon)
+
 ## Features
 
 - Gilden-Kartenpins mit **klassenbezogenen Murloc-Köpfen** (Zoom-feste Größe, Default **18**; Styles: Heads / Body / Rings; Ausfaden vor dem Verschwinden nach 60 s). Mehrere Spieler auf einem Punkt stehen nebeneinander statt übereinander.
@@ -20,7 +22,7 @@ Kommunikation über den Gilden-Addonkanal (Prefix `GildenRadar` für Kompatibili
 
 ## Installation
 
-1. Release-ZIP entpacken.
+1. Über [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) installieren (CurseForge-App) oder das Release-ZIP von dort entpacken.
 2. Ordner `AngryMurlocs` nach  
    `World of Warcraft\_forever_\Interface\AddOns\` kopieren.
 3. Spiel neu starten bzw. Addons neu laden (`/reload`).
@@ -95,4 +97,4 @@ Ingame-Punkte: [Tests/CLIENT_CHECKLIST.md](Tests/CLIENT_CHECKLIST.md). `Tests/` 
 
 Benötigt eine Gilde und Online-Gildenmitglieder mit demselben Addon (**0.7+**, ideal **0.8.0**) für Sync-Features. Ältere Clients ignorieren unbekannte Nachrichtentypen; 0.7+ ignoriert die Wanted-Nachrichten von 0.6.x.
 
-Siehe auch [CHANGELOG.md](CHANGELOG.md) und [DEV.md](DEV.md) (allgemeine WoW-Addon-Referenz).
+Siehe auch [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md) (Mitarbeiten, Ablauf, Releases) und [DEV.md](DEV.md) (allgemeine WoW-Addon-Referenz).
