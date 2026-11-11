@@ -339,6 +339,51 @@ do
   end
 end
 
+-- Guild profession browse categories + unique crafters; global search stays flat
+do
+  local scope = bob.GR.Util.GetScopeDB()
+  scope.prof.cache["Alice-Realm"] = {
+    list = { { key = "alch", skill = 1 } },
+    recipes = {
+      alch = { ids = { 201, 202 }, rev = 1, scanAt = 10, recvAt = 10, complete = true, epoch = 1 },
+    },
+  }
+  scope.prof.cache["Carol-Realm"] = {
+    list = { { key = "alch", skill = 1 } },
+    recipes = {
+      alch = { ids = { 201 }, rev = 1, scanAt = 10, recvAt = 10, complete = true, epoch = 1 },
+    },
+  }
+  bob.GR.db.prof.recipeMeta[201] = { name = "Shared Potion", categoryId = 20, categoryName = "Potions" }
+  bob.GR.db.prof.recipeMeta[202] = { name = "Solo Elixir", categoryId = 21, categoryName = "Elixirs" }
+  local recipes = bob.GR:GetModule("ProfRecipes")
+  if recipes.InvalidateGuildRecipeIndex then recipes.InvalidateGuildRecipeIndex() end
+  check("guild cat helper", ui._TestBuildGuildProfCategoryRows ~= nil)
+  if ui._TestBuildGuildProfCategoryRows then
+    local flat, nRecipes, nCats = ui._TestBuildGuildProfCategoryRows("alch", "", {})
+    check("guild cat closed headers", flat and #flat == 2, flat and #flat)
+    check("guild cat unique recipes", nRecipes == 2, nRecipes)
+    check("guild cat groups", nCats == 2, nCats)
+    flat = ui._TestBuildGuildProfCategoryRows("alch", "Shared", {})
+    local found = false
+    for i = 1, #flat do
+      if flat[i].kind == "recipe" and flat[i].recipe and flat[i].recipe.name == "Shared Potion" then
+        found = true
+        check("guild cat dual crafters", flat[i].recipe.crafters and #flat[i].recipe.crafters == 2,
+          flat[i].recipe.crafters and #flat[i].recipe.crafters)
+      end
+    end
+    check("guild cat search finds closed", found)
+  end
+  ok, err = pcall(ui.ShowTab, ui, "prof")
+  check("guild cat prof tab", ok, err)
+  if ui.ShowProfSubTab then pcall(ui.ShowProfSubTab, ui, "search") end
+  ok, err = pcall(ui.SetSearchFilterText, ui, "Shared")
+  check("global search still ok", ok, err)
+  ok, err = pcall(ui.RefreshSearchList, ui)
+  check("global search refresh", ok, err)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")

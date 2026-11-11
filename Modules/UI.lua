@@ -65,6 +65,14 @@ local searchProfHdr
 local searchCraftHdr
 local SEARCH_NUM_ROWS = 12
 local SEARCH_ROW_H = 26
+-- Bundled to stay under Lua 5.1's 60-upvalue limit in BuildProfTab.
+local searchCat = {
+  expandedByProf = {}, -- [profKey] = { [categoryKey]=true }
+  scrollY = 0,
+  visibleRows = nil,
+  recipeCount = 0,
+  categoryCount = 0,
+}
 local profNavSnap = nil
 local PROF_ICON = 18
 local PROF_SLOT_W = 92
@@ -1010,6 +1018,88 @@ local function ClearSearchRow(row)
   row._amProfBrowseKey = nil
   row._amBrowseRecipeCount = nil
   row._amBrowseCrafterCount = nil
+  row._amCatKey = nil
+  row._amRowKind = nil
+end
+
+function searchCat.GetExpanded(profKey)
+  profKey = tostring(profKey or "")
+  if profKey == "" then return {} end
+  if not searchCat.expandedByProf[profKey] then
+    searchCat.expandedByProf[profKey] = {}
+  end
+  return searchCat.expandedByProf[profKey]
+end
+
+function searchCat.CaptureScroll()
+  if searchHost and searchHost.scroll and searchHost.scroll.GetVerticalScroll then
+    searchCat.scrollY = searchHost.scroll:GetVerticalScroll() or 0
+  end
+end
+
+function searchCat.BindRows(profMod)
+  local visible = searchCat.visibleRows or {}
+  local total = #visible
+  local RLV = GR.RecipeListView
+  if searchHost and searchHost.scrollChild then
+    searchHost.scrollChild:SetHeight((RLV and RLV.ContentHeight and RLV.ContentHeight(total, SEARCH_ROW_H))
+      or math.max(total, 1) * SEARCH_ROW_H)
+  end
+  local scrollY = searchCat.scrollY or 0
+  if searchHost and searchHost.scroll and searchHost.scroll.GetVerticalScrollRange then
+    local maxY = searchHost.scroll:GetVerticalScrollRange() or 0
+    if scrollY > maxY then scrollY = maxY end
+  end
+  if scrollY < 0 then scrollY = 0 end
+  searchCat.scrollY = scrollY
+  local first = 1
+  if RLV and RLV.FirstVisibleIndex then
+    first = RLV.FirstVisibleIndex(scrollY, SEARCH_ROW_H, total)
+  else
+    first = math.floor(scrollY / SEARCH_ROW_H) + 1
+  end
+  for i = 1, SEARCH_NUM_ROWS do
+    local row = searchRows[i]
+    ClearSearchRow(row)
+    local idx = first + i - 1
+    local data = visible[idx]
+    if data then
+      row:ClearAllPoints()
+      row:SetPoint("TOPLEFT", 0, -((idx - 1) * SEARCH_ROW_H))
+      if data.kind == "category" then
+        row._amRowKind = "category"
+        row._amCatKey = data.key
+        if data.expanded then
+          row.nameFS:SetText(string.format("▼ %s", data.name or data.key or "?"))
+        else
+          row.nameFS:SetText(string.format("▶ %s", data.name or data.key or "?"))
+        end
+        row.profFS:SetText("")
+        row.countFS:SetText(tostring(data.count or 0))
+        row.icon:SetTexture("Interface\\Buttons\\UI-MinusButton-UP")
+      else
+        local recipe = data.recipe
+        row._amRowKind = "recipe"
+        row.recipeId = recipe and recipe.recipeId
+        row.profKey = recipe and recipe.profKey
+        row.crafters = recipe and recipe.crafters
+        row._amRecipeName = recipe and recipe.name
+        row.nameFS:SetText(recipe and recipe.name or "")
+        row.profFS:SetText((profMod and profMod.DisplayName and profMod.DisplayName(row.profKey)) or (row.profKey or ""))
+        local n = #((recipe and recipe.crafters) or {})
+        if n <= 1 then
+          row.countFS:SetText(U.L("PROF_CRAFTER_COUNT_ONE"))
+        else
+          row.countFS:SetText(string.format(U.L("PROF_CRAFTER_COUNT"), n))
+        end
+        row.icon:SetTexture((recipe and recipe.icon) or "Interface\\Icons\\INV_Misc_QuestionMark")
+      end
+      T.ApplyRowChrome(row, idx, false)
+      row:Show()
+    else
+      row:Hide()
+    end
+  end
 end
 
 -- Aggregate index into profession categories (unique crafters per category).
@@ -1599,6 +1689,8 @@ local function BuildProfPanel(parent)
   searchBackBtn:SetScript("OnClick", function()
     searchProfKey = ""
     searchPage = 1
+    searchCat.visibleRows = nil
+    searchCat.scrollY = 0
     ResetSearchScroll()
     UI:RefreshSearchList()
   end)
@@ -1637,6 +1729,13 @@ local function BuildProfPanel(parent)
   sScroll:SetScrollChild(sChild)
   searchHost.scroll = sScroll
   searchHost.scrollChild = sChild
+  sScroll:SetScript("OnVerticalScroll", function(self, offset)
+    searchCat.scrollY = offset or 0
+    if searchProfKey ~= "" and searchCat.visibleRows then
+      local prof = GR:GetModule("Professions")
+      searchCat.BindRows(prof)
+    end
+  end)
 
   for i = 1, SEARCH_NUM_ROWS do
     local row = CreateFrame("Button", nil, sChild)
@@ -1660,6 +1759,12 @@ local function BuildProfPanel(parent)
     row.countFS:SetJustifyH("RIGHT")
     row:SetScript("OnEnter", function(self)
       T.RowHoverEnter(self)
+      if self._amRowKind == "category" then
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(self.nameFS and self.nameFS:GetText() or "", 1, 1, 1)
+        GameTooltip:Show()
+        return
+      end
       if self._amProfBrowseKey then
         local prof = GR:GetModule("Professions")
         local title = (prof and prof.DisplayName and prof.DisplayName(self._amProfBrowseKey)) or self._amProfBrowseKey
@@ -1688,9 +1793,21 @@ local function BuildProfPanel(parent)
       GameTooltip_Hide()
     end)
     row:SetScript("OnClick", function(self)
+      if self._amRowKind == "category" and self._amCatKey and searchProfKey ~= "" then
+        local map = searchCat.GetExpanded(searchProfKey)
+        if map[self._amCatKey] then
+          map[self._amCatKey] = nil
+        else
+          map[self._amCatKey] = true
+        end
+        searchCat.CaptureScroll()
+        UI:RefreshSearchList()
+        return
+      end
       if self._amProfBrowseKey then
         searchProfKey = self._amProfBrowseKey
         searchPage = 1
+        searchCat.scrollY = 0
         ResetSearchScroll()
         UI:RefreshSearchList()
         return
@@ -1895,6 +2012,14 @@ function UI:CaptureProfNav()
     searchProfKey = searchProfKey,
     searchPage = searchPage,
     searchScrollY = searchScrollY,
+    searchCatScrollY = searchCat.scrollY,
+    searchExpanded = (function()
+      if searchProfKey == "" then return nil end
+      local src = searchCat.GetExpanded(searchProfKey)
+      local copy = {}
+      for k, v in pairs(src) do copy[k] = v end
+      return copy
+    end)(),
   }
 end
 
@@ -1912,6 +2037,10 @@ function UI:RestoreProfNav()
   profPage = snap.page or 1
   searchProfKey = snap.searchProfKey or ""
   searchPage = snap.searchPage or 1
+  searchCat.scrollY = snap.searchCatScrollY or 0
+  if searchProfKey ~= "" and type(snap.searchExpanded) == "table" then
+    searchCat.expandedByProf[searchProfKey] = snap.searchExpanded
+  end
   if filterBox then filterBox:SetText(snap.filter or "") end
   if profMinBox then
     if snap.minSkill then
@@ -2005,13 +2134,18 @@ function UI:RefreshSearchList()
     end
   end
 
-  local filtered = {}
-  if browseCats then
-    filtered = BuildSearchProfessionCategories(index, prof)
-  else
+  -- Profession drill-down: collapsible WoW recipe categories + scroll (no paging).
+  local useRecipeCategories = (searchProfKey ~= "")
+  if useRecipeCategories then
+    if searchNameHdr then
+      searchNameHdr:SetText(U.L("PROF_COL_RECIPE"))
+      searchProfHdr:SetText(U.L("PROF_COL_PROF"))
+      searchCraftHdr:SetText(U.L("PROF_COL_CRAFTERS"))
+    end
+    local rows = {}
     for i = 1, #index do
       local row = index[i]
-      if searchProfKey == "" or row.profKey == searchProfKey then
+      if row.profKey == searchProfKey then
         local meta = R.GetMeta and R.GetMeta(row.recipeId)
         local name = (meta and meta.name) or string.format(U.L("PROF_RECIPE_ID"), row.recipeId)
         local outputName = nil
@@ -2028,7 +2162,7 @@ function UI:RefreshSearchList()
           })
         end
         if ok then
-          filtered[#filtered + 1] = {
+          rows[#rows + 1] = {
             recipeId = row.recipeId,
             profKey = row.profKey,
             crafters = row.crafters,
@@ -2037,6 +2171,89 @@ function UI:RefreshSearchList()
             icon = (meta and meta.icon) or (R.ResolveRecipeIcon and R.ResolveRecipeIcon(row.recipeId, meta)) or "Interface\\Icons\\INV_Misc_QuestionMark",
           }
         end
+      end
+    end
+    local RC = GR.RecipeCategories
+    local searching = q ~= ""
+    local groups = {}
+    if RC and RC.Group then
+      groups = RC.Group(rows, function(row)
+        if R.ResolveRecipeCategory then
+          return R.ResolveRecipeCategory(row.recipeId, searchProfKey)
+        end
+        return "other", U.L("PROF_RECIPE_CAT_OTHER")
+      end)
+      if searching and RC.SortGroupRecipes then
+        RC.SortGroupRecipes(groups, true)
+      end
+    end
+    searchCat.visibleRows = (RC and RC.Flatten and RC.Flatten(groups, searchCat.GetExpanded(searchProfKey), searching)) or {}
+    searchCat.recipeCount = #rows
+    searchCat.categoryCount = #groups
+
+    if searchRecipeStatusFS and R then
+      ApplyStickyOrCoverageStatus()
+    end
+    if searchPageText then
+      if searchCat.recipeCount > 0 then
+        searchPageText:SetText(string.format(U.L("PROF_RECIPE_CAT_FOOTER"), searchCat.recipeCount, searchCat.categoryCount))
+      else
+        searchPageText:SetText("")
+      end
+    end
+    if searchPrevBtn then searchPrevBtn:Hide() end
+    if searchNextBtn then searchNextBtn:Hide() end
+
+    if searchCat.recipeCount == 0 then
+      searchEmptyText:Show()
+      if #index == 0 then
+        searchEmptyText:SetText(U.L("PROF_SEARCH_EMPTY"))
+      else
+        searchEmptyText:SetText(U.L("PROF_SEARCH_NO_MATCH"))
+      end
+    else
+      searchEmptyText:Hide()
+    end
+
+    searchCat.CaptureScroll()
+    searchCat.BindRows(prof)
+    return
+  end
+
+  searchCat.visibleRows = nil
+  if searchPrevBtn then searchPrevBtn:Show() end
+  if searchNextBtn then searchNextBtn:Show() end
+
+  local filtered = {}
+  if browseCats then
+    filtered = BuildSearchProfessionCategories(index, prof)
+  else
+    for i = 1, #index do
+      local row = index[i]
+      local meta = R.GetMeta and R.GetMeta(row.recipeId)
+      local name = (meta and meta.name) or string.format(U.L("PROF_RECIPE_ID"), row.recipeId)
+      local outputName = nil
+      if meta and meta.outputItemID and R.ResolveItemName then
+        outputName = select(1, R.ResolveItemName(meta.outputItemID, nil))
+      end
+      local ok, rank = true, 1
+      if R.MatchRecipeQuery then
+        ok, rank = R.MatchRecipeQuery(q, {
+          recipeId = row.recipeId,
+          name = name,
+          outputItemID = meta and meta.outputItemID,
+          outputName = outputName,
+        })
+      end
+      if ok then
+        filtered[#filtered + 1] = {
+          recipeId = row.recipeId,
+          profKey = row.profKey,
+          crafters = row.crafters,
+          name = name,
+          rank = rank or 1,
+          icon = (meta and meta.icon) or (R.ResolveRecipeIcon and R.ResolveRecipeIcon(row.recipeId, meta)) or "Interface\\Icons\\INV_Misc_QuestionMark",
+        }
       end
     end
     table.sort(filtered, function(a, b)
@@ -2091,6 +2308,8 @@ function UI:RefreshSearchList()
   for i = 1, SEARCH_NUM_ROWS do
     local row = searchRows[i]
     ClearSearchRow(row)
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", 0, -((i - 1) * SEARCH_ROW_H))
     local data = filtered[first + i - 1]
     if data and (first + i - 1) <= last then
       if browseCats then
@@ -2132,6 +2351,48 @@ function UI:RefreshSearchList()
       row:Hide()
     end
   end
+end
+
+-- Test helper for profession-scoped category flatten (no frame required beyond module load).
+function UI._TestBuildGuildProfCategoryRows(profKey, filter, expandedMap)
+  local R = GR:GetModule("ProfRecipes")
+  local index = (R and R.BuildGuildRecipeIndex and R.BuildGuildRecipeIndex()) or {}
+  local q = TrimSearchQuery(filter or "")
+  local rows = {}
+  for i = 1, #index do
+    local row = index[i]
+    if row.profKey == profKey then
+      local meta = R.GetMeta and R.GetMeta(row.recipeId)
+      local name = (meta and meta.name) or string.format(U.L("PROF_RECIPE_ID"), row.recipeId)
+      local ok, rank = true, 1
+      if R.MatchRecipeQuery then
+        ok, rank = R.MatchRecipeQuery(q, {
+          recipeId = row.recipeId,
+          name = name,
+          outputItemID = meta and meta.outputItemID,
+        })
+      end
+      if ok then
+        rows[#rows + 1] = {
+          recipeId = row.recipeId,
+          profKey = row.profKey,
+          crafters = row.crafters,
+          name = name,
+          rank = rank or 1,
+        }
+      end
+    end
+  end
+  local RC = GR.RecipeCategories
+  local searching = q ~= ""
+  local groups = RC and RC.Group and RC.Group(rows, function(row)
+    return R.ResolveRecipeCategory(row.recipeId, profKey)
+  end) or {}
+  if searching and RC and RC.SortGroupRecipes then
+    RC.SortGroupRecipes(groups, true)
+  end
+  local flat = RC and RC.Flatten and RC.Flatten(groups, expandedMap or {}, searching) or {}
+  return flat, #rows, #groups
 end
 
 function UI:GetFrame()
@@ -2448,7 +2709,17 @@ function UI:OnEnable()
   local function RefreshAdminAccess()
     UI:RefreshAdminTabVisibility()
   end
-  GR:BindMessage(self, "GUILD_UPDATE", RefreshAdminAccess)
+  GR:BindMessage(self, "GUILD_UPDATE", function()
+    searchCat.expandedByProf = {}
+    searchCat.visibleRows = nil
+    searchCat.scrollY = 0
+    searchProfKey = ""
+    RefreshAdminAccess()
+  end)
+
+  GR:BindMessage(self, "PROF_RECIPE_CATEGORY_CHANGED", function()
+    ScheduleProfViewRefresh()
+  end)
 
   if not adminEvents then
     adminEvents = CreateFrame("Frame")
