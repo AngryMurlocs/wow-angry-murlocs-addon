@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.4
 
 - The Discord button now copies the guild's new invite link
 - Guild messages are no longer lost when the game limits how fast addons may send
