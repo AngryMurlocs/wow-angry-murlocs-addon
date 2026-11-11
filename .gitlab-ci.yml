@@ -30,6 +30,21 @@ test:mr-title:
         exit 1
       fi
 
+# Early warning: check the addon against the newest Forever API dump
+# (Ketho/BlizzardInterfaceResources, branch forever) instead of the snapshot in
+# Tests/forever_api. Never blocks the merge. When it fails, Blizzard changed
+# something: refresh the snapshot (luajit Tests/forever_api/update.lua) in its
+# own MR and fix what the test reports.
+test:forever-api-latest:
+  extends: .luajit
+  stage: test
+  allow_failure: true
+  script:
+    - luajit Tests/forever_api/update.lua --out /tmp/forever-api-latest
+    - echo "Snapshot in repo:" && grep '^build' Tests/forever_api/SOURCE.txt
+    - echo "Latest:" && grep '^build' /tmp/forever-api-latest/SOURCE.txt
+    - luajit Tests/ForeverApi_test.lua /tmp/forever-api-latest
+
 # Release MRs ("release: X.Y.Z"): title, all four version places and the
 # CHANGELOG top section agree, no Unreleased section is left, the tag is free.
 test:release:
