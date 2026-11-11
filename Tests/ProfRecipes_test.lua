@@ -11,6 +11,12 @@ local function check(name, cond, extra)
   end
 end
 
+local function wipe(t)
+  if not t then return end
+  for k in pairs(t) do t[k] = nil end
+end
+_G.wipe = wipe
+
 package.path = package.path
 dofile("Localization/enUS.lua")
 dofile("Core/Util.lua")
@@ -29,10 +35,29 @@ end
 function GR:GetModule(name)
   return GR._modules and GR._modules[name]
 end
-function GR:BindMessage() end
-function GR:UnbindMessages() end
+GR._msgBus = {}
+function GR:BindMessage(mod, msg, fn)
+  self._msgBus[msg] = self._msgBus[msg] or {}
+  self._msgBus[msg][#self._msgBus[msg] + 1] = { mod = mod, fn = fn }
+end
+function GR:UnbindMessages(mod)
+  for msg, list in pairs(self._msgBus) do
+    local keep = {}
+    for i = 1, #list do
+      if list[i].mod ~= mod then keep[#keep + 1] = list[i] end
+    end
+    self._msgBus[msg] = keep
+  end
+end
 function GR:ReleaseEventFrame() end
-function GR:SendMessage() end
+function GR:SendMessage(msg, ...)
+  local list = self._msgBus[msg]
+  if not list then return end
+  for i = 1, #list do
+    local e = list[i]
+    if e.fn then e.fn(e.mod, ...) end
+  end
+end
 function GR:RegisterMessage() end
 
 _G.CreateFrame = function()
@@ -47,7 +72,47 @@ _G.CreateFrame = function()
   })
 end
 _G.IsInGuild = function() return true end
-_G.C_Timer = { After = function(_, fn) if fn then fn() end end }
+
+-- Controllable clock + deferred C_Timer.After (no immediate fire).
+local clockNow = 100
+local clockWall = 1700000000
+local timerQueue = {}
+local function TimerSort()
+  table.sort(timerQueue, function(a, b) return a.at < b.at end)
+end
+_G.GetTime = function() return clockNow end
+_G.GetServerTime = function() return clockWall end
+_G.time = function() return clockWall end
+_G.C_Timer = {
+  After = function(delay, fn)
+    delay = tonumber(delay) or 0
+    if delay < 0 then delay = 0 end
+    timerQueue[#timerQueue + 1] = { at = clockNow + delay, fn = fn }
+  end,
+}
+local function Advance(dt)
+  dt = tonumber(dt) or 0
+  if dt < 0 then dt = 0 end
+  local target = clockNow + dt
+  while true do
+    TimerSort()
+    local next = timerQueue[1]
+    if not next or next.at > target + 1e-9 then break end
+    table.remove(timerQueue, 1)
+    clockNow = next.at
+    if next.fn then next.fn() end
+  end
+  clockNow = target
+  clockWall = clockWall + dt
+end
+local function FlushTimers()
+  while #timerQueue > 0 do
+    TimerSort()
+    local next = table.remove(timerQueue, 1)
+    clockNow = math.max(clockNow, next.at)
+    if next.fn then next.fn() end
+  end
+end
 
 dofile("Modules/ProfRecipes.lua")
 local R = GR:GetModule("ProfRecipes")
@@ -268,8 +333,8 @@ end
 local n = R:BroadcastAllStaggered(true, 0.55)
 check("stagger schedules all", n == #keys)
 check("stagger first immediate", sent[1] == keys[1])
--- C_Timer stub runs After callbacks immediately
-check("stagger all sent via timer stub", #sent == #keys, #sent)
+Advance(0.55 * math.max(#keys, 1))
+check("stagger all sent via timer", #sent == #keys, #sent)
 R.BroadcastProfession = realSend
 R.enabled = false
 
@@ -647,7 +712,6 @@ do
     return true
   end
   R.enabled = true
-  _G.GetTime = function() return 500 end
   -- reset cooldown by forcing
   local ok, why = R:RequestRecipeDataRefresh("alch", true)
   check("case2 recipe refresh sent", ok == true and why == "sent", why)
@@ -658,6 +722,8 @@ do
   GR.Comm.Send = realCommSend
   R.enabled = false
   R:MarkRecipeRefreshDone("done")
+  -- Drain settle timers from the aborted session.
+  Advance(R.REFRESH_MAX + 1)
 end
 
 -- R1: guild scope change must not keep prior guild index
@@ -786,6 +852,222 @@ do
   })
   check("R3 late PROFR for dropped prof ignored",
     scope.prof.cache["Alice-Realm"].recipes.tail.rev == 2)
+end
+
+-- ===== Recipe-list improvements =====
+
+-- Content fingerprint ignores scanAt: identical scans one second apart → one send
+do
+  local bodies = {}
+  local realCommSend = GR.Comm.Send
+  GR.Comm.Send = function(_, body)
+    bodies[#bodies + 1] = body
+    return true
+  end
+  R.enabled = true
+  wipe(R._lastSentFp)
+  local me = AngryMurlocs.Util.NormalizeName(AngryMurlocs.Util.PlayerName())
+  local scope = AngryMurlocs.Util.GetScopeDB()
+  scope.prof.cache[me] = { list = { { key = "alch", skill = 1, name = "Alchemy" } }, recipes = {} }
+  R:ApplyLocalScan("alch", { 10, 20 }, true, {})
+  local n1 = #bodies
+  Advance(1)
+  R:ApplyLocalScan("alch", { 10, 20 }, true, {})
+  check("dedup identical scan one send", n1 == 1 and #bodies == 1, #bodies)
+  R:ApplyLocalScan("alch", { 10, 20, 30 }, true, {})
+  check("dedup content change sends again", #bodies == 2, #bodies)
+  GR.Comm.Send = realCommSend
+  R.enabled = false
+end
+
+-- Settle window: quiet before min does not finish; late reply counted; sticky summary
+do
+  local statuses = {}
+  local busSend = GR.SendMessage
+  function GR:SendMessage(msg, a, b, c)
+    if msg == "PROF_RECIPE_REFRESH_STATUS" then
+      statuses[#statuses + 1] = { a, b, c }
+    end
+    return busSend(self, msg, a, b, c)
+  end
+  R.enabled = false
+  R:OnEnable()
+  local ok = R:RequestRecipeDataRefresh(nil, true)
+  check("settle start sent", ok == true)
+  Advance(3)
+  check("settle still requesting at 3s", R:IsRecipeRefreshBusy() == true)
+  local st = select(2, R:GetRecipeRefreshStatus())
+  check("settle why still requesting", st == "requesting", st)
+  local scope = AngryMurlocs.Util.GetScopeDB()
+  scope.prof.cache["Carol-Realm"] = { list = {}, recipes = {} }
+  -- Reply after 1s peer delay style: still inside min window
+  GR:SendMessage("PROF_RECIPE_UPDATE", "Carol-Realm", {
+    profKey = "tail", rev = 1, scanAt = clockWall, complete = true, epoch = 1, ids = { 9 },
+  })
+  Advance(R.REFRESH_MIN_COLLECT + R.REFRESH_QUIET + 0.5)
+  local last = statuses[#statuses]
+  check("settle done with counts", last and last[1] == "done", last and tostring(last[1]))
+  check("settle catalogs >= 1", last and (tonumber(last[3]) or 0) >= 1, last and tostring(last[3]))
+  local summary = R:GetRecipeRefreshSummary()
+  check("sticky summary present", summary ~= nil and summary.why == "done")
+  Advance(1)
+  check("sticky still held", R:GetRecipeRefreshSummary() ~= nil)
+  Advance(R.REFRESH_SUMMARY_HOLD + 1)
+  check("sticky expired", R:GetRecipeRefreshSummary() == nil)
+  GR.SendMessage = busSend
+  R:OnDisable()
+end
+
+-- No replies → no_response
+do
+  R.enabled = false
+  R:OnEnable()
+  local statuses = {}
+  local busSend = GR.SendMessage
+  function GR:SendMessage(msg, a, b, c)
+    if msg == "PROF_RECIPE_REFRESH_STATUS" then statuses[#statuses + 1] = a end
+    return busSend(self, msg, a, b, c)
+  end
+  R:RequestRecipeDataRefresh("alch", true)
+  Advance(R.REFRESH_MIN_COLLECT + 0.5)
+  local saw = false
+  for i = 1, #statuses do if statuses[i] == "no_response" then saw = true end end
+  check("no reply status", saw, table.concat(statuses, ","))
+  local sum = R:GetRecipeRefreshSummary()
+  check("no reply summary", sum and sum.why == "no_response")
+  GR.SendMessage = busSend
+  R:OnDisable()
+  Advance(R.REFRESH_SUMMARY_HOLD + 1)
+end
+
+-- Meta: name-only incomplete; reagentsResolved empty is complete; peer empty unknown
+do
+  GR.db.prof.recipeMeta = {}
+  R.StoreMeta(101, { name = "OnlyName", reagents = nil })
+  check("name-only incomplete", not R.IsMetaComplete(R.GetMeta(101)))
+  R.StoreMeta(102, { name = "EmptyMats", reagents = {}, reagentsResolved = true })
+  check("confirmed empty reagents complete", R.IsMetaComplete(R.GetMeta(102)))
+  R.StoreMeta(103, { name = "PeerEmpty", reagents = {}, reagentsResolved = false })
+  -- StoreMeta with false and empty may still leave incomplete if never resolved
+  check("unconfirmed empty incomplete", not R.IsMetaComplete(R.GetMeta(103)))
+end
+
+-- Meta queue: >24 IDs drain in batches; long wait before first send does not give up
+do
+  Advance(25) -- clear PROFRMQ send cooldown from earlier tests
+  _G.C_TradeSkillUI = nil -- prior cases stub GetRecipeInfo for any id
+  GR.db.prof.recipeMeta = {}
+  R.AbortAllBackgroundWork()
+  wipe(R._metaQueue)
+  wipe(R._metaGiveUp)
+  local bodies = {}
+  local realCommSend = GR.Comm.Send
+  GR.Comm.Send = function(_, body)
+    bodies[#bodies + 1] = body
+    return true
+  end
+  R.enabled = true
+  local ids = {}
+  for i = 1, 500 do ids[i] = 10000 + i end
+  R.EnsureMetaForIds(ids)
+  check("meta first batch sent", #bodies == 1, #bodies)
+  local idPart = bodies[1] and select(2, bodies[1]:match("^PROFRMQ|(%d+)|(.*)$"))
+  local nFirst = 0
+  if idPart then for _ in string.gmatch(idPart, "[^+]+") do nFirst = nFirst + 1 end end
+  check("meta first batch size 24", nFirst == R.MAX_META_REQ_IDS, nFirst)
+  -- Advance only queue wait (not enough for 500*CD); IDs waiting must not all give up
+  Advance(30)
+  check("meta long queue not mass give-up", (function()
+    local n = 0
+    for _ in pairs(R._metaGiveUp) do n = n + 1 end
+    return n < 100
+  end)(), "giveups")
+  -- Drain a few more batches
+  for _ = 1, 5 do Advance(20.1) end
+  check("meta multiple batches", #bodies >= 3, #bodies)
+  GR.Comm.Send = realCommSend
+  R.enabled = false
+  R.AbortAllBackgroundWork()
+end
+
+-- Meta give-up after 3 attempts from first send
+do
+  Advance(25)
+  _G.C_TradeSkillUI = nil
+  GR.db.prof.recipeMeta = {}
+  R.AbortAllBackgroundWork()
+  wipe(R._metaQueue)
+  wipe(R._metaGiveUp)
+  local bodies = {}
+  local realCommSend = GR.Comm.Send
+  GR.Comm.Send = function(_, body)
+    bodies[#bodies + 1] = body
+    return true
+  end
+  R.enabled = true
+  R.EnsureMetaForIds({ 7777 })
+  check("giveup attempt1", #bodies == 1, #bodies)
+  Advance(25.1) -- pending expire
+  Advance(20.1) -- CD
+  check("giveup attempt2", #bodies >= 2, #bodies)
+  Advance(25.1)
+  Advance(20.1)
+  check("giveup attempt3", #bodies >= 3, #bodies)
+  Advance(25.1)
+  Advance(20.1)
+  local after = #bodies
+  Advance(25.1)
+  Advance(20.1)
+  check("giveup no more auto", #bodies == after, #bodies)
+  check("giveup flagged", R._metaGiveUp[7777] == true)
+  GR.Comm.Send = realCommSend
+  R.enabled = false
+  R.AbortAllBackgroundWork()
+end
+
+-- Pending learn: meta does not clear; complete missing ID keeps retry; store with ID clears
+do
+  R.NotePendingLearn(8888, "alch")
+  check("pending noted", R.HasPendingLearn(8888))
+  R.StoreMeta(8888, { name = "New", reagents = { { itemID = 1, qty = 1 } }, reagentsResolved = true })
+  check("pending survives meta", R.HasPendingLearn(8888))
+  local me = AngryMurlocs.Util.NormalizeName(AngryMurlocs.Util.PlayerName())
+  local scope = AngryMurlocs.Util.GetScopeDB()
+  scope.prof.cache[me] = { list = { { key = "alch", skill = 1 } }, recipes = {} }
+  R:ApplyLocalScan("alch", { 1, 2 }, true, { skipBroadcast = true })
+  check("pending remains if missing from catalog", R.HasPendingLearn(8888))
+  R:ApplyLocalScan("alch", { 1, 2, 8888 }, true, { skipBroadcast = true })
+  check("pending cleared when in catalog", not R.HasPendingLearn(8888))
+end
+
+-- Confirmed-complete why helper
+check("confirmed why ok", R.IsConfirmedCompleteWhy("ok"))
+check("confirmed why not partial", not R.IsConfirmedCompleteWhy("partial_unknown"))
+
+-- Partial store must not count as confirmed-complete stop
+check("partial why not confirmed", not R.IsConfirmedCompleteWhy("partial_unknown"))
+check("empty_suspect not confirmed", not R.IsConfirmedCompleteWhy("empty_suspect"))
+
+-- Complete fingerprint equal when scanAt differs
+do
+  local fp1 = R.ContentFingerprint("alch", { 1, 2 }, true, 5)
+  local fp2 = R.ContentFingerprint("alch", { 1, 2 }, true, 5)
+  check("content fp stable", fp1 == fp2)
+  local fp3 = R.ContentFingerprint("alch", { 1, 2, 3 }, true, 5)
+  check("content fp changes with ids", fp1 ~= fp3)
+end
+
+-- Guild abort clears settle
+do
+  Advance(25)
+  R.enabled = false
+  R:OnEnable()
+  R:RequestRecipeDataRefresh(nil, true)
+  check("abort busy before", R:IsRecipeRefreshBusy())
+  -- Invoke bound GUILD_UPDATE handlers via bus
+  GR:SendMessage("GUILD_UPDATE")
+  check("abort busy after guild", not R:IsRecipeRefreshBusy())
+  R:OnDisable()
 end
 
 print(string.format("%d failures", fails))

@@ -274,12 +274,20 @@ function UI:RunRecipeDataRefresh()
   return ok, why
 end
 
-function UI:UpdateRecipeDataRefreshStatus(status)
+function UI:UpdateRecipeDataRefreshStatus(status, members, catalogs)
   if not searchRecipeStatusFS then return end
   if status == "requesting" or status == "busy" then
     searchRecipeStatusFS:SetText(U.L("PROF_RECIPE_DATA_STATUS_LOADING"))
   elseif status == "done" then
-    searchRecipeStatusFS:SetText(U.L("PROF_RECIPE_DATA_STATUS_DONE"))
+    members = tonumber(members) or 0
+    catalogs = tonumber(catalogs) or 0
+    if catalogs > 0 or members > 0 then
+      searchRecipeStatusFS:SetText(string.format(U.L("PROF_RECIPE_DATA_STATUS_DONE_COUNTS"), members, catalogs))
+    else
+      searchRecipeStatusFS:SetText(U.L("PROF_RECIPE_DATA_STATUS_DONE"))
+    end
+  elseif status == "no_response" then
+    searchRecipeStatusFS:SetText(U.L("PROF_RECIPE_DATA_STATUS_NO_RESPONSE"))
   elseif status == "timeout" then
     searchRecipeStatusFS:SetText(U.L("PROF_RECIPE_DATA_STATUS_TIMEOUT"))
   elseif status == "cooldown" then
@@ -287,6 +295,35 @@ function UI:UpdateRecipeDataRefreshStatus(status)
   elseif not status or status == "idle" then
     searchRecipeStatusFS:SetText("")
   end
+end
+
+local function ApplyStickyOrCoverageStatus()
+  if not searchRecipeStatusFS then return end
+  local R = GR:GetModule("ProfRecipes")
+  if R and R.IsRecipeRefreshBusy and R:IsRecipeRefreshBusy() then
+    return
+  end
+  local summary = R and R.GetRecipeRefreshSummary and R:GetRecipeRefreshSummary()
+  if summary then
+    if summary.why == "no_response" then
+      searchRecipeStatusFS:SetText(U.L("PROF_RECIPE_DATA_STATUS_NO_RESPONSE"))
+    else
+      searchRecipeStatusFS:SetText(string.format(
+        U.L("PROF_RECIPE_DATA_STATUS_DONE_COUNTS"),
+        tonumber(summary.members) or 0,
+        tonumber(summary.catalogs) or 0
+      ))
+    end
+    return true
+  end
+  if R and R.CountCoverage then
+    local nChars, nCats = R.CountCoverage()
+    if nChars > 0 or nCats > 0 then
+      searchRecipeStatusFS:SetText(string.format(U.L("PROF_SEARCH_COVERAGE"), nChars, nCats))
+      return true
+    end
+  end
+  return false
 end
 
 local function ScheduleProfViewRefresh()
@@ -1203,6 +1240,7 @@ local function WireProfIconButton(btn, row)
     T.RowHoverEnter(row)
     if not self.profKey or not row.fullName then return end
     local prof = GR:GetModule("Professions")
+    local recipes = GR:GetModule("ProfRecipes")
     local label = (prof and prof.DisplayName and prof.DisplayName(self.profKey)) or self.profKey
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     if self.skill then
@@ -1210,7 +1248,15 @@ local function WireProfIconButton(btn, row)
     else
       GameTooltip:AddLine(label, 1, 1, 1)
     end
-    GameTooltip:AddLine(string.format(U.L("PROF_RECIPE_OPEN_TIP"), label), T.FRESH[1], T.FRESH[2], T.FRESH[3])
+    local me = U.NormalizeName(U.PlayerName())
+    local isSelf = row.fullName == me or U.IsSelfName(row.fullName)
+    local status = recipes and recipes.GetStatus and recipes.GetStatus(row.fullName, self.profKey)
+    if isSelf and status == "none" and recipes and not recipes.IsGathering(self.profKey) then
+      GameTooltip:AddLine(string.format(U.L("PROF_RECIPE_NOT_SCANNED"), label), 1, 0.82, 0)
+      GameTooltip:AddLine(U.L("PROF_RECIPE_OPEN_SKILL"), T.FRESH[1], T.FRESH[2], T.FRESH[3])
+    else
+      GameTooltip:AddLine(string.format(U.L("PROF_RECIPE_OPEN_TIP"), label), T.FRESH[1], T.FRESH[2], T.FRESH[3])
+    end
     GameTooltip:Show()
   end)
   btn:SetScript("OnLeave", function()
@@ -1219,6 +1265,16 @@ local function WireProfIconButton(btn, row)
   end)
   btn:SetScript("OnClick", function(self)
     if not row.fullName or not self.profKey then return end
+    local recipes = GR:GetModule("ProfRecipes")
+    local me = U.NormalizeName(U.PlayerName())
+    local isSelf = row.fullName == me or U.IsSelfName(row.fullName)
+    local status = recipes and recipes.GetStatus and recipes.GetStatus(row.fullName, self.profKey)
+    if isSelf and status == "none" and recipes and recipes.TryOpenTradeSkillForKey
+        and not recipes.IsGathering(self.profKey) then
+      HideWhisperMenu()
+      recipes:TryOpenTradeSkillForKey(self.profKey)
+      return
+    end
     if UI.OpenRecipeCatalog then
       HideWhisperMenu()
       UI:OpenRecipeCatalog(row.fullName, self.profKey)
@@ -1999,14 +2055,8 @@ function UI:RefreshSearchList()
   local first = (searchPage - 1) * SEARCH_NUM_ROWS + 1
   local last = math.min(total, searchPage * SEARCH_NUM_ROWS)
 
-  if searchRecipeStatusFS and R and R.CountCoverage and (not R.IsRecipeRefreshBusy or not R:IsRecipeRefreshBusy()) then
-    local nChars, nCats = R.CountCoverage()
-    if nChars > 0 or nCats > 0 then
-      local st = R.GetRecipeRefreshStatus and select(1, R:GetRecipeRefreshStatus())
-      if st == "idle" or not st then
-        searchRecipeStatusFS:SetText(string.format(U.L("PROF_SEARCH_COVERAGE"), nChars, nCats))
-      end
-    end
+  if searchRecipeStatusFS and R then
+    ApplyStickyOrCoverageStatus()
   end
 
   if searchPageText then
@@ -2431,8 +2481,8 @@ function UI:OnEnable()
   GR:BindMessage(self, "PROF_RECIPE_META_CHANGED", function()
     ScheduleProfViewRefresh()
   end)
-  GR:BindMessage(self, "PROF_RECIPE_REFRESH_STATUS", function(_, status)
-    UI:UpdateRecipeDataRefreshStatus(status)
+  GR:BindMessage(self, "PROF_RECIPE_REFRESH_STATUS", function(_, status, members, catalogs)
+    UI:UpdateRecipeDataRefreshStatus(status, members, catalogs)
   end)
 
   GR:BindMessage(self, "POS_CACHE_CHANGED", function()

@@ -642,10 +642,13 @@ RefreshHeader = function()
     catalog.emptyText:SetText(U.L("PROF_RECIPE_EMPTY_GATHERING"))
     catalog.emptyText:Show()
   elseif status == "none" then
-    catalog.headerStatus:SetText(U.L("PROF_RECIPE_STATUS_NONE"))
-    catalog.emptyText:SetText(IsSelf(name)
-      and U.L("PROF_RECIPE_EMPTY_SCAN_HINT")
-      or U.L("PROF_RECIPE_EMPTY_MEMBER"))
+    if IsSelf(name) then
+      catalog.headerStatus:SetText(string.format(U.L("PROF_RECIPE_NOT_SCANNED"), DisplayProf(state.profKey)))
+      catalog.emptyText:SetText(U.L("PROF_RECIPE_EMPTY_SCAN_HINT"))
+    else
+      catalog.headerStatus:SetText(U.L("PROF_RECIPE_STATUS_NONE"))
+      catalog.emptyText:SetText(U.L("PROF_RECIPE_EMPTY_MEMBER"))
+    end
     catalog.emptyText:Show()
   elseif status == "partial" then
     catalog.headerStatus:SetText(FormatDataAge(rec))
