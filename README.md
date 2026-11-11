@@ -1,100 +1,90 @@
 # AngryMurlocs
 
-Gilden-Helfer für **WoW Forever** (Interface `16001`): Murloc-Kartenpins, Berufsliste, Wanted-Fahndung, Todes-/Level-Toasts — alles über den Gilden-Addonkanal.
+Gilden-Addon der **Angry Murlocs** für **World of Warcraft: Forever**. Es zeigt Gildenmitglieder als Murlocs auf der Weltkarte, sammelt die Berufe und Rezepte der Gilde, führt eine gemeinsame Wanted-Liste und meldet Tode und Level-ups der Gilde.
 
 **Version:** 0.11.4
 
-**Download:** [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) · **Quellcode:** [GitHub](https://github.com/AngryMurlocs/wow-angry-murlocs-addon)
+**Download:** [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) · **Quellcode:** [GitHub](https://github.com/AngryMurlocs/wow-angry-murlocs-addon) · **Discord:** [discord.murlocs.eu](https://discord.murlocs.eu)
 
-## Features
-
-- Gilden-Kartenpins mit **klassenbezogenen Murloc-Köpfen** (Zoom-feste Größe, Default **18**; Styles: Heads / Body / Rings; Ausfaden vor dem Verschwinden nach 60 s). Mehrere Spieler auf einem Punkt stehen nebeneinander statt übereinander.
-- Berufsliste mit Gilden-Sync, **Online** (Addon kürzlich gehört), Sortierung und Paging (Top 40 von N)
-- Wanted-Liste mit Zählung **pro Opfer** (kein Doppelzählen über Live/Relay/Sync), Sync mit sichtbarem Status
-- Wanted-**Sichtungen** beim Anwählen: Frische frisch (&lt;60 s) / aktuell (&lt;5 Min) / veraltet
-- Todes- und Level-Up-Toasts (gemeinsame Queue, Cooldown, Kampf wartet)
-- Privacy-Schalter (Position, Tod/Wanted, Berufe, Sichtungen, Level-Ups) und `/am diag` (nur lokal)
-- Deutsch / Englisch
-
-Kommunikation über den Gilden-Addonkanal (Prefix `GildenRadar` für Kompatibilität). Lange Nachrichten werden fragmentiert. Wanted- und Berufsdaten sind nach **Gilde + Realm** getrennt.
-
-**Grenze Forever:** Der Kampflog (CLEU) ist gesperrt. Ziel/Angreifer zählen **nicht** als Killer. Ab **0.8.1** kann Death Recap bei `Player-*`-GUID Wanted + Toast setzen; Mob/Umgebung nur Toast ohne Wanted-Credit. Recap-Qualität auf Forever: bitte mit `/am diag death` prüfen — nicht als immer zuverlässig annehmen.
+Was sich in jeder Version geändert hat, steht im [CHANGELOG](CHANGELOG.md).
 
 ## Installation
 
-1. Über [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) installieren (CurseForge-App) oder das Release-ZIP von dort entpacken.
-2. Ordner `AngryMurlocs` nach  
-   `World of Warcraft\_forever_\Interface\AddOns\` kopieren.
-3. Spiel neu starten bzw. Addons neu laden (`/reload`).
+1. Über die CurseForge-App installieren, oder das ZIP von der [CurseForge-Seite](https://www.curseforge.com/wow/addons/angry-murlocs) laden und den Ordner `AngryMurlocs` nach `World of Warcraft\_forever_\Interface\AddOns\` kopieren.
+2. WoW starten bzw. neu starten.
+3. `/am` öffnet das Hauptfenster.
 
-**Upgrade von 0.5.x:** SavedVariables bleiben erhalten. Main/Craft-Module sind entfernt — alte SV-Keys liegen harmlos weiter; Tabs/Slash dafür gibt es nicht mehr. Pin-Größe wird von älteren Defaults (8/11/14) einmalig auf **18** migriert, sofern du sie nicht selbst geändert hast. Die flache Wanted-Liste aus 0.4.0 wird einmalig in den Guild-Scope migriert.
+Die meisten Funktionen leben vom Austausch mit der Gilde. Je mehr Gildenmitglieder das Addon nutzen, desto mehr zeigt es. Das Addon weist im Chat darauf hin, wenn jemand in der Gilde eine neuere Version hat.
 
-**Upgrade auf 0.7.0 / 0.8.0:** SavedVariables-Schema **2** (seit 0.7.0). Bestehende Wanted-Level bleiben als Altdaten (`legacy`) erhalten. 0.8.0 ändert nur UI/Frische/Toasts/Berufe-Liste — kein neues Schema. 0.6.x und 0.7+ tauschen keine Wanted-Daten aus — alle Gildenmitglieder sollten aktualisieren. Details und Grenzen: [CHANGELOG.md](CHANGELOG.md).
+## Funktionen
 
-## Slash-Befehle
+### Gilde auf der Karte
+- Gildenmitglieder erscheinen auf der Weltkarte als Murlocs in ihrer Klassenfarbe. Zur Wahl stehen Murloc-Köpfe, Ganzkörper oder Ringe, und die Größe ist einstellbar.
+- Die Positionen werden alle paar Sekunden aktualisiert. Ohne neue Daten verblasst ein Pin langsam und verschwindet nach einer Minute.
+- Stehen mehrere Spieler am selben Ort, rücken ihre Pins auseinander, statt sich zu verdecken.
+
+### Berufe und Rezepte
+- Liste aller Berufe in der Gilde mit Fertigkeitsstufe, Online-Status, Sortierung und Suche.
+- Rezept-Katalog: Wer in der Gilde kann was herstellen, mit benötigten Materialien. Die Rezepte eines Mitglieds erscheinen, sobald es seinen Beruf einmal im Spiel geöffnet hat.
+- Den Hersteller direkt anflüstern oder eine fertige Anfrage in den Chat übernehmen.
+
+### Wanted-Liste
+- Wird ein Gildenmitglied von einem Spieler der Gegenseite getötet, landet der Killer auf der Wanted-Liste der Gilde. Jeder weitere Kill erhöht sein Level, mit Rängen von **Markiert** bis **Gildenschreck**.
+- Duelle, Schlachtfelder, Arenen sowie Tode durch Monster oder Umgebung zählen nie.
+- Nimmst du einen gesuchten Spieler ins Ziel, erfährt die Gilde, wo er gesehen wurde. Sichtungen zeigen, wie frisch sie sind.
+- Liste mit Seiten, Suche, Sortierung und Details zu jedem Eintrag.
+- Die Liste gleicht sich beim Login automatisch mit der Gilde ab, oder jederzeit mit `/am sync`.
+
+### Meldungen
+- Tode und Level-ups in der Gilde erscheinen als Meldung im Murloc-Look. Sound, Größe, Dauer und Position sind einstellbar.
+- Meldungen warten, bis du aus dem Kampf bist, und erscheinen nacheinander statt übereinander.
+
+### Sprachen
+Deutsch und Englisch, je nach Spielsprache.
+
+## Befehle
 
 | Befehl | Wirkung |
 |--------|---------|
-| `/am` | Hauptfenster (Berufe + Navigation) |
-| `/am help` | Hilfe |
-| `/am config` | Esc-Settings (Stub) bzw. Addon-Tab; Alias `options` / `settings` |
-| `/am wanted` | Wanted-Liste / Sichtungen |
-| `/am sync` | Gildendaten jetzt abgleichen (Berufe + Wanted) |
+| `/am` | Hauptfenster öffnen oder schließen |
+| `/am config` | Einstellungen (auch `options` / `settings`) |
+| `/am wanted` | Wanted-Liste |
 | `/am prof` | Berufsliste |
-| `/am share on\|off` | Position teilen |
+| `/am sync` | Gildendaten jetzt abgleichen |
 | `/am map` | Kartenpins an/aus |
-| `/am prof share on\|off` | Berufe teilen |
-| `/am diag on\|off\|show\|death` | Lokale Diagnose (wird nicht gesendet) |
+| `/am share on` / `off` | Eigene Position teilen an/aus |
+| `/am prof share on` / `off` | Eigene Berufe teilen an/aus |
+| `/am diag on` / `off` / `show` / `death` | Diagnose für Fehlersuche, bleibt auf deinem Rechner |
+| `/am help` | Hilfe |
 
-Aliases: `/angrymurlocs`, `/gr`
+Weitere Kurzformen: `/angrymurlocs`, `/gr`. Minimap-Knopf: Linksklick öffnet das Hauptfenster, Rechtsklick die Einstellungen.
 
-## Bedienung
+## Privatsphäre
 
-- **Kartenpins:** Klassen-Murlocs auf der Weltkarte; Größe in den Optionen (8–24, gilt für Heads/Body/Rings). Style unter Opt → Map. Ohne Update ab ~45 s blasser, bei 60 s weg. Liegen mehrere auf einem Haufen, rücken sie auseinander (2 nebeneinander, 3 Dreieck, 4 Raster, 5 als 2 über 3, ab 6 einer in der Mitte). Eine Reihe bleibt an den echten Positionen.
-- **Berufe / Wanted:** Navigation wechselt Fenster exklusiv (kein Übereinanderlegen). Auto-Sync einmal pro Sitzung (Login/Reload) und bei Gildenwechsel; sonst Sync-Button bzw. `/am sync`. Status im Tab „Allgemein“ und im Wanted-Fenster.
-- **Wanted-Zählung (feste Gilden-Regeln):** Jedes Opfer führt pro Killer einen eigenen Zähler; Level = Altdaten + Summe der Opferzähler. Pair-CD **10s** beim Opfer. Duell/BG/Arena/unbekannter Kontext zählen nie. Ränge Markiert→Gildenschreck. Kein Zeit-Expire; Safety-Cap **1000**.
-- **Killer-Quelle auf Forever:** CLEU gesperrt; Ziel/Angreifer gelten nicht als Killer. Death Recap mit `Player-*` kann Wanted zählen. Tödliche Treffer haben Vorrang vor älteren Treffern; ausdrücklich nicht tödliche Treffer und unvollständige Quellen bleiben „Ursache unbekannt“. Fehlt der Recap zunächst, wartet das Addon höchstens eine Sekunde auf die Daten. Sprungbewegung oder ein Atembalken allein beweisen keinen Fall-/Ertrinkungstod. `/am diag death` zur Prüfung.
-- **Liste:** Top 40 von N mit Seiten, Suche, Sortierung nach Level oder zuletzt gesehen. Klick öffnet Details (Kill, Sichtung, Quellen, Opferzähler).
-- **Wanted-Sichtung:** Wanted-Spieler ins Ziel nehmen → Auto-Meldung an die Gilde (Zone = Zone des Melders; 60 s Sendepause). Frische: frisch / aktuell / veraltet (5+ Min).
-- **Minimap:** Linksklick Hauptfenster, Rechtsklick Settings.
-- **Ingame-Prüfung:** [Tests/CLIENT_CHECKLIST.md](Tests/CLIENT_CHECKLIST.md).
+Was das Addon mit der Gilde teilt, stellst du in den Einstellungen unter **Freigaben** ein, jeweils einzeln:
 
-## Einstellungen
+- deine Position auf der Karte (standardmäßig nicht im Kampf und nicht auf Schlachtfeldern)
+- deine Tode (und damit, wer dich getötet hat)
+- deine Berufe und Rezepte
+- deine Wanted-Sichtungen
+- deine Level-ups
 
-Addon-Optionen (Seitenleiste): Freigaben, Karte, Level-Up / Tod / Sichtungen, Oberfläche (Hauptfenster + Minimap). Auto-Wanted-Regeln sind **fest im Addon** (keine Slider).
+Geteilt wird nur innerhalb deiner Gilde. Daten verschiedener Gilden und Realms bleiben getrennt.
 
-## Neu in 0.9.0 (Kurz)
+## Grenzen auf WoW Forever
 
-- Neue Klassen-Köpfe für die Kartenpins
-- Überlappende Pins bilden eine feste Gruppe statt sich zu verdecken
+- Das Kampflog ist auf Forever für Addons gesperrt. Den Killer liest das Addon aus dem **Todesrückblick** (Death Recap) des Spiels. Ist dort kein Spieler eindeutig als Killer erkennbar, steht in der Meldung „Ursache unbekannt“, und auf der Wanted-Liste zählt nichts.
+- Wer gerade im Ziel oder im Kampf war, gilt nie automatisch als Killer.
+- Mit `/am diag death` siehst du, was das Spiel beim letzten Tod geliefert hat.
 
-## Neu in 0.8.0 (Kurz)
+## Mitarbeiten
 
-- Sichtungs-Frische: frisch (&lt;60 s) / aktuell (&lt;5 Min) / veraltet
-- Pin-Ausfaden in den letzten 15 s vor dem Verschwinden; Hover hebt den Pin
-- Berufe: Online (Addon gehört), Sortierung, Paging Top 40 von N
-- Gemeinsame Toast-Queue (Tod vor Level-Up, Cooldown, Kampf wartet)
+Ablauf, Einrichtung, Versionen und Releases: [CONTRIBUTING.md](CONTRIBUTING.md). Hinweise für KI-Agents wie Cursor oder Claude Code: [AGENTS.md](AGENTS.md).
 
-## Neu in 0.7.0 (Kurz)
-
-- Ehrliche Wanted-Zählung pro Opfer, keine Ziel-Beschuldigung
-- Sync mit einem Antwortenden, Seiten, Status und Sperre
-- Lokales Ausblenden statt Löschen (inzwischen wieder entfernt)
-- Privacy: eigene Tode nur bei „Gilden-Tode teilen“, Berufe-Cache pro Gilde
-- `/am diag` für lokale Diagnose
-
-## Tests (Entwicklung)
-
-Reine Lua-Logik wird ohne Client mit LuaJIT/Lua 5.1 getestet, aus dem Repo-Root:
+Tests laufen ohne WoW mit LuaJIT, aus dem Repo-Root:
 
 ```
 luajit Tests/run_all.lua
 ```
 
-Ingame-Punkte: [Tests/CLIENT_CHECKLIST.md](Tests/CLIENT_CHECKLIST.md). `Tests/` wird nicht mit verpackt (siehe [.pkgmeta](.pkgmeta)).
-
-## Hinweis
-
-Benötigt eine Gilde und Online-Gildenmitglieder mit demselben Addon (**0.7+**, ideal **0.8.0**) für Sync-Features. Ältere Clients ignorieren unbekannte Nachrichtentypen; 0.7+ ignoriert die Wanted-Nachrichten von 0.6.x.
-
-Siehe auch [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md) (Mitarbeiten, Ablauf, Releases) und [DEV.md](DEV.md) (allgemeine WoW-Addon-Referenz).
+Was sich nur im Spiel prüfen lässt: [Tests/CLIENT_CHECKLIST.md](Tests/CLIENT_CHECKLIST.md).
