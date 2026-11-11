@@ -3,7 +3,7 @@
 ## Unreleased
 
 - New look for death and level-up messages, with murloc artwork and a new font
-- Death messages show the cause on a second line
+- Death messages are easier to read: who died, the cause and the place each get their own line
 
 ## 0.11.0
 
