@@ -103,7 +103,8 @@ local function EnsureToast()
     return toast
   end
   -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
-  toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.52, 0.38, 0.46 }, 15, 22, 4)
+  toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.52, 0.38, 0.46 },
+    { textSize = 15, titleSize = 22, maxLines = 4, anchor = "top" })
   RaiseToast(toast)
   toast.hint:SetText(U.L("TOAST_DRAG_HINT"))
 
