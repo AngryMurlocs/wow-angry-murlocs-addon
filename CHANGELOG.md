@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Whisper buttons in the professions list and recipe catalog work again
+- Guild messages wait while the game blocks addon messages instead of getting lost
+
 ## 0.11.4
 
 - The Discord button now copies the guild's new invite link
