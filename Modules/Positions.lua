@@ -224,7 +224,8 @@ function Positions:OnEnable()
     GR:SendMessage("POS_CACHE_CHANGED", sender, data)
   end)
 
-  GR:BindMessage(self, "GUILD_CHANGED", function()
+  -- AngryMurlocs.lua sends GUILD_UPDATE only when the guild really changes.
+  GR:BindMessage(self, "GUILD_UPDATE", function()
     wipe(cache)
     StopMovingTicker()
     if not SharingPosition() then StopHeartbeat() end
