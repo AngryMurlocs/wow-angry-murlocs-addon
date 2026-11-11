@@ -27,6 +27,7 @@ local deathSerial = 0
 local layoutEdit = false
 local displayDone
 local muteNextSound = false
+local previewGen = 0
 
 local ENV_KEYS = {
   FALLING = "DEATH_ENV_FALL",
@@ -96,6 +97,23 @@ local function FinishDisplay()
   if d then d() end
 end
 
+-- Drop orphan preview/edit timers without Resume (sibling takeover).
+function Death:CancelPreview()
+  previewGen = previewGen + 1
+  CancelDeathToastTimers()
+  displayDone = nil
+  if not layoutEdit and toast then
+    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(toast) end
+    toast:SetAlpha(1)
+    toast:Hide()
+  end
+end
+
+local function CancelSiblingPreview()
+  local lvl = GR:GetModule("LevelUp")
+  if lvl and lvl.CancelPreview then lvl:CancelPreview() end
+end
+
 local function EnsureToast()
   if toast then
     ApplyToastLayout(toast)
@@ -155,6 +173,11 @@ local function FormatDeathLine(victim, cause, killer, spell, zone)
 end
 
 local function DisplayDeathToast(item, done)
+  item = item or {}
+  if not layoutEdit and not item._preview and not Cfg().showToasts then
+    if done then done() end
+    return
+  end
   if not layoutEdit and AngryMurlocsLevelUpToast and AngryMurlocsLevelUpToast.Hide then
     AngryMurlocsLevelUpToast:Hide()
   end
@@ -172,7 +195,7 @@ local function DisplayDeathToast(item, done)
   f:SetAlpha(1)
   f:Show()
 
-  if not muteNextSound and not layoutEdit and not (item and item._preview) then
+  if not muteNextSound and not layoutEdit and not item._preview then
     if GR.Sounds and GR.Sounds.Play then GR.Sounds.Play("death") end
   end
   muteNextSound = false
@@ -955,6 +978,7 @@ Death.AttributionFromRecapEvents = AttributionFromRecapEvents
 Death.ReadRecapAttribution = ReadRecapAttribution
 
 function Death:Preview()
+  CancelSiblingPreview()
   if layoutEdit then
     muteNextSound = true
     DisplayDeathToast({
@@ -974,6 +998,8 @@ function Death:Preview()
   else
     FinishDisplay()
   end
+  previewGen = previewGen + 1
+  local token = previewGen
   muteNextSound = true
   DisplayDeathToast({
     victim = U.ShortName(U.PlayerName()),
@@ -983,6 +1009,7 @@ function Death:Preview()
     zone = GetZoneText and GetZoneText() or "?",
     _preview = true,
   }, function()
+    if token ~= previewGen then return end
     if GR.ToastQueue and not layoutEdit then
       GR.ToastQueue.Resume()
     end
@@ -998,8 +1025,11 @@ end
 
 function Death:BeginLayoutEdit()
   -- Caller (Options) must Pause + FinishCurrent first.
+  CancelSiblingPreview()
+  previewGen = previewGen + 1
   layoutEdit = true
   CancelDeathToastTimers()
+  displayDone = nil
   muteNextSound = true
   DisplayDeathToast({
     victim = U.ShortName(U.PlayerName()),
