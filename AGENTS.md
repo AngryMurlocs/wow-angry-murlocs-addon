@@ -32,6 +32,8 @@ Es gibt keinen Build-Schritt. Gepackt wird über den BigWigs-Packager (`.pkgmeta
 
 **Netzwerk** (`Core/Comm.lua` + `Core/Queue.lua`): Addon-Nachrichten laufen über den Gildenkanal. Der Wire-Prefix bleibt aus Kompatibilitätsgründen **`GildenRadar`** (`GR.PREFIX`). Ausgehende Nachrichten gehen in eine Prioritäts-Queue (`kill > ctrl > data > pos`, mit Obergrenzen pro Priorität), die alle 0,5 s gedrosselt geleert wird. Empfangsseitig gibt es ein Rate-Limit, Fragmentierung (max. 250 Bytes) und `Comm:Allowed(category)`: Privacy-Schalter blockieren Kategorien beim Senden und entfernen sie aus der Queue.
 
+**Synchronisierte Meldungen (Toast / Feed / Chat):** Wire trägt Fakten (Codes, IDs, Spielernamen). Jeder Client formatiert die Anzeige lokal mit `U.L`. Fehlende Übersetzung → englische Kopie `AngryMurlocsLocaleEN`. Ausnahme: ältere Clients brauchen ggf. weiterhin ein befülltes Klartextfeld (z. B. DEATH `spell`); neue Empfänger nutzen strukturierte Felder nur, wenn sie erfolgreich auflösbar sind. Deduplizierung: Schlüssel `normalize(victim)|eventId`, getrennte Seen-Flags für Toast und Feed (Toast aus blockiert den Feed nicht).
+
 **Wanted** (Kernlogik, siehe Kopfkommentar `Core/WantedLogic.lua`):
 - Jeder Eintrag hat einen Zähler pro Opfer (`origin`) plus einen eingefrorenen `legacy`-Wert aus 0.6.x. Level = `legacy + Σ origin.n`.
 - Beim Mergen gilt `max(n)` pro Opfer. Live-Meldungen, Relays und Syncs sind dadurch idempotent.
@@ -41,7 +43,7 @@ Es gibt keinen Build-Schritt. Gepackt wird über den BigWigs-Packager (`.pkgmeta
 
 **SavedVariables** (`AngryMurlocsDB`): Defaults und Migrationen stehen in `AngryMurlocs.lua` (`SCHEMA = 2`). Gildendaten liegen in Scopes pro Gilde (`U.GuildScopeKey()`, `U.GetScopeDB()`). Wanted- und Berufe-Daten dürfen nicht zwischen Gilden durchsickern; `Tests/PrivacyScope_test.lua` prüft das.
 
-**Lokalisierung:** `Localization/enUS.lua` definiert `AngryMurlocsLocale`. `deDE.lua` überschreibt Schlüssel nur bei `GetLocale() == "deDE"`. Zugriff erfolgt über `U.L("KEY")`. Neue Schlüssel immer in beiden Dateien anlegen.
+**Lokalisierung:** `Localization/enUS.lua` definiert `AngryMurlocsLocale` und am Dateiende eine **Kopie** `AngryMurlocsLocaleEN` (kein Alias — `deDE.lua` mutiert dieselbe Live-Tabelle). `deDE.lua` überschreibt Schlüssel nur bei `GetLocale() == "deDE"`. `U.L("KEY")` sucht aktiv → EN-Kopie → Key. Neue Schlüssel immer in beiden Locale-Dateien anlegen.
 
 ## WoW Forever: Kompatibilität
 
