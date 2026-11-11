@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.2
 
 - Death and level-up messages stay off when you turn them off, even if they were already waiting; previews no longer interrupt each other
 
