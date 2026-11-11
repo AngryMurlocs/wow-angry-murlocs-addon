@@ -41,9 +41,16 @@ test:release:
     GIT_DEPTH: 0
   script:
     - luajit Tests/Version_test.lua release
-    - VERSION=$(sed -n 's/^## Version:[[:space:]]*//p' AngryMurlocs.toc | tr -d '\r')
-    - TITLE_VERSION=$(printf '%s' "$CI_MERGE_REQUEST_TITLE" | sed -E 's/^release(\([^)]*\))?!?:[[:space:]]*v?//')
-    - echo "toc $VERSION, MR title $TITLE_VERSION"
-    - test "$VERSION" = "$TITLE_VERSION" || { echo "MR title must be 'release: $VERSION'"; exit 1; }
-    - git fetch --tags --quiet origin
-    - if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "Tag v$VERSION already exists"; exit 1; fi
+    - |
+      VERSION=$(sed -n 's/^## Version:[[:space:]]*//p' AngryMurlocs.toc | tr -d '\r')
+      TITLE_VERSION=$(printf '%s' "$CI_MERGE_REQUEST_TITLE" | sed -E 's/^release(\([^)]*\))?!?:[[:space:]]*v?//')
+      echo "toc $VERSION, MR title $TITLE_VERSION"
+      if [ "$VERSION" != "$TITLE_VERSION" ]; then
+        echo "MR title must be 'release: $VERSION'"
+        exit 1
+      fi
+      git fetch --tags --quiet origin
+      if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+        echo "Tag v$VERSION already exists"
+        exit 1
+      fi
