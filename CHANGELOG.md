@@ -1,5 +1,12 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Recipe data refresh waits for guild replies, then shows how many members and catalogues arrived
+- Missing recipe names and materials keep loading in batches until complete or given up
+- Own professions show when they still need a first scan, with a clearer capture confirmation
+- Unchanged recipe lists are no longer resent automatically
+
 ## 0.11.5
 
 - Whisper buttons in the professions list and recipe catalog work again
