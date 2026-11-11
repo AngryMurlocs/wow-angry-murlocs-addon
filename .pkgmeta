@@ -12,6 +12,7 @@ ignore:
   - CONTRIBUTING.md
   - .gitlab-ci.yml
   - docs
+  - art
   - CHANGELOG.md
   - Tests
   - tools
