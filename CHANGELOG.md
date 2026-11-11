@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.7
 
 - Browse each profession's recipes in collapsible categories
 
