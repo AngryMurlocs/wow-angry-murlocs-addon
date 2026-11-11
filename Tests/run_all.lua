@@ -22,6 +22,11 @@ local tests = {
   "Tests/ToastControl_test.lua",
   "Tests/L10n_test.lua",
   "Tests/Version_test.lua",
+  "Tests/SendThrottle_test.lua",
+  "Tests/LevelCap_test.lua",
+  "Tests/GuildChangePositions_test.lua",
+  "Tests/SecretTarget_test.lua",
+  "Tests/FragTimeout_test.lua",
 }
 
 local failed = {}
