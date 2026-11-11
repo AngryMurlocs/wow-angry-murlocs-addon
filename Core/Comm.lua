@@ -97,17 +97,46 @@ local function AllowSender(sender, now)
   return b.n <= RATE_MAX
 end
 
+-- Wait after the client reports a send throttle before trying again.
+local THROTTLE_BACKOFF = 1.0
+
+-- Retail-based clients (Forever) can block addon messages for a while
+-- (Midnight restrictions). Keep the queue and wait instead of losing messages.
+local function OutgoingRestricted()
+  local fn = C_ChatInfo and C_ChatInfo.AreOutgoingAddonChatMessagesRestricted
+  if type(fn) ~= "function" then return false end
+  local ok, restricted = pcall(fn)
+  return ok and restricted == true
+end
+
+-- Modern clients return Enum.SendAddonMessageResult; older ones return nothing
+-- or a boolean. Returns "ok", "throttled" or "failed".
+local function SendResult(result)
+  if result == nil or result == true then return "ok" end
+  if result == false then return "failed" end
+  local codes = Enum and Enum.SendAddonMessageResult
+  if codes then
+    if result == codes.Success then return "ok" end
+    if result == codes.AddonMessageThrottle or result == codes.ChannelThrottle then
+      return "throttled"
+    end
+    return "failed"
+  end
+  return result == 0 and "ok" or "failed"
+end
+
 local function RawSend(payload)
-  if not IsInGuild() then return false end
-  if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then return false end
-  if #payload > MAX_SEND then return false end
-  C_ChatInfo.SendAddonMessage(GR.PREFIX, payload, "GUILD")
-  return true
+  if not IsInGuild() then return "failed" end
+  if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then return "failed" end
+  if #payload > MAX_SEND then return "failed" end
+  local ok, result = pcall(C_ChatInfo.SendAddonMessage, GR.PREFIX, payload, "GUILD")
+  if not ok then return "failed" end
+  return SendResult(result)
 end
 
 local function Drain()
   local now = U.Now()
-  if (now - lastSendAt) >= SEND_INTERVAL then
+  if (now - lastSendAt) >= SEND_INTERVAL and not OutgoingRestricted() then
     local item = queue:Pop(now)
     while item and not Comm:Allowed(item.category) do
       Reject("privacy", item.category)
@@ -115,8 +144,14 @@ local function Drain()
     end
     if item then
       lastSendAt = now
-      if RawSend(item.payload) then
+      local status = RawSend(item.payload)
+      if status == "ok" then
         Count("sent_" .. item.prio)
+      elseif status == "throttled" then
+        -- Try the same message again later; order stays the same.
+        queue:PushFront(item)
+        lastSendAt = now + THROTTLE_BACKOFF
+        Count("throttled")
       else
         Reject("send_failed", item.prio)
       end
@@ -329,7 +364,7 @@ local function DispatchParsed(tag, rest, sender)
     if not VALID_CLASS[classFile] then classFile = "PRIEST" end
     local level = tonumber(parts[7]) or 0
     if level < 1 then level = 1 end
-    if level > 80 then level = 80 end
+    if level > U.MaxLevel() then level = U.MaxLevel() end
     if not mapId or mapId < 1 or mapId > 99999 then return end
     if not x or not y or x < 0 or x > 1 or y < 0 or y > 1 then return end
     if x == 0 and y == 0 then return end
@@ -425,7 +460,7 @@ local function DispatchParsed(tag, rest, sender)
     Count("legacy_ignored")
   elseif tag == "LVL" then
     local level = tonumber(rest)
-    if level and level >= 1 and level <= 80 then
+    if level and level >= 1 and level <= U.MaxLevel() then
       GR:SendMessage("LVL_UPDATE", sender, level)
     end
   elseif tag == "SIGHT" then
@@ -486,6 +521,9 @@ local function HandleMessage(message, sender)
       buf.parts[i] = chunk or ""
       buf.count = buf.count + 1
     end
+    -- The timeout counts from the latest part, so a long message that keeps
+    -- arriving is not dropped halfway.
+    buf.t = now
     if buf.count >= n then
       local full = {}
       for k = 1, n do

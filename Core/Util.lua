@@ -83,6 +83,13 @@ function U.IsSelfName(name)
   return false
 end
 
+-- Forever (Retail rules) can hand out "secret" values that throw on compare,
+-- concat or length. Returns nil for a secret, the value otherwise.
+function U.Plain(v)
+  if type(issecretvalue) == "function" and issecretvalue(v) then return nil end
+  return v
+end
+
 function U.PlayerClassFile()
   local _, classFile = UnitClass("player")
   return classFile or "PRIEST"
@@ -133,6 +140,18 @@ end
 function U.SameCharacter(a, b)
   local ka, kb = U.CharKey(a), U.CharKey(b)
   return ka ~= nil and ka == kb
+end
+
+-- Highest character level the client allows (Forever may go above 80).
+-- Never below 80, so older clients keep their old limit.
+function U.MaxLevel()
+  local max = 80
+  if type(GetMaxPlayerLevel) == "function" then
+    local ok, n = pcall(GetMaxPlayerLevel)
+    n = ok and tonumber(n) or nil
+    if n and n > max and n <= 1000 then max = math.floor(n) end
+  end
+  return max
 end
 
 function U.Round(n, places)

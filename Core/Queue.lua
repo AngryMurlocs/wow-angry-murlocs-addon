@@ -67,6 +67,15 @@ function Q:Pop(now)
   return nil
 end
 
+-- Puts a popped item back at the front of its lane (send was throttled).
+-- Ignores the cap: the item was already counted when it was queued.
+function Q:PushFront(item)
+  local lane = item and self.lanes[item.prio]
+  if not lane then return false end
+  table.insert(lane, 1, item)
+  return true
+end
+
 -- Removes queued items for which fn(item) is true. Returns count removed.
 function Q:Purge(fn)
   local n = 0
