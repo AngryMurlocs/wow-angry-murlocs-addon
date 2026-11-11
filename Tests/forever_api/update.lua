@@ -62,6 +62,9 @@ local function SortedKeys(set)
   return list
 end
 
+-- The output folder may not exist yet (CI writes to a temp folder).
+if not Exists(out .. "/SOURCE.txt") then os.execute('mkdir -p "' .. out .. '"') end
+
 local R = src .. "/Resources/"
 
 -- Global functions: Blizzard API plus functions defined by FrameXML
