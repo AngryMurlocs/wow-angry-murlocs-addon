@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.8
 
 - Map pins use new class murloc heads
 - Map pins are larger by default

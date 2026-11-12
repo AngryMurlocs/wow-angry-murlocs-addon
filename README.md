@@ -2,7 +2,7 @@
 
 Gilden-Addon der **Angry Murlocs** für **World of Warcraft: Forever**. Es zeigt Gildenmitglieder als Murlocs auf der Weltkarte, sammelt die Berufe und Rezepte der Gilde, führt eine gemeinsame Wanted-Liste und meldet Tode und Level-ups der Gilde.
 
-**Version:** 0.11.7
+**Version:** 0.11.8
 
 **Download:** [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) · **Quellcode:** [GitHub](https://github.com/AngryMurlocs/wow-angry-murlocs-addon) · **Discord:** [discord.murlocs.eu](https://discord.murlocs.eu)
 
