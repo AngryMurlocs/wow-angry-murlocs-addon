@@ -12,9 +12,9 @@ local PIN_BASE_HEADS = "Interface\\AddOns\\AngryMurlocs\\Media\\PinsHeads\\"
 local CIRCLE_TEX = "Interface\\AddOns\\AngryMurlocs\\Media\\circle"
 local RING_INNER_FRAC = 0.68 -- class fill vs gold outer (thicker rim)
 local GOLD_R, GOLD_G, GOLD_B = 1, 0.92, 0.12 -- brighter gold for contrast
-local DEFAULT_SIZE = 18
+local DEFAULT_SIZE = 26
 local MIN_SIZE = 8
-local MAX_SIZE = 24
+local MAX_SIZE = 40
 local NEAR_SELF = 0.01
 -- Match Positions.STALE: full alpha until FADE_START, then fade to FADE_MIN by STALE_SEC.
 MapPins.STALE_SEC = 60

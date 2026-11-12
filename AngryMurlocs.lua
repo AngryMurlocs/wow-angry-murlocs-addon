@@ -42,7 +42,7 @@ end
 local defaults = {
   map = {
     showPins = true,
-    pinSize = 18,
+    pinSize = 26,
     pinStyle = "heads",
   },
   privacy = {
@@ -94,6 +94,8 @@ local defaults = {
   -- One-shot migration flags (nil = not yet run). Never re-overwrite user prefs after set.
   migrations = {
     pinSizeV18 = nil,
+    pinSizeV20 = nil,
+    pinSizeV26 = nil,
     toastDurV2 = nil,
   },
 }
@@ -216,10 +218,26 @@ frame:SetScript("OnEvent", function(_, event, ...)
     if not mig.pinSizeV18 then
       GR.db.map = GR.db.map or {}
       local ps = tonumber(GR.db.map.pinSize)
-      if not ps or ps <= 14 or ps > 24 then
+      if not ps or ps <= 14 or ps > 40 then
         GR.db.map.pinSize = 18
       end
       mig.pinSizeV18 = true
+    end
+    -- One-shot: previous default 18 → 20. Any other saved size stays.
+    if not mig.pinSizeV20 then
+      GR.db.map = GR.db.map or {}
+      if tonumber(GR.db.map.pinSize) == 18 then
+        GR.db.map.pinSize = 20
+      end
+      mig.pinSizeV20 = true
+    end
+    -- One-shot: previous default 20 → 26. Any other saved size stays.
+    if not mig.pinSizeV26 then
+      GR.db.map = GR.db.map or {}
+      if tonumber(GR.db.map.pinSize) == 20 then
+        GR.db.map.pinSize = 26
+      end
+      mig.pinSizeV26 = true
     end
     -- One-shot: old toast duration defaults → longer defaults
     if not mig.toastDurV2 then

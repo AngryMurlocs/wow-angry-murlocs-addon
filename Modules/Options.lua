@@ -804,8 +804,8 @@ function Options:AttachPanel(parent)
     end
     layoutCallbacks[#layoutCallbacks + 1] = LayoutPinTiles
 
-    H.Slider("OPT_PIN_SIZE", 8, 24, 1, function()
-      return GR.db.map.pinSize or 18
+    H.Slider("OPT_PIN_SIZE", 8, 40, 1, function()
+      return GR.db.map.pinSize or 26
     end, function(v)
       GR.db.map.pinSize = v
       GR:SendMessage("MAP_SETTINGS_CHANGED")
