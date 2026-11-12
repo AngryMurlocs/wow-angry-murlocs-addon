@@ -1,5 +1,12 @@
 # AngryMurlocs Changelog
 
+## 0.11.8
+
+- Map pins use new class murloc heads
+- Map pins are larger by default
+- Pin size can be set up to 40
+- Murloc map pins no longer show a faded copy behind the icon
+
 ## 0.11.7
 
 - Death messages use your language for cause labels when guildmates send structured deaths; older addon versions still get a readable cause string
