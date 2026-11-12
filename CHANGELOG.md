@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Map pins use new class murloc heads
+
 ## 0.11.7
 
 - Death messages use your language for cause labels when guildmates send structured deaths; older addon versions still get a readable cause string

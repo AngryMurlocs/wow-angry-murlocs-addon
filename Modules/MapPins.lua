@@ -34,21 +34,22 @@ local CLASSES = {
 }
 
 -- Opaque-bbox TexCoords (left, right, top, bottom) so class art fills the pin equally.
--- Generated from Media/PinsHeads + Media/Pins TGA alpha bounds + ~5% pad.
+-- Heads: alpha bounds of Media/PinsHeads, one pixel of margin where it fits.
+-- Body: alpha bounds of Media/Pins plus ~5% pad.
 local HEAD_UV = {
-  DEATHKNIGHT = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  DEMONHUNTER = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  DRUID       = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  EVOKER      = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  HUNTER      = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  MAGE        = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  MONK        = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  PALADIN     = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  PRIEST      = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  ROGUE       = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  SHAMAN      = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  WARLOCK     = { 0.0766, 0.9703, 0.0277, 0.9645 },
-  WARRIOR     = { 0.0766, 0.9703, 0.0277, 0.9645 },
+  DEATHKNIGHT = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  DEMONHUNTER = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  DRUID       = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  EVOKER      = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  HUNTER      = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  MAGE        = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  MONK        = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  PALADIN     = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  PRIEST      = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  ROGUE       = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  SHAMAN      = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  WARLOCK     = { 0.0234, 0.9922, 0.0000, 1.0000 },
+  WARRIOR     = { 0.0234, 0.9922, 0.0000, 1.0000 },
 }
 
 local BODY_UV = {

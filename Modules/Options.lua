@@ -44,7 +44,7 @@ local PIN_BASE_HEADS = "Interface\\AddOns\\AngryMurlocs\\Media\\PinsHeads\\"
 local CIRCLE_TEX = "Interface\\AddOns\\AngryMurlocs\\Media\\circle"
 local RING_INNER_FRAC = 0.68
 local GOLD_R, GOLD_G, GOLD_B = 1, 0.92, 0.12
-local HEAD_UV_MAGE = { 0.0766, 0.9703, 0.0277, 0.9645 }
+local HEAD_UV_MAGE = { 0.0234, 0.9922, 0.0000, 1.0000 }
 local BODY_UV_MAGE = { 0.1258, 0.8430, 0.0008, 0.9992 }
 
 local function HideSoundMenu()
