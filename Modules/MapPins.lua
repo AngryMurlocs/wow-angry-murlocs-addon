@@ -10,7 +10,6 @@ local canvasHooked = false
 local PIN_BASE_BODY = "Interface\\AddOns\\AngryMurlocs\\Media\\Pins\\"
 local PIN_BASE_HEADS = "Interface\\AddOns\\AngryMurlocs\\Media\\PinsHeads\\"
 local CIRCLE_TEX = "Interface\\AddOns\\AngryMurlocs\\Media\\circle"
-local GLOW_SCALE = 1.32 -- silhouette bloom behind icon
 local RING_INNER_FRAC = 0.68 -- class fill vs gold outer (thicker rim)
 local GOLD_R, GOLD_G, GOLD_B = 1, 0.92, 0.12 -- brighter gold for contrast
 local DEFAULT_SIZE = 18
@@ -289,15 +288,8 @@ local function BindPinArt(pin, classFile, style)
   pin.tex:SetTexCoord(uL, uR, uT, uB)
   pin._fillR, pin._fillG, pin._fillB = 1, 1, 1
   if pin.glow then
-    -- Same TGA + UV as icon → glow follows silhouette
-    pin.glow:SetTexture(path)
-    pin.glow:SetTexCoord(uL, uR, uT, uB)
-    if pin.glow.SetBlendMode then
-      pcall(pin.glow.SetBlendMode, pin.glow, "ADD")
-    end
-    pin.glow:Show()
+    pin.glow:Hide()
   end
-  pin._glowR, pin._glowG, pin._glowB = r, g, b
   pin._rings = false
 end
 
@@ -308,13 +300,8 @@ local function ApplyPinFade(pin, dead, ageSec)
   local fg = pin._fillG or 1
   local fb = pin._fillB or 1
   pin.tex:SetVertexColor(fr, fg, fb, a)
-  if pin.glow then
-    local ga
-    if pin._rings then
-      ga = (dead and 0.5 or 1) * fade
-    else
-      ga = (dead and 0.25 or 0.65) * fade
-    end
+  if pin.glow and pin._rings then
+    local ga = (dead and 0.5 or 1) * fade
     pin.glow:SetVertexColor(pin._glowR or 1, pin._glowG or 1, pin._glowB or 1, ga)
   end
 end
@@ -347,7 +334,7 @@ local function AcquirePin()
 
   -- Glow / gold rim layer (texture + blend set in ApplyPinArt)
   local glow = pin:CreateTexture(nil, "BACKGROUND")
-  glow:SetSize(DEFAULT_SIZE * GLOW_SCALE, DEFAULT_SIZE * GLOW_SCALE)
+  glow:SetSize(DEFAULT_SIZE, DEFAULT_SIZE)
   glow:SetPoint("CENTER")
   glow:SetTexture(CIRCLE_TEX)
   glow:SetVertexColor(0.8, 0.8, 0.8, 0.65)
@@ -521,12 +508,6 @@ local function SyncPinLayers(pin, size)
   if pin.tex then
     pin.tex:ClearAllPoints()
     pin.tex:SetAllPoints()
-  end
-  if pin.glow then
-    local g = size * GLOW_SCALE
-    pin.glow:ClearAllPoints()
-    pin.glow:SetSize(g, g)
-    pin.glow:SetPoint("CENTER")
   end
 end
 

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Map pins use new class murloc heads
+- Murloc map pins no longer show a faded copy behind the icon
 
 ## 0.11.7
 

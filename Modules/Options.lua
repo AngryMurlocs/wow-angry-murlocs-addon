@@ -791,14 +791,7 @@ function Options:AttachPanel(parent)
         icon:SetTexture(base .. PIN_PREVIEW_CLASS)
         icon:SetTexCoord(uv[1], uv[2], uv[3], uv[4])
         icon:SetAllPoints()
-        glow:SetTexture(base .. PIN_PREVIEW_CLASS)
-        glow:SetTexCoord(uv[1], uv[2], uv[3], uv[4])
-        glow:SetPoint("CENTER")
-        glow:SetSize(36, 36)
-        glow:SetVertexColor(r, g, b, 0.55)
-        if glow.SetBlendMode then
-          pcall(glow.SetBlendMode, glow, "ADD")
-        end
+        glow:Hide()
       end
 
       local label = tile:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
