@@ -326,7 +326,7 @@ function Professions:Broadcast(force)
   local recipes = prevSelf and prevSelf.recipes
   local recipesMod = GR:GetModule("ProfRecipes")
   if recipesMod and recipesMod.PruneRecipesToProfessionList then
-    recipes = recipesMod.PruneRecipesToProfessionList(recipes, list)
+    recipes = recipesMod.PruneRecipesToProfessionList(recipes, list, me)
   end
   Cache()[me] = {
     list = list,
@@ -414,7 +414,7 @@ function Professions:OnEnable()
     local recipes = prev and prev.recipes
     local recipesMod = GR:GetModule("ProfRecipes")
     if recipesMod and recipesMod.PruneRecipesToProfessionList then
-      recipes = recipesMod.PruneRecipesToProfessionList(recipes, list)
+      recipes = recipesMod.PruneRecipesToProfessionList(recipes, list, sender)
     end
     cache[sender] = {
       list = list,

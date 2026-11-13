@@ -275,9 +275,13 @@ frame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "PLAYER_GUILD_UPDATE" then
     local key = U.GuildScopeKey()
     if key == lastGuildKey then return end
+    local oldKey = lastGuildKey
     lastGuildKey = key
     if not key and GR.Comm and GR.Comm.OnGuildLeft then
       GR.Comm:OnGuildLeft()
+    elseif oldKey and GR.Comm and GR.Comm.PurgeByScope then
+      -- Drop queued ops stamped with the previous guild scope (foundation §3).
+      GR.Comm:PurgeByScope(oldKey)
     end
     MigrateLegacyToScope()
     if GR.db then GR.db._recoveredWantedScopes = nil end

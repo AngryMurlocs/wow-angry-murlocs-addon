@@ -962,8 +962,10 @@ do
   wipe(R._metaGiveUp)
   local bodies = {}
   local realCommSend = GR.Comm.Send
-  GR.Comm.Send = function(_, body)
+  -- Instant send-ack: attempt budgets / pending windows start on onAck(true).
+  GR.Comm.Send = function(_, body, _prio, _cat, opts)
     bodies[#bodies + 1] = body
+    if opts and type(opts.onAck) == "function" then opts.onAck(true) end
     return true
   end
   R.enabled = true
@@ -1000,8 +1002,9 @@ do
   wipe(R._metaGiveUp)
   local bodies = {}
   local realCommSend = GR.Comm.Send
-  GR.Comm.Send = function(_, body)
+  GR.Comm.Send = function(_, body, _prio, _cat, opts)
     bodies[#bodies + 1] = body
+    if opts and type(opts.onAck) == "function" then opts.onAck(true) end
     return true
   end
   R.enabled = true

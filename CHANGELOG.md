@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Recipe categories can fill in from guildmates without also pulling materials
+- Profession sharing off still lets you ask for recipe data; only your replies stop
+
 ## 0.11.8
 
 - Map pins use new class murloc heads
