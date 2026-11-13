@@ -29,7 +29,8 @@ function Q:Free(prio)
   return self.caps[prio] - #lane
 end
 
--- items: list of { payload, category } pushed atomically (fragments stay together).
+-- items: list of { payload, category, scopeKey?, operationId? } pushed atomically
+-- (fragments stay together). Optional meta is copied so PushFront / Purge keep it.
 -- The pos lane keeps only the newest position update.
 function Q:PushAll(prio, items, now)
   local lane = self.lanes[prio]
@@ -43,7 +44,14 @@ function Q:PushAll(prio, items, now)
   end
   for i = 1, #items do
     local it = items[i]
-    lane[#lane + 1] = { payload = it.payload, category = it.category, prio = prio, enq = now or 0 }
+    lane[#lane + 1] = {
+      payload = it.payload,
+      category = it.category,
+      prio = prio,
+      enq = now or 0,
+      scopeKey = it.scopeKey,
+      operationId = it.operationId,
+    }
   end
   return true
 end

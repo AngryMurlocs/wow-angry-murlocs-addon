@@ -32,6 +32,9 @@ local queue = GR.SendQueue.New()
 local versionAnnounceSent = false
 local versionNagPrinted = false
 local bestPeerVersion = nil
+-- Logical sends awaiting all-fragment success: operationId -> { left, onAck, sent }
+local pendingOps = {}
+local nextOpSeq = 0
 
 local VALID_CLASS = {
   WARRIOR = true, PALADIN = true, HUNTER = true, ROGUE = true, PRIEST = true,
@@ -128,6 +131,35 @@ local function RawSend(payload)
   return SendResult(result)
 end
 
+local function FinishOp(opId, ok)
+  local pending = opId and pendingOps[opId]
+  if not pending then return end
+  pendingOps[opId] = nil
+  local cb = pending.onAck
+  if type(cb) == "function" then
+    pcall(cb, ok and true or false)
+  end
+end
+
+local function FailOp(opId, reason)
+  if not opId then return end
+  local pending = pendingOps[opId]
+  if not pending then return end
+  queue:Purge(function(it) return it.operationId == opId end)
+  Reject(reason or "send_failed", opId)
+  FinishOp(opId, false)
+end
+
+local function NoteOpSent(opId)
+  local pending = opId and pendingOps[opId]
+  if not pending then return end
+  pending.left = (pending.left or 1) - 1
+  pending.sent = (pending.sent or 0) + 1
+  if pending.left <= 0 then
+    FinishOp(opId, true)
+  end
+end
+
 local function Drain()
   local now = U.Now()
   -- No pre-check with C_ChatInfo.AreOutgoingAddonChatMessagesRestricted: on
@@ -135,22 +167,43 @@ local function Drain()
   -- held the whole queue back (0.11.3 ingame test). The send result decides.
   if (now - lastSendAt) >= SEND_INTERVAL then
     local item = queue:Pop(now)
-    while item and not Comm:Allowed(item.category) do
-      Reject("privacy", item.category)
-      item = queue:Pop(now)
+    local curScope = U.GuildScopeKey and U.GuildScopeKey()
+    while item do
+      if item.scopeKey and curScope and item.scopeKey ~= curScope then
+        FailOp(item.operationId, "scope_mismatch")
+        if not item.operationId then
+          Reject("scope_mismatch", item.prio)
+        end
+        item = queue:Pop(now)
+      elseif not Comm:Allowed(item.category) then
+        -- Privacy drop of one fragment fails the whole logical op.
+        if item.operationId then
+          FailOp(item.operationId, "privacy")
+        else
+          Reject("privacy", item.category)
+        end
+        item = queue:Pop(now)
+      else
+        break
+      end
     end
     if item then
       lastSendAt = now
       local status = RawSend(item.payload)
       if status == "ok" then
         Count("sent_" .. item.prio)
+        NoteOpSent(item.operationId)
       elseif status == "throttled" or status == "lockdown" then
-        -- Try the same message again later; order stays the same.
+        -- Still waiting — not a final failure; do not burn send-ack attempts.
         queue:PushFront(item)
         lastSendAt = now + (status == "lockdown" and LOCKDOWN_BACKOFF or THROTTLE_BACKOFF)
         Count(status)
       else
-        Reject("send_failed", item.prio)
+        if item.operationId then
+          FailOp(item.operationId, "send_failed")
+        else
+          Reject("send_failed", item.prio)
+        end
       end
     end
   end
@@ -204,9 +257,14 @@ end
 
 -- prio: kill | ctrl | data | pos. category: privacy gate key (pos, prof, death,
 -- sight, lvl) or a free label for always-allowed traffic (sync, ctrl).
-function Comm:Send(payload, prio, category)
+-- opts (optional): { scopeKey, operationId, onAck }. Send returns true only for
+-- queue admission. onAck(true) runs after every fragment of this logical send
+-- transmitted; onAck(false) on final fail / scope abort / privacy drop of the op.
+-- Throttle/lockdown keep the attempt waiting (not a final fail).
+function Comm:Send(payload, prio, category, opts)
   prio = prio or "data"
   category = category or "misc"
+  opts = type(opts) == "table" and opts or nil
   if type(payload) ~= "string" or payload == "" then return false end
   if not IsInGuild or not IsInGuild() then return false end
   if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then return false end
@@ -214,19 +272,44 @@ function Comm:Send(payload, prio, category)
     Reject("privacy", category)
     return false
   end
+  local scopeKey = opts and opts.scopeKey
+  if scopeKey == nil and U.GuildScopeKey then
+    scopeKey = U.GuildScopeKey()
+  end
+  if scopeKey and U.GuildScopeKey and U.GuildScopeKey() and scopeKey ~= U.GuildScopeKey() then
+    Reject("scope_mismatch", prio)
+    return false
+  end
   local msgs = Fragment(payload)
   if not msgs then
     Reject("too_long", prio)
     return false
   end
+  local opId = opts and opts.operationId
+  if not opId and (opts and opts.onAck or #msgs > 1) then
+    nextOpSeq = nextOpSeq + 1
+    opId = "op" .. tostring(nextOpSeq)
+  end
   local items = {}
   for i = 1, #msgs do
-    items[i] = { payload = msgs[i], category = category }
+    items[i] = {
+      payload = msgs[i],
+      category = category,
+      scopeKey = scopeKey,
+      operationId = opId,
+    }
   end
   local ok, why = queue:PushAll(prio, items, U.Now())
   if not ok then
     Reject("queue_" .. tostring(why), prio)
     return false
+  end
+  if opId then
+    pendingOps[opId] = {
+      left = #msgs,
+      sent = 0,
+      onAck = opts and opts.onAck,
+    }
   end
   EnsureDrain()
   return true
@@ -238,20 +321,65 @@ function Comm:QueueSize(prio)
   return queue:Size(prio)
 end
 
+function Comm:EstimateFrames(payload)
+  if type(payload) ~= "string" or payload == "" then return nil end
+  local msgs = Fragment(payload)
+  if not msgs then return nil end
+  return #msgs
+end
+
 function Comm:Purge(category)
   local n = queue:Purge(function(item) return item.category == category end)
   if n > 0 then Reject("privacy_purged", category .. " x" .. n) end
   return n
 end
 
--- fn(payload) -> true drops the queued message.
+-- fn(payload) -> true drops the queued message. WantedSync depends on payload-only.
 function Comm:PurgeWhere(fn)
   return queue:Purge(function(item) return fn(item.payload) end)
 end
 
+-- Drop queued items for one logical send; fails pending send-ack.
+function Comm:PurgeByOperation(operationId)
+  if not operationId then return 0 end
+  local n = queue:Purge(function(item) return item.operationId == operationId end)
+  if pendingOps[operationId] then
+    FinishOp(operationId, false)
+  end
+  return n
+end
+
+-- Drop queued items stamped with scopeKey (e.g. after guild change).
+function Comm:PurgeByScope(scopeKey)
+  if not scopeKey then return 0 end
+  local doomed = {}
+  local n = queue:Purge(function(item)
+    if item.scopeKey == scopeKey then
+      if item.operationId then doomed[item.operationId] = true end
+      return true
+    end
+    return false
+  end)
+  for opId in pairs(doomed) do
+    if pendingOps[opId] then FinishOp(opId, false) end
+  end
+  return n
+end
+
 -- Drop everything whose privacy gate is closed now.
+-- shareProfessions off removes prof replies/relays; sync/ctrl requests stay.
 function Comm:PurgeDisallowed()
-  local n = queue:Purge(function(item) return not Comm:Allowed(item.category) end)
+  local doomed = {}
+  local n = queue:Purge(function(item)
+    if not Comm:Allowed(item.category) then
+      if item.operationId then doomed[item.operationId] = true end
+      return true
+    end
+    return false
+  end)
+  for opId in pairs(doomed) do
+    if pendingOps[opId] then FinishOp(opId, false) end
+  end
   if n > 0 then Reject("privacy_purged", "x" .. n) end
   return n
 end
@@ -421,6 +549,21 @@ local function DispatchParsed(tag, rest, sender)
     end
     Count("recv_PROFRMQ")
     GR:SendMessage("PROF_RECIPE_META_REQUEST", sender, ids)
+  elseif tag == "PROFRCQ" then
+    -- Category-only request (IDs). Must not imply material replies.
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    if #cleaned > 4000 then
+      Reject("too_long", "PROFRCQ " .. tostring(sender))
+      return
+    end
+    local recipes = GR:GetModule("ProfRecipes")
+    local ids, why = recipes and recipes.DecodeCategoryRequest and recipes.DecodeCategoryRequest(cleaned)
+    if not ids then
+      Reject("invalid", "PROFRCQ " .. tostring(why) .. " " .. tostring(sender))
+      return
+    end
+    Count("recv_PROFRCQ")
+    GR:SendMessage("PROF_RECIPE_CATEGORY_REQUEST", sender, ids)
   elseif tag == "PROFRM" then
     -- Recipe metadata batch (names/reagents). Does not grant craft knowledge.
     local cleaned = tostring(rest or ""):gsub("[%c]", "")
@@ -596,6 +739,9 @@ end
 function Comm:OnGuildLeft()
   local n = queue:Purge(function() return true end)
   if n > 0 then Reject("guild_left", "queue x" .. n) end
+  for opId in pairs(pendingOps) do
+    FinishOp(opId, false)
+  end
   wipe(peers)
   wipe(rateBuckets)
   wipe(fragBuf)

@@ -302,6 +302,38 @@ function U.EnsureScopeTable(scope)
   scope.wantedSelf = scope.wantedSelf or {}
   scope.prof = scope.prof or {}
   scope.prof.cache = scope.prof.cache or {}
+  -- Additive recipe-sync bag (relay progress + elevated catalog versions).
+  -- Idempotent; never wipes existing cache / catalog data.
+  local rs = scope.prof.recipeSync
+  if type(rs) ~= "table" then
+    rs = {}
+    scope.prof.recipeSync = rs
+  end
+  rs.profiles = type(rs.profiles) == "table" and rs.profiles or {}
+  rs.ownProfileRev = type(rs.ownProfileRev) == "table" and rs.ownProfileRev or {}
+  rs.inventoryRev = tonumber(rs.inventoryRev) or 0
+  rs.progress = type(rs.progress) == "table" and rs.progress or {}
+  rs.catalogVersions = type(rs.catalogVersions) == "table" and rs.catalogVersions or {}
+  -- Fold any earlier catalogEpoch bag into recipeSync.catalogVersions (never lower).
+  local legacy = scope.prof.catalogEpoch
+  if type(legacy) == "table" then
+    for owner, bag in pairs(legacy) do
+      if type(owner) == "string" and type(bag) == "table" then
+        rs.catalogVersions[owner] = rs.catalogVersions[owner] or {}
+        for pk, ver in pairs(bag) do
+          if type(pk) == "string" and type(ver) == "table" then
+            local cur = rs.catalogVersions[owner][pk]
+            local ce, cr = tonumber(cur and cur.epoch) or 0, tonumber(cur and cur.rev) or 0
+            local ve, vr = tonumber(ver.epoch) or 0, tonumber(ver.rev) or 0
+            if ve > ce or (ve == ce and vr > cr) then
+              rs.catalogVersions[owner][pk] = { epoch = ve, rev = vr }
+            end
+          end
+        end
+      end
+    end
+    scope.prof.catalogEpoch = nil
+  end
   scope.sync = scope.sync or {}
   return scope
 end

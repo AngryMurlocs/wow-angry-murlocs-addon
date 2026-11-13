@@ -19,6 +19,8 @@ local FILES = {
   "Core/Sounds.lua",
   "Core/Events.lua",
   "Core/Diag.lua",
+  "Core/MetaReplyPolicy.lua",
+  "Core/RecipeSyncLogic.lua",
   "Core/Comm.lua",
   "Core/WantedLogic.lua",
   "Core/RecipeCategories.lua",

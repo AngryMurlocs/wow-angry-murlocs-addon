@@ -117,6 +117,33 @@ do
   check("pushfront bad item", q:PushFront({ prio = "nope" }) == false)
 end
 
+-- scopeKey / operationId survive PushAll -> Pop -> PushFront -> Pop
+do
+  local q = Queue.New()
+  local ok = q:PushAll("ctrl", {
+    { payload = "RQ1", category = "sync", scopeKey = "Realm::Old", operationId = "opA" },
+    { payload = "RQ2", category = "sync", scopeKey = "Realm::Old", operationId = "opA" },
+  }, 0)
+  check("meta pushall ok", ok)
+  local a = q:Pop(0)
+  check("meta on first frag", a.scopeKey == "Realm::Old" and a.operationId == "opA" and a.payload == "RQ1")
+  q:PushFront(a)
+  local b = q:Pop(0)
+  check("meta after pushfront", b.scopeKey == "Realm::Old" and b.operationId == "opA" and b.payload == "RQ1")
+  local c = q:Pop(0)
+  check("meta on second frag", c.operationId == "opA" and c.payload == "RQ2")
+  local n = q:Purge(function(it) return it.operationId == "opA" end)
+  check("purge by operation empty", n == 0 and q:Size() == 0)
+end
+
+-- Items without meta keep previous behaviour
+do
+  local q = Queue.New()
+  q:Push("data", "X", "misc", 0)
+  local it = q:Pop(0)
+  check("no meta fields", it.scopeKey == nil and it.operationId == nil and it.payload == "X")
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")
