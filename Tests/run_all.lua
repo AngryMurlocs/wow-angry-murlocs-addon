@@ -29,6 +29,7 @@ local tests = {
   "Tests/CommTransport_test.lua",
   "Tests/MetaReplyPolicy_test.lua",
   "Tests/RecipeCategorySync_test.lua",
+  "Tests/ProfReplySync_test.lua",
   "Tests/RecipeSyncLogic_test.lua",
   "Tests/RecipeEpochPersist_test.lua",
   "Tests/LevelCap_test.lua",

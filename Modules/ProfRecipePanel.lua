@@ -1593,6 +1593,10 @@ function UI:OpenRecipeCatalog(playerName, profKey)
   SetBaseListsVisible(false)
   catalog:Show()
   ShowListView()
+  local R = Recipes()
+  if R and R.EnsureCategoriesForPlayerProf then
+    R.EnsureCategoriesForPlayerProf(playerName, profKey)
+  end
   UI:RefreshRecipeCatalog()
   MaybeAutoFetchRecipes()
 end
@@ -1629,6 +1633,10 @@ function UI:OpenRecipeDetail(recipeId, profKey, crafters)
   SetBaseListsVisible(false)
   catalog:Show()
   ShowDetailView()
+  local R = Recipes()
+  if R and R.EnsureCategoriesForIds then
+    R.EnsureCategoriesForIds({ recipeId })
+  end
   RefreshDetail()
 end
 

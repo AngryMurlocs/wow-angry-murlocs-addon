@@ -2211,6 +2211,11 @@ function UI:RefreshSearchList()
     searchCat.visibleRows = (RC and RC.Flatten and RC.Flatten(groups, searchCat.GetExpanded(searchProfKey), searching)) or {}
     searchCat.recipeCount = #rows
     searchCat.categoryCount = #groups
+    if R and R.EnsureCategoriesForIds and #rows > 0 then
+      local catIds = {}
+      for i = 1, #rows do catIds[i] = rows[i].recipeId end
+      R.EnsureCategoriesForIds(catIds)
+    end
 
     if searchRecipeStatusFS and R then
       ApplyStickyOrCoverageStatus()
@@ -2284,6 +2289,11 @@ function UI:RefreshSearchList()
       if na ~= nb then return na < nb end
       return (a.recipeId or 0) < (b.recipeId or 0)
     end)
+    if R and R.EnsureCategoriesForIds and #filtered > 0 then
+      local catIds = {}
+      for i = 1, #filtered do catIds[i] = filtered[i].recipeId end
+      R.EnsureCategoriesForIds(catIds)
+    end
   end
 
   local total = #filtered

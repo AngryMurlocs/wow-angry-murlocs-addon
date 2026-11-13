@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Missing recipe categories load again from the guild after catalogues arrive
+- Guild recipe replies no longer skip, double-send, or fire for the wrong guild after a change
+
 ## 0.11.9
 
 - Recipe categories can fill in from guildmates without also pulling materials
