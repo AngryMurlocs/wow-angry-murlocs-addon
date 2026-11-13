@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.9
 
 - Recipe categories can fill in from guildmates without also pulling materials
 - Profession sharing off still lets you ask for recipe data; only your replies stop
