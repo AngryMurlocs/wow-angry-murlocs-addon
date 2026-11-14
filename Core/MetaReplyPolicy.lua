@@ -30,7 +30,7 @@ function Policy.New(opts)
     deadlineSec = tonumber(opts.deadlineSec) or DEFAULTS.deadlineSec,
     -- id -> { meta=bool need, category=bool need, deadline=number, addedAt=number }
     open = {},
-    -- observations after Add: key "id|part" -> canonical string
+    -- observations for the current need epoch: key "id|part" -> canonical string
     seen = {},
     order = {}, -- FIFO ids for Due fairness
   }
@@ -55,6 +55,8 @@ end
 
 -- parts: { meta = true/false, category = true/false }
 -- Returns acceptedCount, overflowCount.
+-- Opening a part that was not already needed starts a new need epoch for that
+-- part (clears prior seen). Merging the same part while already true does not.
 function Policy.Add(state, ids, now, parts)
   now = tonumber(now) or 0
   parts = parts or { meta = true, category = true }
@@ -67,23 +69,27 @@ function Policy.Add(state, ids, now, parts)
       overflow = overflow + 1
     elseif row then
       -- Merging must not extend the original deadline.
-      if parts.meta then row.meta = true end
-      if parts.category then row.category = true end
-      accepted = accepted + 1
-      -- Drop parts already observed after this need existed.
-      local metaKey = id .. "|meta"
-      local catKey = id .. "|category"
-      if row.meta and state.seen[metaKey] then row.meta = false end
-      if row.category and state.seen[catKey] then row.category = false end
-      if not row.meta and not row.category then
-        Policy.Resolve(state, { id }, "both", "suppressed", now)
+      if parts.meta then
+        if not row.meta then
+          state.seen[id .. "|meta"] = nil
+        end
+        row.meta = true
       end
+      if parts.category then
+        if not row.category then
+          state.seen[id .. "|category"] = nil
+        end
+        row.category = true
+      end
+      accepted = accepted + 1
     end
   end
   return accepted, overflow
 end
 
-function Policy.Observe(state, id, part, canonical, now)
+-- Store peer canonical. Clear the open part only when matchCanonical is provided
+-- and equals peerCanonical while that part need is currently open.
+function Policy.Observe(state, id, part, canonical, now, matchCanonical)
   id = tonumber(id)
   if not id or (part ~= "meta" and part ~= "category") then return end
   canonical = tostring(canonical or "")
@@ -92,6 +98,8 @@ function Policy.Observe(state, id, part, canonical, now)
   if not row then return end -- observation before Add does not clear future need
   local key = id .. "|" .. part
   state.seen[key] = canonical
+  if matchCanonical == nil then return end
+  if tostring(matchCanonical) ~= canonical then return end
   if part == "meta" and row.meta then row.meta = false end
   if part == "category" and row.category then row.category = false end
   if not row.meta and not row.category then
@@ -130,7 +138,8 @@ function Policy.Resolve(state, ids, part, outcome, now)
 end
 
 -- candidates[id] = { meta = canonicalOrNil, category = canonicalOrNil }
--- Returns list of { id, parts = {meta=, category=} } up to batchSize.
+-- Returns list of { id, meta=, category= } up to batchSize.
+-- Parts whose seen equals the candidate canon for the current need are suppressed.
 function Policy.Due(state, now, candidates)
   now = tonumber(now) or 0
   candidates = candidates or {}
@@ -146,16 +155,31 @@ function Policy.Due(state, now, candidates)
       -- do not advance i
     else
       local cand = candidates[id]
+      local metaKey = id .. "|meta"
+      local catKey = id .. "|category"
       local needMeta = row.meta and cand and cand.meta
       local needCat = row.category and cand and cand.category
-      if needMeta or needCat then
-        batch[#batch + 1] = {
-          id = id,
-          meta = needMeta and cand.meta or nil,
-          category = needCat and cand.category or nil,
-        }
+      if needMeta and state.seen[metaKey] == cand.meta then
+        row.meta = false
+        needMeta = false
       end
-      i = i + 1
+      if needCat and state.seen[catKey] == cand.category then
+        row.category = false
+        needCat = false
+      end
+      if not row.meta and not row.category then
+        RemoveOpen(state, id)
+        -- do not advance i
+      else
+        if needMeta or needCat then
+          batch[#batch + 1] = {
+            id = id,
+            meta = needMeta and cand.meta or nil,
+            category = needCat and cand.category or nil,
+          }
+        end
+        i = i + 1
+      end
     end
   end
   return batch

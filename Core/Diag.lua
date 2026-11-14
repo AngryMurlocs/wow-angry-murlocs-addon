@@ -33,6 +33,16 @@ function Diag:Count(key, n)
   self.counters[key] = (self.counters[key] or 0) + (n or 1)
 end
 
+-- Keep the highest value seen for a fixed local counter key (no network).
+function Diag:Max(key, value)
+  value = tonumber(value)
+  if not value then return end
+  local cur = self.counters[key]
+  if not cur or value > cur then
+    self.counters[key] = value
+  end
+end
+
 function Diag:Log(kind, fmt, ...)
   self:Count(kind)
   if not self:Enabled() then return end

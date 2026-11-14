@@ -192,6 +192,10 @@ local function Drain()
       local status = RawSend(item.payload)
       if status == "ok" then
         Count("sent_" .. item.prio)
+        local d = Diag()
+        if d and d.Max and item.enq then
+          d:Max("queue_wait_max", now - item.enq)
+        end
         NoteOpSent(item.operationId)
       elseif status == "throttled" or status == "lockdown" then
         -- Still waiting — not a final failure; do not burn send-ack attempts.

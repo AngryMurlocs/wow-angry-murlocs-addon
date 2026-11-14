@@ -42,15 +42,15 @@ local SCAN_MAX_EXTRA = 2
 local INDEX_CACHE = nil
 local INDEX_CACHE_SCOPE = nil
 local INDEX_CACHE_GEN = 0
-local lastMetaReqSend = 0
-local lastMetaReqReply = 0
+local lastMetaReqSend = nil -- nil = never sent
+local lastMetaReqReply = nil -- nil = never replied
 local pendingMetaReq = {} -- id -> expireAt
 local metaQueue = {} -- ordered recipe IDs awaiting peer request
 local metaQueueSet = {} -- id -> true
 local metaAttempt = {} -- id -> { n = attemptsSent, firstSentAt = number|nil }
 -- Independent category request queue (PROFRCQ); timers start on send-ack.
-local lastCatReqSend = 0
-local lastCatReqReply = 0
+local lastCatReqSend = nil -- nil = never sent
+local lastCatReqReply = nil -- nil = never replied
 local pendingCatReq = {}
 local catQueue = {}
 local catQueueSet = {}
@@ -61,7 +61,7 @@ local catDrainScheduled = false
 local catInFlightOp = nil
 local replyPolicy = GR.MetaReplyPolicy and GR.MetaReplyPolicy.New() or nil
 local replyPolicyGen = 0
-local deferredCatIds = {} -- ids waiting for reply CD
+local replyDrainScheduled = false
 local catReplyOpIds = {} -- operationId -> true (queued category replies)
 local metaGiveUp = {} -- id -> true (session)
 local metaDrainGen = 0
@@ -1861,6 +1861,9 @@ function ProfRecipes:OnRecipeUpdate(sender, data)
     if ProfRecipes.EnsureMetaForIds then
       ProfRecipes.EnsureMetaForIds(data.ids, sender)
     end
+    if ProfRecipes.EnsureCategoriesForIds then
+      ProfRecipes.EnsureCategoriesForIds(data.ids)
+    end
     return
   end
   entry.recipes[data.profKey] = {
@@ -1875,6 +1878,9 @@ function ProfRecipes:OnRecipeUpdate(sender, data)
   GR:SendMessage("PROF_RECIPES_CHANGED", sender, data.profKey)
   if ProfRecipes.EnsureMetaForIds then
     ProfRecipes.EnsureMetaForIds(data.ids, sender)
+  end
+  if ProfRecipes.EnsureCategoriesForIds then
+    ProfRecipes.EnsureCategoriesForIds(data.ids)
   end
 end
 
@@ -1995,7 +2001,7 @@ local function AbortCategoryDrain()
     GR.MetaReplyPolicy.Reset(replyPolicy)
   end
   replyPolicyGen = replyPolicyGen + 1
-  wipe(deferredCatIds)
+  replyDrainScheduled = false
 end
 
 function ProfRecipes.AbortAllBackgroundWork()
@@ -2191,16 +2197,24 @@ function ProfRecipes:OnEnable()
 
   GR:BindMessage(self, "PROF_RECIPE_META_REQUEST", function(_, sender, ids)
     if U.IsSelfName(sender) then return end
+    local scopeKey = U.GuildScopeKey and U.GuildScopeKey()
+    local gen = replyPolicyGen
     C_Timer.After(0.4 + math.random() * 1.2, function()
       if not ProfRecipes.enabled then return end
+      if gen ~= replyPolicyGen then return end
+      if U.GuildScopeKey and U.GuildScopeKey() ~= scopeKey then return end
       ProfRecipes:OnMetaRequest(sender, ids)
     end)
   end)
 
   GR:BindMessage(self, "PROF_RECIPE_CATEGORY_REQUEST", function(_, sender, ids)
     if U.IsSelfName(sender) then return end
+    local scopeKey = U.GuildScopeKey and U.GuildScopeKey()
+    local gen = replyPolicyGen
     C_Timer.After(0.4 + math.random() * 1.2, function()
       if not ProfRecipes.enabled then return end
+      if gen ~= replyPolicyGen then return end
+      if U.GuildScopeKey and U.GuildScopeKey() ~= scopeKey then return end
       ProfRecipes:OnCategoryRequest(sender, ids)
     end)
   end)
@@ -2631,7 +2645,7 @@ function ProfRecipes._DrainCategoryQueue()
   if not Comm or not Comm.Send then return false, "no_comm" end
   if catInFlightOp then return false, "in_flight" end
   local now = U.Now()
-  if (now - lastCatReqSend) < PROFRMQ_SEND_CD then
+  if lastCatReqSend and (now - lastCatReqSend) < PROFRMQ_SEND_CD then
     ScheduleCatDrain(PROFRMQ_SEND_CD - (now - lastCatReqSend) + 0.05)
     return false, "cooldown"
   end
@@ -2707,6 +2721,8 @@ function ProfRecipes._DrainCategoryQueue()
   })
   if not ok then
     if catInFlightOp == opId then catInFlightOp = nil end
+    -- Queue reject: retry soon; do not burn attempt budget (no onAck).
+    ScheduleCatDrain(1)
     return false, "send_fail"
   end
   return true, "queued"
@@ -2746,6 +2762,47 @@ function ProfRecipes.RetryCategoriesForIds(ids)
   return ProfRecipes.EnsureCategoriesForIds(ids)
 end
 
+-- Collect recipe ids from guild cache (optional profession filter).
+function ProfRecipes.CollectKnownRecipeIds(profKey)
+  local out, seen = {}, {}
+  local cache = Cache()
+  for _, entry in pairs(cache) do
+    if type(entry) == "table" and type(entry.recipes) == "table" then
+      for pk, rec in pairs(entry.recipes) do
+        if (not profKey or profKey == "" or pk == profKey)
+            and type(rec) == "table" and type(rec.ids) == "table" then
+          for i = 1, #rec.ids do
+            local id = tonumber(rec.ids[i])
+            if id and id > 0 and not seen[id] then
+              seen[id] = true
+              out[#out + 1] = id
+            end
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
+function ProfRecipes.EnsureCategoriesForPlayerProf(playerName, profKey)
+  local rec = ProfRecipes.GetEntry(playerName, profKey)
+  if not rec or type(rec.ids) ~= "table" then return 0, {} end
+  return ProfRecipes.EnsureCategoriesForIds(rec.ids)
+end
+
+-- Manual refresh / search backfill: optionally clear give-up without resetting attempts.
+function ProfRecipes.EnsureCategoriesForKnownRecipes(profKey, opts)
+  opts = opts or {}
+  local ids = ProfRecipes.CollectKnownRecipeIds(profKey)
+  if opts.clearGiveUp then
+    for i = 1, #ids do
+      catGiveUp[ids[i]] = nil
+    end
+  end
+  return ProfRecipes.EnsureCategoriesForIds(ids)
+end
+
 local function CanonicalCategory(meta)
   if not meta then return nil end
   local catId = tonumber(meta.categoryId)
@@ -2756,7 +2813,59 @@ local function CanonicalCategory(meta)
   return nil
 end
 
-local BuildMetaEntries, SendMetaReply, DrainReplyPolicy
+-- Wire-aligned fingerprint for meta replies (locale + reagents participate).
+local function CanonicalMeta(meta)
+  if not meta or type(meta.name) ~= "string" or meta.name == "" then return nil end
+  if meta.reagentsResolved ~= true then return nil end
+  local name = SanitizeMetaName(meta.name)
+  local icon = tonumber(meta.icon) or 0
+  local out = tonumber(meta.outputItemID) or 0
+  local qmin = tonumber(meta.qtyMin) or 0
+  local qmax = tonumber(meta.qtyMax) or 0
+  local ench = meta.isEnchant and 1 or 0
+  local locale = SanitizeMetaName(meta.locale or "")
+  if #locale > 8 then locale = locale:sub(1, 8) end
+  return string.format(
+    "%s|%d|%d|%d|%d|%d|%s|%s",
+    name, icon, out, qmin, qmax, ench, locale, EncodeReagents(meta.reagents)
+  )
+end
+
+local function CanonicalMetaFromEntry(e)
+  if not e or type(e.name) ~= "string" or e.name == "" then return nil end
+  if type(e.reagents) ~= "table" then return nil end
+  local name = SanitizeMetaName(e.name)
+  local icon = tonumber(e.icon) or 0
+  local out = tonumber(e.outputItemID) or 0
+  local qmin = tonumber(e.qtyMin) or 0
+  local qmax = tonumber(e.qtyMax) or 0
+  local ench = e.isEnchant and 1 or 0
+  local locale = SanitizeMetaName(e.locale or "")
+  if #locale > 8 then locale = locale:sub(1, 8) end
+  return string.format(
+    "%s|%d|%d|%d|%d|%d|%s|%s",
+    name, icon, out, qmin, qmax, ench, locale, EncodeReagents(e.reagents)
+  )
+end
+
+local BuildMetaEntries, SendMetaReply, DrainReplyPolicy, ScheduleReplyDrain
+
+function ScheduleReplyDrain(delay)
+  delay = math.max(0, tonumber(delay) or 0)
+  if replyDrainScheduled then return end
+  -- Immediate drain when not in cooldown path; deferred drains set the flag.
+  if delay <= 0 then
+    DrainReplyPolicy(U.Now())
+    return
+  end
+  replyDrainScheduled = true
+  local gen = replyPolicyGen
+  C_Timer.After(delay, function()
+    replyDrainScheduled = false
+    if not ProfRecipes.enabled or gen ~= replyPolicyGen then return end
+    DrainReplyPolicy(U.Now())
+  end)
+end
 
 local function SendCategoryReply(ids)
   local entries = {}
@@ -2789,19 +2898,31 @@ local function SendCategoryReply(ids)
   return ok
 end
 
+local function ReplyPolicyStillOpen()
+  if not replyPolicy then return false end
+  for _ in pairs(replyPolicy.open) do return true end
+  return false
+end
+
 function DrainReplyPolicy(now)
   if not replyPolicy or not GR.MetaReplyPolicy then return end
   if not GR.db or not GR.db.privacy or not GR.db.privacy.shareProfessions then return end
+  now = tonumber(now) or U.Now()
+  local lastReply = lastCatReqReply
+  if lastMetaReqReply and (not lastReply or lastMetaReqReply > lastReply) then
+    lastReply = lastMetaReqReply
+  end
+  if lastReply and (now - lastReply) < PROFRMQ_REPLY_CD then
+    ScheduleReplyDrain(PROFRMQ_REPLY_CD - (now - lastReply) + 0.05)
+    return
+  end
   local candidates = {}
   for id, row in pairs(replyPolicy.open) do
     local meta = ProfRecipes.GetMeta(id)
     candidates[id] = {
-      meta = nil,
+      meta = row.meta and CanonicalMeta(meta) or nil,
       category = row.category and CanonicalCategory(meta) or nil,
     }
-    if row.meta and meta and meta.name and meta.name ~= "" and meta.reagentsResolved == true then
-      candidates[id].meta = true
-    end
   end
   local batch = GR.MetaReplyPolicy.Due(replyPolicy, now, candidates)
   if #batch == 0 then return end
@@ -2810,22 +2931,45 @@ function DrainReplyPolicy(now)
     if batch[i].category then catIds[#catIds + 1] = batch[i].id end
     if batch[i].meta then metaIds[#metaIds + 1] = batch[i].id end
   end
+  local anyOk, anyFail = false, false
+  local piggySet = {}
   if #metaIds > 0 then
-    if SendMetaReply(BuildMetaEntries(metaIds)) then
+    local ok, piggyIds = SendMetaReply(BuildMetaEntries(metaIds))
+    if ok then
+      anyOk = true
       GR.MetaReplyPolicy.Resolve(replyPolicy, metaIds, "meta", "queued", now)
-      GR.MetaReplyPolicy.Resolve(replyPolicy, metaIds, "category", "queued", now)
       lastMetaReqReply = now
+      for i = 1, #(piggyIds or {}) do
+        local pid = piggyIds[i]
+        piggySet[pid] = true
+      end
+      if piggyIds and #piggyIds > 0 then
+        GR.MetaReplyPolicy.Resolve(replyPolicy, piggyIds, "category", "queued", now)
+        lastCatReqReply = now
+      end
     else
+      anyFail = true
       GR.MetaReplyPolicy.Resolve(replyPolicy, metaIds, "meta", "retry", now)
     end
   end
-  if #catIds > 0 then
-    if SendCategoryReply(catIds) then
-      GR.MetaReplyPolicy.Resolve(replyPolicy, catIds, "category", "queued", now)
+  local remainCat = {}
+  for i = 1, #catIds do
+    if not piggySet[catIds[i]] then
+      remainCat[#remainCat + 1] = catIds[i]
+    end
+  end
+  if #remainCat > 0 then
+    if SendCategoryReply(remainCat) then
+      anyOk = true
+      GR.MetaReplyPolicy.Resolve(replyPolicy, remainCat, "category", "queued", now)
       lastCatReqReply = now
     else
-      GR.MetaReplyPolicy.Resolve(replyPolicy, catIds, "category", "retry", now)
+      anyFail = true
+      GR.MetaReplyPolicy.Resolve(replyPolicy, remainCat, "category", "retry", now)
     end
+  end
+  if ReplyPolicyStillOpen() and (anyOk or anyFail) then
+    ScheduleReplyDrain(PROFRMQ_REPLY_CD + 0.05)
   end
 end
 
@@ -2834,7 +2978,7 @@ function ProfRecipes._DrainMetaQueue()
   if not Comm or not Comm.Send then return false, "no_comm" end
   if metaInFlightOp then return false, "in_flight" end
   local now = U.Now()
-  if (now - lastMetaReqSend) < PROFRMQ_SEND_CD then
+  if lastMetaReqSend and (now - lastMetaReqSend) < PROFRMQ_SEND_CD then
     ScheduleMetaDrain(PROFRMQ_SEND_CD - (now - lastMetaReqSend) + 0.05)
     return false, "cooldown"
   end
@@ -2914,6 +3058,7 @@ function ProfRecipes._DrainMetaQueue()
   })
   if not ok then
     if metaInFlightOp == opId then metaInFlightOp = nil end
+    ScheduleMetaDrain(1)
     return false, "send_fail"
   end
   return true, "queued"
@@ -2971,9 +3116,9 @@ function BuildMetaEntries(ids)
 end
 
 function SendMetaReply(entries)
-  if #entries == 0 then return false end
+  if #entries == 0 then return false, {} end
   local encoded = ProfRecipes.EncodeMetaBatch(entries)
-  if not encoded then return false end
+  if not encoded then return false, {} end
   local opId = "metarep-" .. tostring(U.Now()) .. "-" .. tostring(entries[1].recipeId)
   catReplyOpIds[opId] = true
   local ok = Comm:Send("PROFRM|" .. encoded, "data", "prof", {
@@ -2981,7 +3126,10 @@ function SendMetaReply(entries)
     operationId = opId,
     onAck = function() catReplyOpIds[opId] = nil end,
   })
-  if not ok then catReplyOpIds[opId] = nil end
+  if not ok then
+    catReplyOpIds[opId] = nil
+    return false, {}
+  end
   -- Piggyback categories for the same recipes when known.
   local catEntries = {}
   for i = 1, #entries do
@@ -2995,12 +3143,15 @@ function SendMetaReply(entries)
       }
     end
   end
+  local piggyOk = {}
   if #catEntries > 0 then
     local ids = {}
     for i = 1, #catEntries do ids[i] = catEntries[i].recipeId end
-    SendCategoryReply(ids)
+    if SendCategoryReply(ids) then
+      piggyOk = ids
+    end
   end
-  return ok
+  return true, piggyOk
 end
 
 function ProfRecipes:OnMetaRequest(sender, ids)
@@ -3013,20 +3164,10 @@ function ProfRecipes:OnMetaRequest(sender, ids)
   end
   if replyPolicy and GR.MetaReplyPolicy and sender ~= "__policy__" then
     GR.MetaReplyPolicy.Add(replyPolicy, ids, now, { meta = true, category = true })
-    -- last*Reply == 0 means never replied; do not treat as still in cooldown.
-    if lastMetaReqReply > 0 and (now - lastMetaReqReply) < PROFRMQ_REPLY_CD then
-      local gen = replyPolicyGen
-      C_Timer.After(PROFRMQ_REPLY_CD - (now - lastMetaReqReply) + 0.05, function()
-        if not ProfRecipes.enabled or gen ~= replyPolicyGen then return end
-        DrainReplyPolicy(U.Now())
-      end)
-      return
-    end
-    lastMetaReqReply = now
-    DrainReplyPolicy(now)
+    ScheduleReplyDrain(0)
     return
   end
-  if lastMetaReqReply > 0 and (now - lastMetaReqReply) < PROFRMQ_REPLY_CD then return end
+  if lastMetaReqReply and (now - lastMetaReqReply) < PROFRMQ_REPLY_CD then return end
   lastMetaReqReply = now
   SendMetaReply(BuildMetaEntries(ids))
 end
@@ -3042,20 +3183,10 @@ function ProfRecipes:OnCategoryRequest(sender, ids)
   -- Category-only: never schedule material replies.
   if replyPolicy and GR.MetaReplyPolicy then
     GR.MetaReplyPolicy.Add(replyPolicy, ids, now, { meta = false, category = true })
-    local lastReply = math.max(lastCatReqReply or 0, lastMetaReqReply or 0)
-    if lastReply > 0 and (now - lastReply) < PROFRMQ_REPLY_CD then
-      local gen = replyPolicyGen
-      C_Timer.After(PROFRMQ_REPLY_CD - (now - lastReply) + 0.05, function()
-        if not ProfRecipes.enabled or gen ~= replyPolicyGen then return end
-        DrainReplyPolicy(U.Now())
-      end)
-      return
-    end
-    lastCatReqReply = now
-    DrainReplyPolicy(now)
+    ScheduleReplyDrain(0)
     return
   end
-  if lastCatReqReply > 0 and (now - lastCatReqReply) < PROFRMQ_REPLY_CD then return end
+  if lastCatReqReply and (now - lastCatReqReply) < PROFRMQ_REPLY_CD then return end
   lastCatReqReply = now
   SendCategoryReply(ids)
 end
@@ -3071,6 +3202,8 @@ function ProfRecipes:OnMetaUpdate(sender, entries)
     if id then
       pendingMetaReq[id] = nil
       local prev = ProfRecipes.GetMeta(id)
+      local localCanon = CanonicalMeta(prev)
+      local peerCanon = CanonicalMetaFromEntry(e)
       local name = e.name
       if prev and prev.name and prev.name ~= "" then
         name = prev.name
@@ -3102,8 +3235,8 @@ function ProfRecipes:OnMetaUpdate(sender, entries)
         DequeueMetaId(id)
         metaAttempt[id] = nil
         metaGiveUp[id] = nil
-        if replyPolicy and GR.MetaReplyPolicy then
-          GR.MetaReplyPolicy.Observe(replyPolicy, id, "meta", "complete", U.Now())
+        if replyPolicy and GR.MetaReplyPolicy and peerCanon then
+          GR.MetaReplyPolicy.Observe(replyPolicy, id, "meta", peerCanon, U.Now(), localCanon)
         end
       end
       changed = true
@@ -3130,11 +3263,12 @@ function ProfRecipes:OnCategoryUpdate(sender, entries)
       DequeueCatId(id)
       catAttempt[id] = nil
       catGiveUp[id] = nil
+      local prev = ProfRecipes.GetMeta(id)
+      local localCanon = CanonicalCategory(prev)
       local canon = string.format("%d|%s", catId, catName)
       if replyPolicy and GR.MetaReplyPolicy then
-        GR.MetaReplyPolicy.Observe(replyPolicy, id, "category", canon, U.Now())
+        GR.MetaReplyPolicy.Observe(replyPolicy, id, "category", canon, U.Now(), localCanon)
       end
-      local prev = ProfRecipes.GetMeta(id)
       local had = prev and tonumber(prev.categoryId) and prev.categoryName and prev.categoryName ~= ""
       if not had then
         -- Prefer locally resolved name when EnsureCategoryResolved can fill it.
@@ -3219,6 +3353,11 @@ function ProfRecipes:RequestRecipeDataRefresh(profKey, force)
       nMembers = 0,
       nCats = 0,
     }
+    -- Backfill missing categories without resetting active attempt counters.
+    ProfRecipes.EnsureCategoriesForKnownRecipes(
+      (profKey and profKey ~= "") and profKey or nil,
+      { clearGiveUp = true }
+    )
     ScheduleRefreshSettleCheck(gen)
     GR:SendMessage("PROF_RECIPE_REFRESH_STATUS", "requesting", profKey)
   elseif why == "cooldown" then
@@ -3271,5 +3410,13 @@ ProfRecipes.FLAG_COMPLETE = FLAG_COMPLETE
 ProfRecipes.GATHERING_KEYS = GATHERING_KEYS
 ProfRecipes._metaQueue = metaQueue
 ProfRecipes._metaGiveUp = metaGiveUp
+ProfRecipes._catQueue = catQueue
+ProfRecipes._catGiveUp = catGiveUp
+ProfRecipes._catAttempt = catAttempt
 ProfRecipes._pendingLearn = pendingLearn
 ProfRecipes._lastSentFp = lastSentFp
+ProfRecipes._replyPolicy = function() return replyPolicy end
+ProfRecipes._replyDrainScheduled = function() return replyDrainScheduled end
+ProfRecipes._replyPolicyGen = function() return replyPolicyGen end
+ProfRecipes.PROFRMQ_REPLY_CD = PROFRMQ_REPLY_CD
+ProfRecipes.PROFRMQ_SEND_CD = PROFRMQ_SEND_CD

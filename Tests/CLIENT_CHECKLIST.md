@@ -150,6 +150,16 @@ Ziel: CLEU bleibt gesperrt; Recap `Player-*` darf Wanted zählen. Ziel/Angreifer
    - Ziel/Angreifer ohne Recap-Player: kein Wanted (`unclear_killer` / `no_player`).
 5. Ergebnis an die Entwicklung geben. Forever-Recap-Vollständigkeit bleibt **client-confirmed** erst nach diesem Check.
 
+## Sync-Last / doppelte Rezept-Antworten (Simulator + Client)
+
+Lua: `luajit Tests/MetaSync_sim_test.lua` (A/B Policy an/aus). Stand Messung: S1 (~30 gleiche Anbieter) spart Median-Frames, **50%-Ziel im Sim nicht erreicht** (erste Antwortwelle vor `Observe`). Client-Lauf offen.
+
+- [ ] Gleichzeitiger Login mehrerer Charaktere mit geteilten Berufen: Rezeptansicht/Sync ohne Dauerschleife; `/am diag show` — `sent_*` beruhigt sich.
+- [ ] Freigabe „Berufe teilen“ aus/an während offener Anfragen: keine Antworten an falsche Gilde; Queue leert sich.
+- [ ] Gildenwechsel während Sync: keine alten PROFRM/PROFRC in die neue Gilde.
+- [ ] 10 Minuten Ruhe: keine neuen Meta/Kategorie-Antwortpakete ohne Anlass; grob Frames/Bytes, Latenzgefühl, Speicher/CPU vs. vorher notieren.
+- [ ] Ergebnis an Entwicklung: ob spürbar weniger doppelte Rezeptdaten als ohne Policy (0.11.8-Verhalten).
+
 ### Regression: Todesursachen im aktuellen Arbeitsstand
 
 - [ ] Falltod nach Mobtreffern: Enthält der Recap `FALLING`, zeigt lokal und beim Gildenmitglied Fallschaden; ältere Mob-/Spielertreffer erhalten keinen Credit.

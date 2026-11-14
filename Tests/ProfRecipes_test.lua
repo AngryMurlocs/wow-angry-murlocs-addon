@@ -1028,6 +1028,79 @@ do
   R.AbortAllBackgroundWork()
 end
 
+-- Category queue: >24 IDs drain in batches; long wait before first send does not give up
+do
+  Advance(25) -- clear PROFRCQ send cooldown from earlier tests
+  _G.C_TradeSkillUI = nil
+  GR.db.prof.recipeMeta = {}
+  R.AbortAllBackgroundWork()
+  wipe(R._catQueue)
+  wipe(R._catGiveUp)
+  local bodies = {}
+  local realCommSend = GR.Comm.Send
+  GR.Comm.Send = function(_, body, _prio, _cat, opts)
+    bodies[#bodies + 1] = body
+    if opts and type(opts.onAck) == "function" then opts.onAck(true) end
+    return true
+  end
+  R.enabled = true
+  local ids = {}
+  for i = 1, 500 do ids[i] = 20000 + i end
+  R.EnsureCategoriesForIds(ids)
+  check("cat first batch sent", #bodies == 1, #bodies)
+  local idPart = bodies[1] and select(2, bodies[1]:match("^PROFRCQ|(%d+)|(.*)$"))
+  local nFirst = 0
+  if idPart then for _ in string.gmatch(idPart, "[^+]+") do nFirst = nFirst + 1 end end
+  check("cat first batch size 24", nFirst == R.MAX_META_REQ_IDS, nFirst)
+  Advance(30)
+  check("cat long queue not mass give-up", (function()
+    local n = 0
+    for _ in pairs(R._catGiveUp) do n = n + 1 end
+    return n < 100
+  end)(), "giveups")
+  for _ = 1, 5 do Advance(20.1) end
+  check("cat multiple batches", #bodies >= 3, #bodies)
+  GR.Comm.Send = realCommSend
+  R.enabled = false
+  R.AbortAllBackgroundWork()
+end
+
+-- Category give-up after 3 attempts from first send
+do
+  Advance(25)
+  _G.C_TradeSkillUI = nil
+  GR.db.prof.recipeMeta = {}
+  R.AbortAllBackgroundWork()
+  wipe(R._catQueue)
+  wipe(R._catGiveUp)
+  local bodies = {}
+  local realCommSend = GR.Comm.Send
+  GR.Comm.Send = function(_, body, _prio, _cat, opts)
+    bodies[#bodies + 1] = body
+    if opts and type(opts.onAck) == "function" then opts.onAck(true) end
+    return true
+  end
+  R.enabled = true
+  R.EnsureCategoriesForIds({ 7778 })
+  check("cat giveup attempt1", #bodies == 1, #bodies)
+  Advance(25.1) -- pending expire
+  Advance(20.1) -- CD
+  check("cat giveup attempt2", #bodies >= 2, #bodies)
+  Advance(25.1)
+  Advance(20.1)
+  check("cat giveup attempt3", #bodies >= 3, #bodies)
+  Advance(25.1)
+  Advance(20.1)
+  local after = #bodies
+  Advance(25.1)
+  Advance(20.1)
+  check("cat giveup no more auto", #bodies == after, #bodies)
+  check("cat giveup flagged", R._catGiveUp[7778] == true)
+  GR.Comm.Send = realCommSend
+  R.enabled = false
+  R.AbortAllBackgroundWork()
+end
+
 -- Pending learn: meta does not clear; complete missing ID keeps retry; store with ID clears
 do
   R.NotePendingLearn(8888, "alch")
