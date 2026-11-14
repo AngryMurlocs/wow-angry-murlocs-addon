@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Guild recipe lists from members who are offline can fill in from others who already have them
+
 ## 0.11.11
 
 - Missing recipe categories load again from the guild after catalogues arrive
