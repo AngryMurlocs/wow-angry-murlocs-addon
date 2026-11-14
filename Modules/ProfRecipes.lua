@@ -62,7 +62,6 @@ local catInFlightOp = nil
 local replyPolicy = GR.MetaReplyPolicy and GR.MetaReplyPolicy.New() or nil
 local replyPolicyGen = 0
 local replyDrainScheduled = false
-local deferredCatIds = {} -- ids waiting for reply CD (unused; shared drain owns scheduling)
 local catReplyOpIds = {} -- operationId -> true (queued category replies)
 local metaGiveUp = {} -- id -> true (session)
 local metaDrainGen = 0
@@ -2003,7 +2002,6 @@ local function AbortCategoryDrain()
   end
   replyPolicyGen = replyPolicyGen + 1
   replyDrainScheduled = false
-  wipe(deferredCatIds)
 end
 
 function ProfRecipes.AbortAllBackgroundWork()
