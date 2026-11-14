@@ -2,7 +2,7 @@
 
 Gilden-Addon der **Angry Murlocs** für **World of Warcraft: Forever**. Es zeigt Gildenmitglieder als Murlocs auf der Weltkarte, sammelt die Berufe und Rezepte der Gilde, führt eine gemeinsame Wanted-Liste und meldet Tode und Level-ups der Gilde.
 
-**Version:** 0.11.9
+**Version:** 0.11.10
 
 **Download:** [CurseForge](https://www.curseforge.com/wow/addons/angry-murlocs) · **Quellcode:** [GitHub](https://github.com/AngryMurlocs/wow-angry-murlocs-addon) · **Discord:** [discord.murlocs.eu](https://discord.murlocs.eu)
 
@@ -22,6 +22,7 @@ Die meisten Funktionen leben vom Austausch mit der Gilde. Je mehr Gildenmitglied
 - Gildenmitglieder erscheinen auf der Weltkarte als Murlocs in ihrer Klassenfarbe. Zur Wahl stehen Murloc-Köpfe, Ganzkörper oder Ringe, und die Größe ist einstellbar.
 - Die Positionen werden alle paar Sekunden aktualisiert. Ohne neue Daten verblasst ein Pin langsam und verschwindet nach einer Minute.
 - Stehen mehrere Spieler am selben Ort, rücken ihre Pins auseinander, statt sich zu verdecken.
+- Die Pins liegen hinter Quest-Symbolen, Kisten und Markierungen anderer Addons. Ein Pin, der frei liegt, bleibt anklickbar.
 
 ### Berufe und Rezepte
 - Liste aller Berufe in der Gilde mit Fertigkeitsstufe, Online-Status, Sortierung und Suche.
