@@ -20,8 +20,8 @@ local NEAR_SELF = 0.01
 MapPins.STALE_SEC = 60
 MapPins.FADE_START_SEC = 45
 MapPins.FADE_MIN = 0.25
-local BASE_LEVEL = 100
-local HOVER_LEVEL = 200
+-- First Blizzard icon band above map chrome (fog, quest shading). Pins stay under it.
+local SYMBOL_BAND = "PIN_FRAME_LEVEL_DIG_SITE"
 local CLUSTER_GAP_PX = 2 -- screen pixels between pin edges
 local CLUSTER_SPAN = 2 -- pile diameter, in pin widths; longer chains stay put
 local PI = 3.141592653589793
@@ -230,6 +230,29 @@ function MapPins.ClusterOffsets(points, pinSize, gap)
   return out
 end
 
+--- Rest level and hover level for guild pins.
+--- symbolStart is the first Blizzard icon band (nil if unknown).
+--- Every rest level stays strictly under that band when the canvas still has room.
+--- Returns levels (one per pin), then the hover level.
+function MapPins.LayerLevels(count, canvasLevel, symbolStart)
+  count = math.max(math.floor(tonumber(count) or 0), 0)
+  canvasLevel = math.floor(tonumber(canvasLevel) or 0)
+  local floor = canvasLevel + 1
+  local rest, hover = floor, floor
+  if type(symbolStart) == "number" then
+    local hoverCandidate = math.floor(symbolStart) - 1
+    if hoverCandidate >= floor then
+      hover = hoverCandidate
+      rest = math.max(floor, hoverCandidate - 1)
+    end
+  end
+  local levels = {}
+  for i = 1, count do
+    levels[i] = rest
+  end
+  return levels, hover
+end
+
 --- Pure fade curve for tests: 1 until FADE_START, linear down to FADE_MIN at STALE.
 function MapPins.FadeFactor(ageSec)
   ageSec = tonumber(ageSec) or 0
@@ -349,8 +372,10 @@ local function AcquirePin()
   pin:SetScript("OnEnter", function(self)
     if not self.data then return end
     local d = self.data
-    if self.baseLevel then
-      self:SetFrameLevel(self.baseLevel + HOVER_LEVEL)
+    if self.bandTop then
+      self:SetFrameLevel(self.bandTop)
+    elseif self.baseLevel then
+      self:SetFrameLevel(self.baseLevel)
     end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     local r, g, b = U.ClassColor(d.classFile)
@@ -454,6 +479,17 @@ end
 local function GetScrollContainer()
   if WorldMapFrame and WorldMapFrame.ScrollContainer then
     return WorldMapFrame.ScrollContainer
+  end
+end
+
+local function SymbolBandStart()
+  local map = WorldMapFrame
+  if not map or not map.GetPinFrameLevelsManager then return end
+  local manager = map:GetPinFrameLevelsManager()
+  if not manager or not manager.GetFrameLevelStart then return end
+  local ok, level = pcall(manager.GetFrameLevelStart, manager, SYMBOL_BAND)
+  if ok and type(level) == "number" and level > 1 then
+    return level
   end
 end
 
@@ -594,9 +630,9 @@ function MapPins:Refresh()
   local seen = {}
   local positions = GR:GetModule("Positions")
   local cache = positions and positions:GetCache() or {}
-  local canvasBase = (canvas.GetFrameLevel and canvas:GetFrameLevel() or 0) + BASE_LEVEL
+  local canvasLevel = (canvas.GetFrameLevel and canvas:GetFrameLevel() or 0)
 
-  -- Time order only sets frame level. Pile slots sort by name so they stay put.
+  -- Pile slots sort by name so they stay put. Frame level is shared under Blizzard icons.
   local order = {}
   for name, data in pairs(cache) do
     if not U.IsSelfName(name) and data.x and data.y then
@@ -621,6 +657,8 @@ function MapPins:Refresh()
       end
     end
   end
+  local levels, bandTop = MapPins.LayerLevels(#visible, canvasLevel, SymbolBandStart())
+
   local clustering = not GR.db.map or GR.db.map.pinClustering ~= false
   local laid
   if clustering then
@@ -644,8 +682,11 @@ function MapPins:Refresh()
       active[name] = pin
     end
     pin:SetParent(canvas)
-    pin:SetFrameStrata("HIGH")
-    pin.baseLevel = canvasBase + (item.order or i)
+    if canvas.GetFrameStrata and pin.SetFrameStrata then
+      pin:SetFrameStrata(canvas:GetFrameStrata())
+    end
+    pin.baseLevel = levels[i] or bandTop
+    pin.bandTop = bandTop
     pin:SetFrameLevel(pin.baseLevel)
     pin:SetScale(1)
     pin:SetSize(size, size)

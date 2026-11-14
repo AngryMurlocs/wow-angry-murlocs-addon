@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## 0.11.10
+
+- Guild pins on the world map sit behind quest markers, chests, and pins from other addons
+
 ## 0.11.9
 
 - Recipe categories can fill in from guildmates without also pulling materials

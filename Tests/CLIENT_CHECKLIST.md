@@ -28,6 +28,12 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 - [ ] Weltkarte: Gilden-Pin voll sichtbar; nach ~45 s ohne Update blasser; bei 60 s weg.
 - [ ] Zwei Pins auf demselben Punkt: nebeneinander, Reihenfolge bleibt nach einem Update gleich. Drei als Dreieck, vier als Raster. Eine Reihe von Spielern entlang einer Straße bleibt auf den echten Positionen.
 - [ ] Karte zoomen: die Gruppe bleibt zusammen und die Pins überdecken sich nicht neu. Hover hebt den Pin und zeigt die Frische-Zeile.
+
+## Kartenpins hinter anderen Symbolen (0.11.10)
+
+- [ ] Weltkarte: Murloc liegt hinter Quest-!, Kiste und Pins anderer Addons.
+- [ ] Freier Murloc: Tooltip mit Name und Frische. Hover legt ihn über andere Murlocs, nicht über das Quest-Symbol.
+- [ ] Zoom und Cluster wie bisher.
 - [ ] Berufe: Online zuerst; Offline gedimmt mit ·; bei >40 Einträgen Seiten `<` `>` und Kopfzeile „Top 40 von N“.
 - [ ] Mehrere Tode/Level-Ups schnell hintereinander: Toasts nacheinander (Tod vor Level), kein Überlappen, im Kampf Pause bis Kampfende.
 
