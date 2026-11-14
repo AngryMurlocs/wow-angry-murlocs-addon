@@ -174,6 +174,51 @@ do
   alice.GR.Comm.Send = realSend
 end
 
+-- 3b) Category-only reply batches spaced by reply CD (no PROFRM)
+do
+  local sim = Sim.New(48)
+  local alice = MakeClient(sim, "Alice")
+  WireDeliver(sim, alice)
+  local R = alice.GR:GetModule("ProfRecipes")
+  local function storeKnown(id)
+    R.StoreMeta(id, {
+      name = "C" .. id,
+      categoryId = 10,
+      categoryName = "Cat",
+    })
+  end
+  for id = 1, 72 do storeKnown(id) end
+  local times = {}
+  local sawM = false
+  local realSend = alice.GR.Comm.Send
+  alice.GR.Comm.Send = function(self, body, prio, cat, opts)
+    local ok = realSend(self, body, prio, cat, opts)
+    if ok and tostring(body):find("^PROFRC|") then
+      times[#times + 1] = sim.clock
+    end
+    if ok and tostring(body):find("^PROFRM|") then
+      sawM = true
+    end
+    return ok
+  end
+  R:OnCategoryRequest("Bob-Realm", { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 })
+  R:OnCategoryRequest("Carol-Realm", { 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48 })
+  R:OnCategoryRequest("Dave-Realm", { 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72 })
+  sim:Run(40)
+  check("3b: three PROFRC batches", #times == 3, #times)
+  if #times >= 3 then
+    local gap1 = times[2] - times[1]
+    local gap2 = times[3] - times[2]
+    check("3b: gap1 >= reply CD", gap1 >= (R.PROFRMQ_REPLY_CD - 0.2), gap1)
+    check("3b: gap2 >= reply CD", gap2 >= (R.PROFRMQ_REPLY_CD - 0.2), gap2)
+  else
+    check("3b: gap1 >= reply CD", false)
+    check("3b: gap2 >= reply CD", false)
+  end
+  check("3b: no PROFRM", not sawM)
+  alice.GR.Comm.Send = realSend
+end
+
 -- 4) Conflicting peer category keeps local value and still replies with local
 do
   local sim = Sim.New(43)
