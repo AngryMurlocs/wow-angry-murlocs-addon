@@ -34,8 +34,16 @@ local META_PENDING_EXPIRE = 25
 local CHAT_SOFT_LIMIT = 240
 local REFRESH_MIN_COLLECT = 6
 local REFRESH_QUIET = 2.5
-local REFRESH_MAX = 14
+-- Hard ceiling: own + staggered relays (24×0.55s) + peer jitter + FRAG drain.
+local REFRESH_MAX = 45
 local REFRESH_SUMMARY_HOLD = 8
+local RELAY_MAX = 24
+local RELAY_STAGGER = 0.55
+-- Match UI "online" window (Modules/UI.lua PROF_ONLINE_SEC).
+local PROF_ONLINE_SEC = 600
+local RELAY_OWNER_MAX = 64
+-- Rotation cursor: [scopeKey .. "\0" .. profFilter] -> next index (1-based into sorted list).
+local relayCursor = {}
 local SCAN_INITIAL_DELAY = 0.5
 local SCAN_RETRY_DELAY = 0.8
 local SCAN_MAX_EXTRA = 2
@@ -84,8 +92,8 @@ local GATHERING_KEYS = {
   arch = true,
 }
 
-local lastReqSend = 0
-local lastReqReply = 0
+local lastReqSend = nil -- nil = never sent
+local lastReqReply = nil -- nil = never replied
 local lastSentFp = {} -- profKey -> content fingerprint (excludes scanAt)
 
 local function ProfMod()
@@ -1656,21 +1664,52 @@ function ProfRecipes:ScanProfession(profKey, opts)
   return ApplyScanResult(self, profKey, ids, complete, why, opts)
 end
 
-function ProfRecipes:BroadcastProfession(profKey, force)
+function ProfRecipes:BroadcastProfession(profKey, force, opts)
+  opts = opts or {}
   local db = GR.db
-  if not db or not db.privacy.shareProfessions then return end
-  if not IsInGuild or not IsInGuild() then return end
-  if not profKey or ProfRecipes.IsGathering(profKey) then return end
+  if not db or not db.privacy.shareProfessions then return false, "privacy" end
+  if not IsInGuild or not IsInGuild() then return false, "no_guild" end
+  if not profKey or ProfRecipes.IsGathering(profKey) then return false, "gathering" end
   local me = U.NormalizeName(U.PlayerName())
   local rec = ProfRecipes.GetEntry(me, profKey)
-  if not rec or not rec.complete then return end
+  if not rec or not rec.complete then return false, "incomplete" end
   local epoch = tonumber(rec.epoch) or ProfRecipes.EnsureOwnerEpoch()
   local encoded = ProfRecipes.Encode(profKey, rec.rev, rec.scanAt, true, rec.ids, epoch)
-  if not encoded then return end
+  if not encoded then return false, "encode" end
   local fp = ProfRecipes.ContentFingerprint(profKey, rec.ids, true, epoch)
   if not force and lastSentFp[profKey] == fp then return false, "unchanged" end
-  if Comm:Send("PROFR|" .. encoded, "data", "prof") then
+  local sendOpts = nil
+  if opts.scopeKey ~= nil then
+    sendOpts = { scopeKey = opts.scopeKey }
+  end
+  if Comm:Send("PROFR|" .. encoded, "data", "prof", sendOpts) then
     lastSentFp[profKey] = fp
+    return true, "sent"
+  end
+  return false, "send_fail"
+end
+
+-- Relay a cached peer catalog as PROFRO. Always pass epoch or 0 (never omit).
+function ProfRecipes:RelayProfession(owner, profKey, opts)
+  opts = opts or {}
+  local db = GR.db
+  if not db or not db.privacy.shareProfessions then return false, "privacy" end
+  if not IsInGuild or not IsInGuild() then return false, "no_guild" end
+  if not owner or U.IsSelfName(owner) then return false, "self" end
+  if not profKey or ProfRecipes.IsGathering(profKey) then return false, "gathering" end
+  local rec = ProfRecipes.GetEntry(owner, profKey)
+  if not rec or not rec.complete then return false, "incomplete" end
+  local epoch = tonumber(rec.epoch) or 0
+  local encoded = ProfRecipes.Encode(profKey, rec.rev, rec.scanAt, true, rec.ids, epoch)
+  if not encoded then return false, "encode" end
+  local ownerWire = tostring(owner):gsub("|", "")
+  if ownerWire == "" or #ownerWire > RELAY_OWNER_MAX then return false, "owner" end
+  local payload = "PROFRO|" .. ownerWire .. "|" .. encoded
+  local sendOpts = nil
+  if opts.scopeKey ~= nil then
+    sendOpts = { scopeKey = opts.scopeKey }
+  end
+  if Comm:Send(payload, "data", "prof", sendOpts) then
     return true, "sent"
   end
   return false, "send_fail"
@@ -1703,40 +1742,79 @@ function ProfRecipes:ListCompleteProfessionKeys()
   return out
 end
 
-function ProfRecipes:BroadcastAll(force)
+function ProfRecipes:BroadcastAll(force, opts)
   local keys = self:ListCompleteProfessionKeys()
   for i = 1, #keys do
-    self:BroadcastProfession(keys[i], force)
+    self:BroadcastProfession(keys[i], force, opts)
   end
   return #keys
 end
 
+local function ScopeStillValid(scopeKey)
+  if not scopeKey or scopeKey == "" then return false end
+  local cur = U.GuildScopeKey and U.GuildScopeKey()
+  return cur == scopeKey
+end
+
 -- Push each complete profession list with delay so Comm queue drains cleanly.
--- Returns number of professions scheduled.
-function ProfRecipes:BroadcastAllStaggered(force, interval)
+-- Returns number of professions scheduled. opts.scopeKey required for reply waves.
+function ProfRecipes:BroadcastAllStaggered(force, interval, opts)
+  opts = opts or {}
   local keys = self:ListCompleteProfessionKeys()
   if #keys == 0 then return 0 end
   interval = tonumber(interval) or 0.55
   if interval < 0.5 then interval = 0.5 end
+  local scopeKey = opts.scopeKey
   for i = 1, #keys do
     local key = keys[i]
     local delay = (i - 1) * interval
+    local function sendOne()
+      if not ProfRecipes.enabled then return end
+      if scopeKey and not ScopeStillValid(scopeKey) then return end
+      ProfRecipes:BroadcastProfession(key, force, opts)
+    end
     if delay <= 0 then
-      self:BroadcastProfession(key, force)
+      sendOne()
     else
-      C_Timer.After(delay, function()
-        if not ProfRecipes.enabled then return end
-        ProfRecipes:BroadcastProfession(key, force)
-      end)
+      C_Timer.After(delay, sendOne)
     end
   end
   return #keys
 end
 
+-- After own reply: stagger PROFRO for rotated offline peer catalogs.
+function ProfRecipes:ScheduleRelayWave(profKeyFilter, scopeKey, startDelay)
+  if not scopeKey or not ScopeStillValid(scopeKey) then return 0 end
+  if not GR.db or not GR.db.privacy.shareProfessions then return 0 end
+  local candidates = ProfRecipes.ListRelayCandidates(profKeyFilter)
+  local window = ProfRecipes.TakeRelayWindow(candidates, scopeKey, profKeyFilter)
+  if #window == 0 then return 0 end
+  startDelay = tonumber(startDelay) or 0
+  if startDelay < 0 then startDelay = 0 end
+  for i = 1, #window do
+    local item = window[i]
+    local delay = startDelay + (i - 1) * RELAY_STAGGER
+    local owner, profKey = item.owner, item.profKey
+    local function sendOne()
+      if not ProfRecipes.enabled then return end
+      if not ScopeStillValid(scopeKey) then return end
+      if not GR.db or not GR.db.privacy.shareProfessions then return end
+      if ProfRecipes.IsPeerOnlineForRelay(owner) then return end
+      ProfRecipes:RelayProfession(owner, profKey, { scopeKey = scopeKey })
+    end
+    if delay <= 0 then
+      sendOne()
+    else
+      C_Timer.After(delay, sendOne)
+    end
+  end
+  return #window
+end
+
 function ProfRecipes:RequestAll(profKey, force)
   if not IsInGuild or not IsInGuild() then return false, "no_guild" end
   local now = U.Now()
-  if not force and (now - lastReqSend) < PROFRQ_SEND_CD then
+  if not force and lastReqSend and (now - lastReqSend) < PROFRQ_SEND_CD then
     return false, "cooldown"
   end
   lastReqSend = now
@@ -1816,9 +1894,11 @@ function ProfRecipes:RefreshProfession(profKey, opts)
   return false, why
 end
 
-function ProfRecipes:OnRecipeUpdate(sender, data)
+-- provenance: "direct" (live PROFR, wire sender == owner) or "relay" (PROFRO).
+function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
   if not data or not data.profKey or not data.complete then return end
   if ProfRecipes.IsGathering(data.profKey) then return end
+  provenance = provenance or "direct"
   local cache = Cache()
   local entry = cache[sender]
   if not entry then
@@ -1866,6 +1946,14 @@ function ProfRecipes:OnRecipeUpdate(sender, data)
     end
     return
   end
+  -- Same epoch+rev, divergent IDs: owner-direct may correct; relay keeps existing.
+  if prev and prev.complete and not newerEpoch
+      and tonumber(prev.rev) == tonumber(data.rev)
+      and not ProfRecipes.IdsEqual(prev.ids, data.ids) then
+    if provenance == "relay" then
+      return
+    end
+  end
   entry.recipes[data.profKey] = {
     ids = data.ids,
     rev = data.rev,
@@ -1882,6 +1970,73 @@ function ProfRecipes:OnRecipeUpdate(sender, data)
   if ProfRecipes.EnsureCategoriesForIds then
     ProfRecipes.EnsureCategoriesForIds(data.ids)
   end
+end
+
+-- Raw PROFRO owner field before NormalizeName.
+function ProfRecipes.ParseRelayOwner(raw)
+  raw = tostring(raw or "")
+  if raw == "" or #raw > RELAY_OWNER_MAX then
+    return nil, "owner"
+  end
+  if raw:find("[%c|]") then
+    return nil, "owner"
+  end
+  local owner = U.NormalizeName(raw)
+  if not owner or owner == "" then
+    return nil, "owner"
+  end
+  return owner
+end
+
+function ProfRecipes.IsPeerOnlineForRelay(owner)
+  if not owner or U.IsSelfName(owner) then return true end
+  if not Comm or not Comm.PeerAge then return false end
+  local age = Comm:PeerAge(owner)
+  return age ~= nil and age <= PROF_ONLINE_SEC
+end
+
+local function RelayCursorKey(scopeKey, profKey)
+  return tostring(scopeKey or "") .. "\0" .. tostring(profKey or "")
+end
+
+-- Sorted list of { owner, profKey, rec } for offline peers' complete catalogs.
+function ProfRecipes.ListRelayCandidates(profKeyFilter)
+  local cache = Cache()
+  local out = {}
+  local filter = (profKeyFilter and profKeyFilter ~= "") and profKeyFilter or nil
+  for owner, entry in pairs(cache) do
+    if type(owner) == "string" and entry and type(entry.recipes) == "table"
+        and not U.IsSelfName(owner)
+        and not ProfRecipes.IsPeerOnlineForRelay(owner) then
+      for profKey, rec in pairs(entry.recipes) do
+        if rec and rec.complete and not ProfRecipes.IsGathering(profKey)
+            and (not filter or profKey == filter) then
+          out[#out + 1] = { owner = owner, profKey = profKey, rec = rec }
+        end
+      end
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.owner ~= b.owner then return a.owner < b.owner end
+    return a.profKey < b.profKey
+  end)
+  return out
+end
+
+function ProfRecipes.TakeRelayWindow(candidates, scopeKey, profKeyFilter)
+  local n = #candidates
+  if n == 0 then return {} end
+  local key = RelayCursorKey(scopeKey, profKeyFilter)
+  local start = relayCursor[key] or 1
+  if start < 1 or start > n then start = 1 end
+  local take = math.min(RELAY_MAX, n)
+  local window = {}
+  for i = 0, take - 1 do
+    local idx = ((start - 1 + i) % n) + 1
+    window[#window + 1] = candidates[idx]
+  end
+  relayCursor[key] = ((start - 1 + take) % n) + 1
+  return window
 end
 
 -- Build whisper/request text (no auto-send).
@@ -2112,6 +2267,10 @@ local function NoteRefreshPair(session, sender, profKey)
   session.nCats = (session.nCats or 0) + 1
 end
 
+local function CatalogTransferInFlight()
+  return Comm and Comm.HasOpenFrag and Comm:HasOpenFrag()
+end
+
 local function ScheduleRefreshSettleCheck(gen)
   local function tick()
     local sess = recipeRefreshSession
@@ -2120,15 +2279,17 @@ local function ScheduleRefreshSettleCheck(gen)
     local elapsed = now - sess.startedAt
     local quiet = (sess.lastRecv > 0) and (now - sess.lastRecv) or 0
     local have = (sess.nCats or 0) > 0
+    local fragOpen = CatalogTransferInFlight()
     local done = false
     if elapsed >= REFRESH_MAX then
       done = true
+    elseif fragOpen then
+      -- Defer early no_response / quiet settle while a FRAG catalog is reassembling.
+      done = false
     elseif have and elapsed >= REFRESH_MIN_COLLECT and quiet >= REFRESH_QUIET then
       done = true
     elseif (not have) and elapsed >= REFRESH_MIN_COLLECT then
-      -- Wait until min; if still nothing by max, finish as no_response via max path.
-      -- At min with no replies: keep waiting until max unless we want early no-response at min.
-      -- Plan: no replies → finish at min (or max). Use min.
+      -- No replies and no open FRAG → no_response at min collect.
       done = true
     end
     if done then
@@ -2143,13 +2304,15 @@ local function ScheduleRefreshSettleCheck(gen)
       return
     end
     local nextIn = 0.5
-    if have then
+    local untilMax = REFRESH_MAX - elapsed
+    if fragOpen then
+      nextIn = math.max(0.1, math.min(0.5, untilMax))
+    elseif have then
       local untilQuiet = REFRESH_QUIET - quiet
       local untilMin = REFRESH_MIN_COLLECT - elapsed
-      local untilMax = REFRESH_MAX - elapsed
       nextIn = math.max(0.1, math.min(untilMax, math.max(untilQuiet, untilMin)))
     else
-      nextIn = math.max(0.1, math.min(REFRESH_MAX - elapsed, REFRESH_MIN_COLLECT - elapsed))
+      nextIn = math.max(0.1, math.min(untilMax, REFRESH_MIN_COLLECT - elapsed))
     end
     C_Timer.After(nextIn, tick)
   end
@@ -2161,7 +2324,7 @@ function ProfRecipes:OnEnable()
   self.enabled = true
   EnsureMetaDB()
 
-  GR:BindMessage(self, "PROF_RECIPE_UPDATE", function(_, sender, data)
+  GR:BindMessage(self, "PROF_RECIPE_UPDATE", function(_, sender, data, provenance)
     if U.IsSelfName(sender) then return end
     local sess = recipeRefreshSession
     local filterKey = sess and sess.profKey
@@ -2169,7 +2332,7 @@ function ProfRecipes:OnEnable()
     if filterKey and filterKey ~= "" and data and data.profKey and data.profKey ~= filterKey then
       accept = false
     end
-    ProfRecipes:OnRecipeUpdate(sender, data)
+    ProfRecipes:OnRecipeUpdate(sender, data, provenance)
     if accept and recipeRefreshWhy == "requesting" and sess and data and data.profKey and data.complete then
       -- Count only after accept into cache (OnRecipeUpdate may reject).
       local entry = Cache()[sender]
@@ -2183,15 +2346,28 @@ function ProfRecipes:OnEnable()
 
   GR:BindMessage(self, "PROF_RECIPE_REQUEST", function(_, sender, profKey)
     local now = U.Now()
-    if (now - lastReqReply) < PROFRQ_REPLY_CD then return end
+    if lastReqReply and (now - lastReqReply) < PROFRQ_REPLY_CD then return end
+    local scopeKey = U.GuildScopeKey and U.GuildScopeKey()
+    if not scopeKey or scopeKey == "" then return end
+    if not GR.db or not GR.db.privacy.shareProfessions then return end
     lastReqReply = now
+    local filter = (profKey and profKey ~= "") and profKey or nil
     C_Timer.After(1 + math.random() * 4, function()
       if not ProfRecipes.enabled then return end
-      if profKey and profKey ~= "" then
-        ProfRecipes:BroadcastProfession(profKey, true)
+      if not ScopeStillValid(scopeKey) then return end
+      if not GR.db or not GR.db.privacy.shareProfessions then return end
+      local opts = { scopeKey = scopeKey }
+      local ownN = 0
+      if filter then
+        if ProfRecipes:BroadcastProfession(filter, true, opts) then
+          ownN = 1
+        end
       else
-        ProfRecipes:BroadcastAllStaggered(true, 0.55)
+        ownN = ProfRecipes:BroadcastAllStaggered(true, RELAY_STAGGER, opts) or 0
       end
+      -- Relays after own block (ownN * stagger), still scoped to request guild.
+      local relayStart = ownN > 0 and (ownN * RELAY_STAGGER) or 0
+      ProfRecipes:ScheduleRelayWave(filter, scopeKey, relayStart)
     end)
   end)
 
@@ -2243,6 +2419,7 @@ function ProfRecipes:OnEnable()
 
   GR:BindMessage(self, "GUILD_UPDATE", function()
     wipe(lastSentFp)
+    wipe(relayCursor)
     ProfRecipes.AbortAllBackgroundWork()
     -- Derived index must not outlive the active guild scope.
     ProfRecipes.InvalidateGuildRecipeIndex()
@@ -3401,6 +3578,11 @@ ProfRecipes.REFRESH_MIN_COLLECT = REFRESH_MIN_COLLECT
 ProfRecipes.REFRESH_QUIET = REFRESH_QUIET
 ProfRecipes.REFRESH_MAX = REFRESH_MAX
 ProfRecipes.REFRESH_SUMMARY_HOLD = REFRESH_SUMMARY_HOLD
+ProfRecipes.RELAY_MAX = RELAY_MAX
+ProfRecipes.RELAY_STAGGER = RELAY_STAGGER
+ProfRecipes.PROF_ONLINE_SEC = PROF_ONLINE_SEC
+ProfRecipes.RELAY_OWNER_MAX = RELAY_OWNER_MAX
+ProfRecipes._relayCursor = relayCursor
 ProfRecipes.WIRE_VER = WIRE_VER
 ProfRecipes.PROFR_WIRE_VER = PROFR_WIRE_VER
 ProfRecipes.PROFR_WIRE_VER_LEGACY = PROFR_WIRE_VER_LEGACY

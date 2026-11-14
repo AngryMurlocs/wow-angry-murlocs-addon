@@ -169,7 +169,9 @@ local function Drain()
     local item = queue:Pop(now)
     local curScope = U.GuildScopeKey and U.GuildScopeKey()
     while item do
-      if item.scopeKey and curScope and item.scopeKey ~= curScope then
+      -- Scoped ops send only while the current guild key matches exactly
+      -- (nil current or different guild → drop, including queued fragments).
+      if item.scopeKey ~= nil and item.scopeKey ~= curScope then
         FailOp(item.operationId, "scope_mismatch")
         if not item.operationId then
           Reject("scope_mismatch", item.prio)
@@ -277,12 +279,15 @@ function Comm:Send(payload, prio, category, opts)
     return false
   end
   local scopeKey = opts and opts.scopeKey
-  if scopeKey == nil and U.GuildScopeKey then
-    scopeKey = U.GuildScopeKey()
-  end
-  if scopeKey and U.GuildScopeKey and U.GuildScopeKey() and scopeKey ~= U.GuildScopeKey() then
-    Reject("scope_mismatch", prio)
-    return false
+  local curScope = U.GuildScopeKey and U.GuildScopeKey() or nil
+  if scopeKey ~= nil then
+    -- Explicit scope: require an exact match (nil current fails).
+    if scopeKey ~= curScope then
+      Reject("scope_mismatch", prio)
+      return false
+    end
+  elseif U.GuildScopeKey then
+    scopeKey = curScope
   end
   local msgs = Fragment(payload)
   if not msgs then
@@ -451,6 +456,18 @@ function Comm:PeerAge(name)
   return best
 end
 
+-- True while any incomplete FRAG reassembly buffer is open (not expired).
+-- Used by recipe refresh settle to wait for large PROFR/PROFRO catalogs.
+function Comm:HasOpenFrag()
+  local now = U.Now()
+  for _, buf in pairs(fragBuf) do
+    if buf and buf.t and (now - buf.t) <= FRAG_TTL and (buf.count or 0) < (buf.n or 0) then
+      return true
+    end
+  end
+  return false
+end
+
 local function DispatchV2(tag, rest, sender)
   local data, why
   if tag == "WK" then
@@ -528,7 +545,30 @@ local function DispatchParsed(tag, rest, sender)
       return
     end
     Count("recv_PROFR")
-    GR:SendMessage("PROF_RECIPE_UPDATE", sender, data)
+    -- Third arg provenance: direct owner broadcast (wire sender == owner).
+    GR:SendMessage("PROF_RECIPE_UPDATE", sender, data, "direct")
+  elseif tag == "PROFRO" then
+    -- Relayed peer catalog: PROFRO|<owner>|<PROFR body>. Old clients ignore unknown tags.
+    local cleaned = tostring(rest or ""):gsub("[%c]", "")
+    if #cleaned > 20000 then
+      Reject("too_long", "PROFRO " .. tostring(sender))
+      return
+    end
+    local ownerRaw, body = cleaned:match("^([^|]*)|(.*)$")
+    local recipes = GR:GetModule("ProfRecipes")
+    local owner, owhy = recipes and recipes.ParseRelayOwner and recipes.ParseRelayOwner(ownerRaw)
+    if not owner then
+      Reject("invalid", "PROFRO owner " .. tostring(owhy or "owner") .. " " .. tostring(sender))
+      return
+    end
+    local data, why = recipes and recipes.Decode and recipes.Decode(body)
+    if not data then
+      Reject("invalid", "PROFRO " .. tostring(why) .. " " .. tostring(sender))
+      return
+    end
+    Count("recv_PROFRO")
+    -- Attribute to owner; PeerAge stays on wire sender only (OnAddonMessage).
+    GR:SendMessage("PROF_RECIPE_UPDATE", owner, data, "relay")
   elseif tag == "PROFRQ" then
     local cleaned = tostring(rest or ""):gsub("[%c]", "")
     local ver, profKey = cleaned:match("^(%d+)|([%w_]*)$")
