@@ -28,6 +28,7 @@ local tests = {
   "Tests/SendThrottle_test.lua",
   "Tests/CommTransport_test.lua",
   "Tests/MetaReplyPolicy_test.lua",
+  "Tests/MetaSync_sim_test.lua",
   "Tests/RecipeCategorySync_test.lua",
   "Tests/ProfReplySync_test.lua",
   "Tests/RecipeSyncLogic_test.lua",

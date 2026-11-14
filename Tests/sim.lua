@@ -56,9 +56,20 @@ Stub = function()
 end
 Sim.Stub = Stub
 
-function Sim.New(seed, latency)
+-- opts (optional): { drop = function(from, to, msg) -> bool }
+-- drop true = do not deliver to that recipient; bus still records the send.
+function Sim.New(seed, latency, opts)
   math.randomseed(seed or 1)
-  local s = setmetatable({ clock = 0, timers = {}, seq = 0, clients = {}, bus = {}, latency = latency or LATENCY }, Sim)
+  opts = type(opts) == "table" and opts or nil
+  local s = setmetatable({
+    clock = 0,
+    timers = {},
+    seq = 0,
+    clients = {},
+    bus = {},
+    latency = latency or LATENCY,
+    drop = opts and opts.drop,
+  }, Sim)
   return s
 end
 
@@ -113,11 +124,15 @@ function Sim:Deliver(from, prefix, msg, channel)
   self.bus[#self.bus + 1] = { t = self.clock, from = from.name, msg = msg }
   for _, c in ipairs(self.clients) do
     if c ~= from and c.online and c.guild and c.guild == from.guild then
-      self:Schedule(self.latency, function()
-        if c.online then
-          c.GR.Comm:OnAddonMessage(prefix, msg, channel, from.name .. "-Realm")
-        end
-      end)
+      if self.drop and self.drop(from, c, msg) then
+        -- intentional loss: sender still counted on bus
+      else
+        self:Schedule(self.latency, function()
+          if c.online then
+            c.GR.Comm:OnAddonMessage(prefix, msg, channel, from.name .. "-Realm")
+          end
+        end)
+      end
     end
   end
 end
@@ -129,6 +144,19 @@ function Sim:Count(tag, filter)
     if m.msg:match("^" .. tag .. "|") and (not filter or filter(m)) then n = n + 1 end
   end
   return n
+end
+
+-- Actual guild bus traffic: frames and payload bytes (successful sends only).
+-- filter(m) optional; bytes = sum of #m.msg for counted frames.
+function Sim:TrafficStats(filter)
+  local frames, bytes = 0, 0
+  for _, m in ipairs(self.bus) do
+    if not filter or filter(m) then
+      frames = frames + 1
+      bytes = bytes + #(m.msg or "")
+    end
+  end
+  return { frames = frames, bytes = bytes }
 end
 
 local function DefaultDB()
@@ -145,7 +173,8 @@ local function DefaultDB()
 end
 Sim.DefaultDB = DefaultDB
 
--- opts: { guild = "Murlocs", db = savedTable, extraFiles = {...}, env = {...} }
+-- opts: { guild, db, extraFiles, env, noReplyPolicy }
+-- noReplyPolicy: skip MetaReplyPolicy so ProfRecipes uses legacy reply path.
 function Sim:AddClient(name, opts)
   opts = opts or {}
   local sim = self
@@ -196,9 +225,18 @@ function Sim:AddClient(name, opts)
     setfenv(chunk, env)
     chunk()
   end
-  for _, f in ipairs(FILES) do Load(f) end
+  for _, f in ipairs(FILES) do
+    if opts.noReplyPolicy and f == "Core/MetaReplyPolicy.lua" then
+      -- legacy reply path for A/B traffic comparison
+    else
+      Load(f)
+    end
+  end
 
   local GR = env.AngryMurlocs
+  if opts.noReplyPolicy then
+    GR.MetaReplyPolicy = nil
+  end
   GR._modules, GR._moduleOrder = {}, {}
   function GR:NewModule(n)
     local mod = { name = n }
