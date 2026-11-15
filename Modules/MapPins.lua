@@ -20,6 +20,14 @@ local NEAR_SELF = 0.01
 MapPins.STALE_SEC = 60
 MapPins.FADE_START_SEC = 45
 MapPins.FADE_MIN = 0.25
+-- Wanted sight pins: full until 30 min, fade until 3 h, then gone (wall clock).
+MapPins.SIGHT_PIN_FULL_SEC = 30 * 60
+MapPins.SIGHT_PIN_GONE_SEC = 3 * 3600
+MapPins.SIGHT_PIN_FADE_MIN = 0.3
+local SIGHT_RED_R, SIGHT_RED_G, SIGHT_RED_B = 0.85, 0.12, 0.12
+local SIGHT_OUTLINE_R, SIGHT_OUTLINE_G, SIGHT_OUTLINE_B = 0.05, 0.02, 0.02
+local WHITE_TEX = "Interface\\Buttons\\WHITE8X8"
+local SIGHT_BUST_PATH = PIN_BASE_HEADS .. "WARRIOR"
 -- First Blizzard icon band above map chrome (fog, quest shading). Pins stay under it.
 local SYMBOL_BAND = "PIN_FRAME_LEVEL_DIG_SITE"
 local CLUSTER_GAP_PX = 2 -- screen pixels between pin edges
@@ -263,8 +271,29 @@ function MapPins.FadeFactor(ageSec)
   return 1 - t * (1 - MapPins.FADE_MIN)
 end
 
+--- Wanted sight pin fade: full until FULL, linear to FADE_MIN at GONE, 0 at/after GONE.
+function MapPins.SightPinFadeFactor(ageSec)
+  ageSec = tonumber(ageSec) or 0
+  if ageSec < 0 then ageSec = 0 end
+  if ageSec >= MapPins.SIGHT_PIN_GONE_SEC then return 0 end
+  if ageSec <= MapPins.SIGHT_PIN_FULL_SEC then return 1 end
+  local span = MapPins.SIGHT_PIN_GONE_SEC - MapPins.SIGHT_PIN_FULL_SEC
+  local t = (ageSec - MapPins.SIGHT_PIN_FULL_SEC) / span
+  return 1 - t * (1 - MapPins.SIGHT_PIN_FADE_MIN)
+end
+
 local function PinAge(data)
   return U.Now() - (data and data.time or U.Now())
+end
+
+local function SightPinAge(data)
+  local Wanted = GR:GetModule("Wanted")
+  local now = Wanted and Wanted.Now and Wanted:Now() or U.WallTime()
+  return now - (data and data.ts or now)
+end
+
+local function ShowSightPins()
+  return not GR.db.map or GR.db.map.showSightPins ~= false
 end
 
 local function PinFreshKey(ageSec)
@@ -329,10 +358,129 @@ local function ApplyPinFade(pin, dead, ageSec)
   end
 end
 
+local function EnsureSightLayers(pin)
+  if pin.sightOutline then return end
+  local outline = pin:CreateTexture(nil, "BACKGROUND", nil, -1)
+  outline:SetTexture(CIRCLE_TEX)
+  outline:SetPoint("CENTER")
+  pin.sightOutline = outline
+
+  local ring = pin:CreateTexture(nil, "BORDER")
+  ring:SetTexture(CIRCLE_TEX)
+  ring:SetPoint("CENTER")
+  pin.sightRing = ring
+
+  local ticks = {}
+  for i = 1, 4 do
+    local t = pin:CreateTexture(nil, "ARTWORK", nil, 1)
+    t:SetTexture(WHITE_TEX)
+    ticks[i] = t
+  end
+  pin.sightTicks = ticks
+end
+
+local function HideSightLayers(pin)
+  if pin.sightOutline then pin.sightOutline:Hide() end
+  if pin.sightRing then pin.sightRing:Hide() end
+  if pin.sightTicks then
+    for i = 1, #pin.sightTicks do
+      pin.sightTicks[i]:Hide()
+    end
+  end
+end
+
+local function SyncSightPinLayers(pin, size)
+  EnsureSightLayers(pin)
+  size = size or pin:GetWidth() or DEFAULT_SIZE
+  local outline = pin.sightOutline
+  outline:ClearAllPoints()
+  outline:SetSize(size * 1.18, size * 1.18)
+  outline:SetPoint("CENTER")
+  outline:Show()
+
+  local ring = pin.sightRing
+  ring:ClearAllPoints()
+  ring:SetSize(size, size)
+  ring:SetPoint("CENTER")
+  ring:Show()
+
+  -- Four short crosshair ticks at N/E/S/W
+  local tickLen = size * 0.22
+  local tickThick = math.max(1.5, size * 0.06)
+  local reach = size * 0.48
+  local ticks = pin.sightTicks
+  -- N
+  ticks[1]:ClearAllPoints()
+  ticks[1]:SetSize(tickThick, tickLen)
+  ticks[1]:SetPoint("BOTTOM", pin, "CENTER", 0, reach - tickLen)
+  ticks[1]:Show()
+  -- E
+  ticks[2]:ClearAllPoints()
+  ticks[2]:SetSize(tickLen, tickThick)
+  ticks[2]:SetPoint("LEFT", pin, "CENTER", reach - tickLen, 0)
+  ticks[2]:Show()
+  -- S
+  ticks[3]:ClearAllPoints()
+  ticks[3]:SetSize(tickThick, tickLen)
+  ticks[3]:SetPoint("TOP", pin, "CENTER", 0, -(reach - tickLen))
+  ticks[3]:Show()
+  -- W
+  ticks[4]:ClearAllPoints()
+  ticks[4]:SetSize(tickLen, tickThick)
+  ticks[4]:SetPoint("RIGHT", pin, "CENTER", -(reach - tickLen), 0)
+  ticks[4]:Show()
+
+  if pin.glow then pin.glow:Hide() end
+  if pin.tex then
+    local bust = size * 0.55
+    pin.tex:ClearAllPoints()
+    pin.tex:SetSize(bust, bust)
+    pin.tex:SetPoint("CENTER")
+  end
+end
+
+local function ApplySightPinFade(pin, ageSec)
+  local fade = MapPins.SightPinFadeFactor(ageSec or 0)
+  if pin.sightOutline then
+    pin.sightOutline:SetVertexColor(SIGHT_OUTLINE_R, SIGHT_OUTLINE_G, SIGHT_OUTLINE_B, fade)
+  end
+  if pin.sightRing then
+    pin.sightRing:SetVertexColor(SIGHT_RED_R, SIGHT_RED_G, SIGHT_RED_B, fade * 0.95)
+  end
+  if pin.sightTicks then
+    for i = 1, #pin.sightTicks do
+      pin.sightTicks[i]:SetVertexColor(SIGHT_RED_R, SIGHT_RED_G, SIGHT_RED_B, fade)
+    end
+  end
+  if pin.tex then
+    -- Pale head-shoulder silhouette
+    pin.tex:SetVertexColor(0.92, 0.9, 0.88, fade)
+  end
+end
+
+local function BindSightPinArt(pin)
+  if pin._artKey == "sight" then return end
+  pin._artKey = "sight"
+  EnsureSightLayers(pin)
+  if pin.tex then
+    pin.tex:SetTexture(SIGHT_BUST_PATH)
+    local uL, uR, uT, uB = ClassUV("heads", "WARRIOR")
+    pin.tex:SetTexCoord(uL, uR, uT, uB)
+  end
+  pin._rings = false
+  pin._fillR, pin._fillG, pin._fillB = 0.92, 0.9, 0.88
+end
+
 local function ApplyPinArt(pin, classFile, dead, ageSec)
+  HideSightLayers(pin)
   local style = PinStyle()
   BindPinArt(pin, classFile, style)
   ApplyPinFade(pin, dead, ageSec)
+end
+
+local function ApplySightPinArt(pin, ageSec)
+  BindSightPinArt(pin)
+  ApplySightPinFade(pin, ageSec)
 end
 
 local function PlayerViewPos(viewMapId)
@@ -378,6 +526,17 @@ local function AcquirePin()
       self:SetFrameLevel(self.baseLevel)
     end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    if self.kind == "sight" then
+      local name = U.ShortName(self.member or "")
+      local zone = (d.zone and d.zone ~= "") and d.zone or "?"
+      local age = SightPinAge(d)
+      local by = U.ShortName(d.by or "?")
+      GameTooltip:AddLine(string.format("%s · %s · %s · %s",
+        name, zone, FormatPinAge(age), string.format(U.L("SIGHT_PIN_SEEN_BY"), by)), 1, 0.25, 0.2)
+      GameTooltip:AddLine(U.L("SIGHT_PIN_APPROX"), 0.75, 0.75, 0.75)
+      GameTooltip:Show()
+      return
+    end
     local r, g, b = U.ClassColor(d.classFile)
     GameTooltip:AddLine(U.ShortName(self.member), r, g, b)
 
@@ -425,7 +584,10 @@ local function ReleasePin(pin)
   pin:SetParent(nil)
   pin.data = nil
   pin.member = nil
+  pin.kind = nil
   pin._artKey = nil
+  HideSightLayers(pin)
+  if pin.glow then pin.glow:Show() end
   pool[#pool + 1] = pin
 end
 
@@ -526,12 +688,18 @@ end
 
 local function SyncPinLayers(pin, size)
   size = size or pin:GetWidth() or DEFAULT_SIZE
+  if pin.kind == "sight" then
+    SyncSightPinLayers(pin, size)
+    return
+  end
+  HideSightLayers(pin)
   if PinStyle() == "rings" then
     -- Outer gold = party size; class fill inset for thicker rim
     if pin.glow then
       pin.glow:ClearAllPoints()
       pin.glow:SetSize(size, size)
       pin.glow:SetPoint("CENTER")
+      pin.glow:Show()
     end
     if pin.tex then
       local inner = size * RING_INNER_FRAC
@@ -541,6 +709,7 @@ local function SyncPinLayers(pin, size)
     end
     return
   end
+  if pin.glow then pin.glow:Show() end
   if pin.tex then
     pin.tex:ClearAllPoints()
     pin.tex:SetAllPoints()
@@ -594,10 +763,27 @@ local function EnsureFadeTicker()
       end
       return
     end
-    for _, pin in pairs(active) do
+    local needRefresh = false
+    local Wanted = GR:GetModule("Wanted")
+    for key, pin in pairs(active) do
       if pin.data then
-        ApplyPinFade(pin, pin.data.dead, PinAge(pin.data))
+        if pin.kind == "sight" then
+          local age = SightPinAge(pin.data)
+          if age >= MapPins.SIGHT_PIN_GONE_SEC then
+            if Wanted and Wanted.RemoveSightPin then
+              Wanted:RemoveSightPin(pin.member)
+            end
+            needRefresh = true
+          else
+            ApplySightPinFade(pin, age)
+          end
+        else
+          ApplyPinFade(pin, pin.data.dead, PinAge(pin.data))
+        end
       end
+    end
+    if needRefresh then
+      MapPins:Refresh()
     end
   end)
 end
@@ -616,6 +802,11 @@ function MapPins:Refresh()
   end
 
   PurgeSelfFromCache()
+
+  local Wanted = GR:GetModule("Wanted")
+  if Wanted and Wanted.PruneSightPins then
+    Wanted:PruneSightPins()
+  end
 
   local scale = GetCanvasScale()
   local size = ScreenPinSize() / scale
@@ -685,6 +876,7 @@ function MapPins:Refresh()
     if canvas.GetFrameStrata and pin.SetFrameStrata then
       pin:SetFrameStrata(canvas:GetFrameStrata())
     end
+    pin.kind = nil
     pin.baseLevel = levels[i] or bandTop
     pin.bandTop = bandTop
     pin:SetFrameLevel(pin.baseLevel)
@@ -705,8 +897,57 @@ function MapPins:Refresh()
     pin:Show()
   end
 
+  -- Wanted sight pins (own location allowed; wall-clock age).
+  if ShowSightPins() and Wanted and Wanted.GetSightPins then
+    local sightStore = Wanted:GetSightPins() or {}
+    local sightKeys = {}
+    for key in pairs(sightStore) do
+      sightKeys[#sightKeys + 1] = key
+    end
+    table.sort(sightKeys)
+    local sightLevel = (bandTop or canvasLevel) + 1
+    for i = 1, #sightKeys do
+      local key = sightKeys[i]
+      local data = sightStore[key]
+      if data and data.mapId and data.x and data.y then
+        local age = SightPinAge(data)
+        if age >= MapPins.SIGHT_PIN_GONE_SEC then
+          Wanted:RemoveSightPin(key)
+        else
+          local px, py = ProjectToView(data.mapId, data.x, data.y, mapId)
+          if px and py then
+            local pinKey = "sight:" .. key
+            seen[pinKey] = true
+            local pin = active[pinKey]
+            if not pin then
+              pin = AcquirePin()
+              active[pinKey] = pin
+            end
+            pin:SetParent(canvas)
+            if canvas.GetFrameStrata and pin.SetFrameStrata then
+              pin:SetFrameStrata(canvas:GetFrameStrata())
+            end
+            pin.kind = "sight"
+            pin.baseLevel = sightLevel
+            pin.bandTop = sightLevel + 2
+            pin:SetFrameLevel(pin.baseLevel)
+            pin:SetScale(1)
+            pin:SetSize(size, size)
+            SyncPinLayers(pin, size)
+            pin.data = data
+            pin.member = key
+            ApplySightPinArt(pin, age)
+            pin:ClearAllPoints()
+            pin:SetPoint("CENTER", canvas, "TOPLEFT", px * cw, -(py * ch))
+            pin:Show()
+          end
+        end
+      end
+    end
+  end
+
   for name, pin in pairs(active) do
-    if not seen[name] or U.IsSelfName(name) then
+    if not seen[name] or (pin.kind ~= "sight" and U.IsSelfName(name)) then
       ReleasePin(pin)
       active[name] = nil
     end
@@ -780,7 +1021,17 @@ function MapPins:OnEnable()
     -- Keep pooled frames; Refresh reapplies size, art, and clustering.
     MapPins:Refresh()
   end)
-  -- Refresh via OnShow / OnMapChanged / scale / POS_* messages (no polling ticker)
+  GR:BindMessage(self, "SIGHT_APPLIED", function()
+    if MapShown() then
+      ScheduleRefresh()
+    end
+  end)
+  GR:BindMessage(self, "WANTED_CHANGED", function()
+    if MapShown() then
+      ScheduleRefresh()
+    end
+  end)
+  -- Refresh via OnShow / OnMapChanged / scale / POS_* / SIGHT / WANTED messages
 end
 
 function MapPins:OnDisable()

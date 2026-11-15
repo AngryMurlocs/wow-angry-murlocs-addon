@@ -8,9 +8,14 @@ local Wanted = GR:NewModule("Wanted")
 
 local SEND_CD = 60
 local ALERT_CD = 20
+-- Map-pin lifetime (separate from WantedLogic SightTier 60/300).
+Wanted.SIGHT_PIN_GONE_SEC = 3 * 3600
 
 local sendCd = {}   -- targetKey -> GetTime
 local alertCd = {}  -- targetKey -> GetTime
+-- Ephemeral guild-scoped sight pins (not SavedVariables).
+-- sightPins[key] = { mapId, x, y, zone, by, ts }
+local sightPins = {}
 
 Wanted.cfg = Logic.GetFixedConfig()
 local cfg = Wanted.cfg
@@ -83,6 +88,66 @@ local function FormatAge(ts)
 end
 Wanted.FormatAge = FormatAge
 
+local function ValidSightCoords(mapId, x, y)
+  mapId = tonumber(mapId)
+  x = tonumber(x)
+  y = tonumber(y)
+  if not mapId or mapId ~= math.floor(mapId) or mapId < 1 or mapId > 99999 then return false end
+  if not x or not y then return false end
+  if x ~= x or y ~= y then return false end
+  if x < 0 or x > 1 or y < 0 or y > 1 then return false end
+  if x == 0 and y == 0 then return false end
+  return true
+end
+
+function Wanted:ClearSightPins()
+  wipe(sightPins)
+end
+
+function Wanted:GetSightPins()
+  return sightPins
+end
+
+function Wanted:RemoveSightPin(key)
+  if not key then return false end
+  if sightPins[key] == nil then return false end
+  sightPins[key] = nil
+  return true
+end
+
+--- Drop expired / invalidated pins. Returns true if anything changed.
+function Wanted:PruneSightPins()
+  local now = self:Now()
+  local state = self:State()
+  local wanted = state and state.wanted
+  local changed = false
+  for key, pin in pairs(sightPins) do
+    local age = now - (pin.ts or 0)
+    if age >= Wanted.SIGHT_PIN_GONE_SEC then
+      sightPins[key] = nil
+      changed = true
+    else
+      local entry = wanted and wanted[key]
+      if not entry or (entry.lastSeenTime or 0) > (pin.ts or 0) then
+        sightPins[key] = nil
+        changed = true
+      end
+    end
+  end
+  return changed
+end
+
+local function UpsertSightPin(key, zone, reporter, ts, mapId, x, y)
+  sightPins[key] = {
+    mapId = mapId,
+    x = x,
+    y = y,
+    zone = zone or "",
+    by = reporter or "",
+    ts = ts,
+  }
+end
+
 local refreshPending = false
 
 function Wanted:PruneNow()
@@ -98,6 +163,7 @@ function Wanted:ScheduleRefresh()
   C_Timer.After(1, function()
     refreshPending = false
     Wanted:PruneNow()
+    Wanted:PruneSightPins()
     GR:SendMessage("WANTED_CHANGED")
   end)
 end
@@ -126,16 +192,30 @@ function Wanted:RecordOwnDeath(killer, zone)
   return r
 end
 
-function Wanted:ApplySighting(target, zone, reporter, ts)
+--- Apply a sighting. Optional mapId/x/y update the ephemeral pin before SIGHT_APPLIED.
+--- Coords without a full valid triple are ignored (zone sighting still applies).
+function Wanted:ApplySighting(target, zone, reporter, ts, mapId, x, y)
   local key = self:NormalizeKiller(target)
   if not key then return false end
+  local hasCoords = ValidSightCoords(mapId, x, y)
   local ok = Logic.ApplySighting(self:State(), cfg, key, ts, zone or "", U.NormalizeName(reporter or ""), self:Now())
-  if ok then
-    local entry = self:State().wanted[key]
-    GR:SendMessage("SIGHT_APPLIED", key, entry.lastSeenZone, entry.lastSeenBy)
-    self:ScheduleRefresh()
+  if not ok then return false end
+
+  local entry = self:State().wanted[key]
+  local by = entry.lastSeenBy
+  local seenZone = entry.lastSeenZone
+  local seenTs = entry.lastSeenTime
+
+  -- Pin first, then one SIGHT_APPLIED (activity feed must not double).
+  if hasCoords then
+    UpsertSightPin(key, seenZone, by, seenTs, tonumber(mapId), tonumber(x), tonumber(y))
+  else
+    Wanted:RemoveSightPin(key)
   end
-  return ok
+
+  GR:SendMessage("SIGHT_APPLIED", key, seenZone, by)
+  self:ScheduleRefresh()
+  return true
 end
 
 function Wanted:SetClassFile(killer, classFile)
@@ -170,6 +250,17 @@ local function MaybeAlert(targetKey, zone, reporter)
   if GR.Sounds and GR.Sounds.Play then
     GR.Sounds.Play("sight")
   end
+end
+
+local function TryReadSightPos()
+  local Positions = GR:GetModule("Positions")
+  if not Positions or not Positions.GetPlayerMapPos then return end
+  local ok, mapId, x, y = pcall(function()
+    return Positions:GetPlayerMapPos()
+  end)
+  if not ok then return end
+  if not ValidSightCoords(mapId, x, y) then return end
+  return mapId, x, y
 end
 
 local function OnTargetChanged()
@@ -212,14 +303,20 @@ local function OnTargetChanged()
   local nowSession = U.Now()
   local wall = Wanted:Now()
 
-  -- Local apply (never changes the level)
-  Wanted:ApplySighting(key, zone, me, wall)
+  -- Optional coords once; failure must not block zone sighting.
+  local mapId, x, y = TryReadSightPos()
+
+  -- Local apply (never changes the level); pin then single SIGHT_APPLIED
+  Wanted:ApplySighting(key, zone, me, wall, mapId, x, y)
 
   local lastSend = sendCd[key] or 0
   if (nowSession - lastSend) >= SEND_CD and IsInGuild and IsInGuild() then
     sendCd[key] = nowSession
-    Comm:Send(string.format("SIGHT|%s|%s|%d", U.SanitizeText(key, 48), U.SanitizeText(zone, 48), wall),
-      "ctrl", "sight")
+    local payload = string.format("SIGHT|%s|%s|%d", U.SanitizeText(key, 48), U.SanitizeText(zone, 48), wall)
+    if mapId and Comm:CanShareSightCoords() then
+      payload = string.format("%s|%d|%.4f|%.4f", payload, mapId, x, y)
+    end
+    Comm:Send(payload, "ctrl", "sight")
   end
 
   MaybeAlert(key, zone, me)
@@ -238,6 +335,7 @@ function Wanted:OnEnable()
 
   self:Scope()
   self:PruneNow()
+  Wanted:ClearSightPins()
   -- Local hide feature removed; clear any leftover markers from older versions.
   local st = self:State()
   if st and type(st.hidden) == "table" then
@@ -256,9 +354,13 @@ function Wanted:OnEnable()
   GR:BindMessage(self, "SIGHT_UPDATE", function(_, sender, data)
     if not data or not data.target then return end
     -- Never rebroadcast received sightings
-    if Wanted:ApplySighting(data.target, data.zone, sender, data.ts) then
+    if Wanted:ApplySighting(data.target, data.zone, sender, data.ts, data.mapId, data.x, data.y) then
       MaybeAlert(data.target, data.zone, sender)
     end
+  end)
+
+  GR:BindMessage(self, "GUILD_UPDATE", function()
+    Wanted:ClearSightPins()
   end)
 
   if self._EnableSync then self:_EnableSync() end
@@ -270,6 +372,7 @@ function Wanted:OnDisable()
   self.enabled = false
   if self._DisableSync then self:_DisableSync() end
   if self._DisablePanel then self:_DisablePanel() end
+  Wanted:ClearSightPins()
   GR:UnbindMessages(self)
   GR:ReleaseEventFrame(self._targetFrame)
   self._targetFrame = nil

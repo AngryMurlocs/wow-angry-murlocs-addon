@@ -29,6 +29,20 @@ Ergebnis je Punkt notieren: OK / Fehler + `/am diag show`-Auszug.
 - [ ] Zwei Pins auf demselben Punkt: nebeneinander, Reihenfolge bleibt nach einem Update gleich. Drei als Dreieck, vier als Raster. Eine Reihe von Spielern entlang einer Straße bleibt auf den echten Positionen.
 - [ ] Karte zoomen: die Gruppe bleibt zusammen und die Pins überdecken sich nicht neu. Hover hebt den Pin und zeigt die Frische-Zeile.
 
+## Wanted-Sichtungs-Pins auf der Weltkarte (Unreleased)
+
+Client-Build notieren: `/dump GetBuildInfo()` → ________
+
+Vorbereitung: zwei Gildenmitglieder A/B, gleicher bekannter Wanted-Eintrag, Karte + „Wanted-Sichtungen anzeigen“ an, Positionsfreigabe an.
+
+- [ ] A visiert das Wanted-Ziel an; B öffnet die Karte erst danach. Beide sehen denselben roten Fadenkreuz-Pin am Melder-Standort.
+- [ ] Tooltip: Name · Zone · Alter · gesehen von …; Zusatz „Ungefährer Sichtungsort“.
+- [ ] Kartenzoom: Pin bleibt am Ort; persönlicher Wegpunkt bleibt frei.
+- [ ] Karte offen lassen: Pin nach ~30 Min blasser; bei genau 3 h weg (ohne neue Sichtung).
+- [ ] Zielwechsel im Kampf: Alarm/Sendepause wie bisher; kein Extra-Klick nötig.
+- [ ] Positionsfreigabe aus: Sichtungstext kommt noch, Pin-Koordinaten nicht (Zone-only).
+- [ ] Höchstens ein Pin pro Wanted-Ziel; neuere Sichtung mit Koordinaten versetzt ihn.
+
 ## Kartenpins hinter anderen Symbolen (0.11.10)
 
 - [ ] Weltkarte: Murloc liegt hinter Quest-!, Kiste und Pins anderer Addons.

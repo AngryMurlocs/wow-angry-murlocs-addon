@@ -136,6 +136,30 @@ local function ReadLocalPos()
   return mapId, x, y, zone, dead
 end
 
+function Positions:IsSharingPosition()
+  return SharingPosition() and true or false
+end
+
+function Positions:ShouldSuppressPos()
+  return ShouldSuppressPos()
+end
+
+--- Safe optional map coords for callers (e.g. Wanted sightings).
+--- Never throws; returns nil on secret/missing/invalid values. No last-POS or zone-center fallback.
+function Positions:GetPlayerMapPos()
+  local ok, a, b, c = pcall(function()
+    return ReadLocalPos()
+  end)
+  if not ok then return end
+  local mapId, x, y = tonumber(a), tonumber(b), tonumber(c)
+  if not mapId or mapId ~= math.floor(mapId) or mapId < 1 or mapId > 99999 then return end
+  if not x or not y then return end
+  if x ~= x or y ~= y then return end -- NaN
+  if x < 0 or x > 1 or y < 0 or y > 1 then return end
+  if x == 0 and y == 0 then return end
+  return mapId, x, y
+end
+
 local function ShouldSend(mapId, x, y)
   local now = U.Now()
   if now - lastSent.t >= HEARTBEAT then
@@ -158,8 +182,8 @@ function Positions:Broadcast(force)
   if not IsInGuild() then return end
   if ShouldSuppressPos() then return end
 
-  local mapId, x, y, zone, dead = ReadLocalPos()
-  if not mapId then return end
+  local ok, mapId, x, y, zone, dead = pcall(ReadLocalPos)
+  if not ok or not mapId then return end
 
   if not force and not ShouldSend(mapId, x, y) then
     return

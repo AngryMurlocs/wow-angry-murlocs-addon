@@ -33,7 +33,7 @@ Die meisten Funktionen leben vom Austausch mit der Gilde. Je mehr Gildenmitglied
 ### Wanted-Liste
 - Wird ein Gildenmitglied von einem Spieler der Gegenseite getötet, landet der Killer auf der Wanted-Liste der Gilde. Jeder weitere Kill erhöht sein Level, mit Rängen von **Markiert** bis **Gildenschreck**.
 - Duelle, Schlachtfelder, Arenen sowie Tode durch Monster oder Umgebung zählen nie.
-- Nimmst du einen gesuchten Spieler ins Ziel, erfährt die Gilde, wo er gesehen wurde. Sichtungen zeigen, wie frisch sie sind.
+- Nimmst du einen gesuchten Spieler ins Ziel, erfährt die Gilde, wo er gesehen wurde. Sichtungen zeigen, wie frisch sie sind. Mit freigegebener Position erscheint auf der Weltkarte ein roter Wanted-Pin am ungefähren Sichtungsort (etwa 30 Minuten kräftig, bis drei Stunden sichtbar).
 - Liste mit Seiten, Suche, Sortierung und Details zu jedem Eintrag.
 - Die Liste gleicht sich beim Login automatisch mit der Gilde ab, oder jederzeit mit `/am sync`.
 

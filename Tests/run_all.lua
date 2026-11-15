@@ -18,6 +18,7 @@ local tests = {
   "Tests/ProfRecipes_test.lua",
   "Tests/Freshness_test.lua",
   "Tests/PinFade_test.lua",
+  "Tests/SightPins_test.lua",
   "Tests/PinCluster_test.lua",
   "Tests/PinLayer_test.lua",
   "Tests/ToastQueue_test.lua",
