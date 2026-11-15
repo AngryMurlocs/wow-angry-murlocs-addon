@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Wanted sighting pins no longer have a dark outline glow around the crosshair
+
 ## 0.11.14
 
 - Death and level-up messages can use the old bar look again (Appearance → Message style)
