@@ -75,6 +75,38 @@ function Comm:Allowed(category)
   return gate(privacy) and true or false
 end
 
+--- Whether SIGHT wire may carry map coords (sharePosition + not suppressed).
+function Comm:CanShareSightCoords()
+  local privacy = GR.db and GR.db.privacy
+  if not privacy or not privacy.sharePosition then return false end
+  local Positions = GR:GetModule("Positions")
+  if Positions and Positions.ShouldSuppressPos and Positions:ShouldSuppressPos() then
+    return false
+  end
+  return true
+end
+
+local function ParseSightCoords(mapIdRaw, xRaw, yRaw)
+  local mapId = tonumber(mapIdRaw)
+  local x = tonumber(xRaw)
+  local y = tonumber(yRaw)
+  if not mapId or mapId ~= math.floor(mapId) or mapId < 1 or mapId > 99999 then return end
+  if not x or not y then return end
+  if x ~= x or y ~= y then return end
+  if x < 0 or x > 1 or y < 0 or y > 1 then return end
+  if x == 0 and y == 0 then return end
+  return mapId, x, y
+end
+
+--- Drop |mapId|x|y from a queued SIGHT payload when coords are no longer allowed.
+local function StripSightCoords(payload)
+  if type(payload) ~= "string" then return payload end
+  if payload:sub(1, 6) ~= "SIGHT|" then return payload end
+  local parts = U.SplitKeepEmpty(payload:sub(7), "|")
+  if #parts < 6 then return payload end
+  return string.format("SIGHT|%s|%s|%s", parts[1] or "", parts[2] or "", parts[3] or "")
+end
+
 local function Sweep(now)
   if (now - lastSweep) < SWEEP_EVERY then return end
   lastSweep = now
@@ -190,6 +222,9 @@ local function Drain()
       end
     end
     if item then
+      if item.category == "sight" and not Comm:CanShareSightCoords() then
+        item.payload = StripSightCoords(item.payload)
+      end
       lastSendAt = now
       local status = RawSend(item.payload)
       if status == "ok" then
@@ -682,10 +717,14 @@ local function DispatchParsed(tag, rest, sender)
       Reject("bad_ts", "SIGHT " .. tostring(sender))
       return
     end
+    local mapId, x, y = ParseSightCoords(parts[4], parts[5], parts[6])
     GR:SendMessage("SIGHT_UPDATE", sender, {
       target = target,
       zone = zone,
       ts = ts,
+      mapId = mapId,
+      x = x,
+      y = y,
       fromRemote = true,
     })
   elseif tag == "VER" then

@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Wanted sightings can appear as red crosshair pins on the world map for up to three hours
+
 ## 0.11.13
 
 - Guild map pins and the main window stay smoother while many position updates arrive
