@@ -713,6 +713,13 @@ function Options:AttachPanel(parent)
       GR.db.map.showPins = v and true or false
       GR:SendMessage("MAP_SETTINGS_CHANGED")
     end)
+    H.Check("OPT_SHOW_SIGHT_PINS", function()
+      return not GR.db.map or GR.db.map.showSightPins ~= false
+    end, function(v)
+      GR.db.map = GR.db.map or {}
+      GR.db.map.showSightPins = v and true or false
+      GR:SendMessage("MAP_SETTINGS_CHANGED")
+    end)
 
     H.GroupLabel("OPT_PIN_STYLE")
     H.Hint("OPT_PIN_STYLE_HINT")

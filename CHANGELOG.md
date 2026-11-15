@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Death and level-up messages can use the old bar look again (Appearance → Message style)
+- Wanted sightings can appear as red crosshair pins on the world map for up to three hours
 
 ## 0.11.13
 

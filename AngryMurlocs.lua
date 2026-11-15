@@ -42,6 +42,7 @@ end
 local defaults = {
   map = {
     showPins = true,
+    showSightPins = true,
     pinSize = 26,
     pinStyle = "heads",
   },
