@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.13
 
 - Guild map pins and the main window stay smoother while many position updates arrive
 - Recipe lists update in one pass when recipe data arrives, without extra stutter
