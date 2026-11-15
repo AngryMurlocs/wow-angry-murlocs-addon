@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Guild map pins and the main window stay smoother while many position updates arrive
+- Recipe lists update in one pass when recipe data arrives, without extra stutter
+
 ## 0.11.12
 
 - Guild recipe lists from members who are offline can fill in from others who already have them

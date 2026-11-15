@@ -37,6 +37,7 @@ local tests = {
   "Tests/RecipeEpochPersist_test.lua",
   "Tests/LevelCap_test.lua",
   "Tests/GuildChangePositions_test.lua",
+  "Tests/PerfHotpath_test.lua",
   "Tests/SecretTarget_test.lua",
   "Tests/FragTimeout_test.lua",
   "Tests/Whisper_test.lua",

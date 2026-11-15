@@ -86,6 +86,11 @@ local FEED_LINE_H = 18
 local syncButtons = {}
 
 local gen = {}
+-- Wanted summary cache for General tab (scope-bound; invalidated on data/guild change).
+local genWantedCache = nil
+local genPosRefreshPending = false
+local GEN_POS_DEBOUNCE = 0.05
+UI._generalPaintCount = 0
 
 -- Name column only; profession icons are built per row.
 local COLS = {
@@ -623,105 +628,144 @@ local function SetBottomMode(mode)
   end
   gen.bottomMode = mode
   ApplyBottomLayout()
+  -- Opening details needs a fresh Wanted top (score is time-based).
+  if mode == "details" then
+    UI:RefreshGeneral()
+  end
 end
 
-function UI:RefreshGeneral()
-  if not generalPanel then return end
+local function InvalidateGenWantedCache()
+  genWantedCache = nil
+end
 
-  local guildName = GetGuildInfo and GetGuildInfo("player")
-  if gen.guildText then
-    if guildName and guildName ~= "" then
-      gen.guildText:SetText(string.format(U.L("GENERAL_GUILD"), guildName))
-    else
-      gen.guildText:SetText(U.L("NOT_IN_GUILD"))
-    end
+local function CurrentWantedScopeKey()
+  if U.GuildScopeKey then
+    local k = U.GuildScopeKey()
+    if k then return k end
   end
+  local realm = U.RealmKey and U.RealmKey() or "Realm"
+  return realm .. "::__none__"
+end
 
-  if gen.versionText then
-    gen.versionText:SetText(string.format(U.L("GENERAL_VERSION"), tostring(GR.VERSION or "?")))
+local function CountWantedEntries(wanted)
+  local n = 0
+  local st = wanted and wanted.State and wanted:State()
+  for _ in pairs((st and st.wanted) or {}) do
+    n = n + 1
   end
+  return n
+end
 
-  local wanted = WantedModule()
-  local n, v2, newest = 0, 0, nil
-  if GR.Comm and GR.Comm.Peers then
-    n, v2, newest = GR.Comm:Peers(600)
-  end
-  local pins = CountPins()
-
-  if gen.syncText then
-    local short = ShortSyncStatus()
-    local lastLine = ""
-    if wanted and wanted.GetLastSyncOkAt then
-      local last = wanted:GetLastSyncOkAt()
-      if last and last > 0 then
-        lastLine = " · " .. string.format(U.L("GENERAL_SYNC_LAST"), FormatRelAge(last))
-      end
-    else
-      -- Fallback: append age from full status when last complete phrase exists.
-      local full = wanted and wanted.SyncStatusText and wanted:SyncStatusText() or ""
-      local age = full:match("·%s*(.+)$")
-      if age and age ~= "" then
-        lastLine = " · " .. age
+local function EarliestNextScoreAt(list, now)
+  local soonest = nil
+  for i = 1, #list do
+    local last = tonumber(list[i].entry and list[i].entry.lastKillTime) or 0
+    if last > 0 then
+      local ageH = math.floor(math.max(0, now - last) / 3600)
+      local nextAt = last + (ageH + 1) * 3600
+      if not soonest or nextAt < soonest then
+        soonest = nextAt
       end
     end
-    gen.syncText:SetText(short .. lastLine)
-    T.SetTextColor(gen.syncText, T.MUTED)
   end
+  return soonest
+end
 
+-- needTop: recompute Sorted when missing/stale; otherwise reuse total without sorting.
+local function WantedDisplay(wanted, needTop)
+  local scopeKey = CurrentWantedScopeKey()
+  local c = genWantedCache
+  if c and c.scopeKey ~= scopeKey then
+    c = nil
+    genWantedCache = nil
+  end
+  local now = wanted and wanted.Now and wanted:Now() or U.WallTime()
+  local topStale = needTop and (
+    not c or not c.topResolved
+      or (c.nextScoreAt and now >= c.nextScoreAt)
+  )
+  if c and not topStale then
+    if not needTop then
+      return { total = c.total or 0, top = nil }, false
+    end
+    local top = nil
+    if c.topKey then
+      top = { key = c.topKey, level = c.topLevel }
+    end
+    return { total = c.total or 0, top = top }, false
+  end
+  if not needTop then
+    local total = CountWantedEntries(wanted)
+    genWantedCache = {
+      scopeKey = scopeKey,
+      total = total,
+      topResolved = false,
+    }
+    return { total = total, top = nil }, false
+  end
+  local list = GR.WantedLogic.Sorted(wanted:State(), now, { includeHidden = true })
+  local top = list[1]
+  genWantedCache = {
+    scopeKey = scopeKey,
+    total = #list,
+    topKey = top and top.key or nil,
+    topLevel = top and top.level or nil,
+    nextScoreAt = EarliestNextScoreAt(list, now),
+    topResolved = true,
+  }
+  return { total = #list, top = top }, true
+end
+
+local function ApplySyncText(wanted)
+  if not gen.syncText then return end
+  local short = ShortSyncStatus()
+  local lastLine = ""
+  if wanted and wanted.GetLastSyncOkAt then
+    local last = wanted:GetLastSyncOkAt()
+    if last and last > 0 then
+      lastLine = " · " .. string.format(U.L("GENERAL_SYNC_LAST"), FormatRelAge(last))
+    end
+  else
+    local full = wanted and wanted.SyncStatusText and wanted:SyncStatusText() or ""
+    local age = full:match("·%s*(.+)$")
+    if age and age ~= "" then
+      lastLine = " · " .. age
+    end
+  end
+  gen.syncText:SetText(short .. lastLine)
+  T.SetTextColor(gen.syncText, T.MUTED)
+end
+
+local function ApplyPeerPinCards(n, v2, newest, pins)
   if gen.cardActive then
     gen.cardActive.value:SetText(tostring(n))
   end
   if gen.cardPins then
     gen.cardPins.value:SetText(tostring(pins))
   end
-  if gen.cardWanted and wanted and wanted.Summary then
-    local s = wanted:Summary()
-    gen.cardWanted.value:SetText(tostring(s.total or 0))
-  end
-
   if gen.detailsProto then
     local age = newest and FormatRelAge(newest) or "-"
     gen.detailsProto:SetText(string.format(U.L("GENERAL_PROTO"), v2, age))
   end
-  if gen.detailsShares and GR.db and GR.db.privacy then
-    local p = GR.db.privacy
-    gen.detailsShares:SetText(string.format(U.L("GENERAL_SHARES"),
-      OnOffLabel(p.sharePosition), OnOffLabel(p.shareDeath), OnOffLabel(p.shareProfessions),
-      OnOffLabel(p.shareSightings ~= false), OnOffLabel(p.shareLevelUp)))
+end
+
+local function ApplyWantedCards(wanted, needTop)
+  if not wanted then return end
+  local s = WantedDisplay(wanted, needTop and true or false)
+  if gen.cardWanted then
+    gen.cardWanted.value:SetText(tostring(s.total or 0))
   end
-  if gen.detailsWanted and wanted and wanted.Summary then
-    local s = wanted:Summary()
+  if not gen.detailsWanted then return end
+  if needTop then
     local top = "-"
     if s.top then
       top = string.format("%s %d", U.ShortName(s.top.key), s.top.level)
     end
-    gen.detailsWanted:SetText(string.format(U.L("GENERAL_WANTED_SUMMARY"), s.total, top))
+    gen.detailsWanted:SetText(string.format(U.L("GENERAL_WANTED_SUMMARY"), s.total or 0, top))
   end
-  -- Help text is only rebuilt when the help panel opens (ApplyBottomLayout).
-  -- Remeasure details panel if open; never change bottomMode here.
-  if gen.bottomMode == "details" then
-    ApplyBottomLayout()
-  end
+end
 
-  local sharePos = GR.db and GR.db.privacy and GR.db.privacy.sharePosition
-  local showPins = GR.db and GR.db.map and GR.db.map.showPins
-  if gen.posBtn then
-    gen.posBtn:SetText(U.L("GENERAL_POS") .. ": " .. OnOffLabel(sharePos))
-    local c = T.OnOffColor(sharePos)
-    if gen.posBtn.GetFontString and gen.posBtn:GetFontString() then
-      gen.posBtn:GetFontString():SetTextColor(c[1], c[2], c[3])
-    end
-  end
-  if gen.pinsBtn then
-    gen.pinsBtn:SetText(U.L("GENERAL_PINS") .. ": " .. OnOffLabel(showPins))
-    local c = T.OnOffColor(showPins)
-    if gen.pinsBtn.GetFontString and gen.pinsBtn:GetFontString() then
-      gen.pinsBtn:GetFontString():SetTextColor(c[1], c[2], c[3])
-    end
-  end
-
-  UI:UpdateSyncButtons()
-
+local function ApplyFeedLines()
   if not gen.feedLines then return end
   local count = #activity
   if gen.feedEmpty then
@@ -741,6 +785,99 @@ function UI:RefreshGeneral()
       line:Hide()
     end
   end
+end
+
+local function ApplyPrivacyButtons()
+  local sharePos = GR.db and GR.db.privacy and GR.db.privacy.sharePosition
+  local showPins = GR.db and GR.db.map and GR.db.map.showPins
+  if gen.posBtn then
+    gen.posBtn:SetText(U.L("GENERAL_POS") .. ": " .. OnOffLabel(sharePos))
+    local c = T.OnOffColor(sharePos)
+    if gen.posBtn.GetFontString and gen.posBtn:GetFontString() then
+      gen.posBtn:GetFontString():SetTextColor(c[1], c[2], c[3])
+    end
+  end
+  if gen.pinsBtn then
+    gen.pinsBtn:SetText(U.L("GENERAL_PINS") .. ": " .. OnOffLabel(showPins))
+    local c = T.OnOffColor(showPins)
+    if gen.pinsBtn.GetFontString and gen.pinsBtn:GetFontString() then
+      gen.pinsBtn:GetFontString():SetTextColor(c[1], c[2], c[3])
+    end
+  end
+end
+
+-- Light path for POS traffic: peers/pins/ages only; Wanted total reused; top if details open.
+function UI:RefreshGeneralPos()
+  if not generalPanel then return end
+  UI._generalPaintCount = (UI._generalPaintCount or 0) + 1
+  local wanted = WantedModule()
+  local n, v2, newest = 0, 0, nil
+  if GR.Comm and GR.Comm.Peers then
+    n, v2, newest = GR.Comm:Peers(600)
+  end
+  ApplyPeerPinCards(n, v2, newest, CountPins())
+  ApplySyncText(wanted)
+  local needTop = gen.bottomMode == "details"
+  ApplyWantedCards(wanted, needTop)
+  ApplyFeedLines()
+  if needTop then
+    ApplyBottomLayout()
+  end
+end
+
+function UI:RefreshGeneral()
+  if not generalPanel then return end
+  UI._generalPaintCount = (UI._generalPaintCount or 0) + 1
+
+  local guildName = GetGuildInfo and GetGuildInfo("player")
+  if gen.guildText then
+    if guildName and guildName ~= "" then
+      gen.guildText:SetText(string.format(U.L("GENERAL_GUILD"), guildName))
+    else
+      gen.guildText:SetText(U.L("NOT_IN_GUILD"))
+    end
+  end
+
+  if gen.versionText then
+    gen.versionText:SetText(string.format(U.L("GENERAL_VERSION"), tostring(GR.VERSION or "?")))
+  end
+
+  local wanted = WantedModule()
+  local n, v2, newest = 0, 0, nil
+  if GR.Comm and GR.Comm.Peers then
+    n, v2, newest = GR.Comm:Peers(600)
+  end
+  ApplyPeerPinCards(n, v2, newest, CountPins())
+  ApplySyncText(wanted)
+
+  -- Full refresh always resolves Wanted (and top for details text).
+  InvalidateGenWantedCache()
+  ApplyWantedCards(wanted, true)
+
+  if gen.detailsShares and GR.db and GR.db.privacy then
+    local p = GR.db.privacy
+    gen.detailsShares:SetText(string.format(U.L("GENERAL_SHARES"),
+      OnOffLabel(p.sharePosition), OnOffLabel(p.shareDeath), OnOffLabel(p.shareProfessions),
+      OnOffLabel(p.shareSightings ~= false), OnOffLabel(p.shareLevelUp)))
+  end
+  if gen.bottomMode == "details" then
+    ApplyBottomLayout()
+  end
+
+  ApplyPrivacyButtons()
+  UI:UpdateSyncButtons()
+  ApplyFeedLines()
+end
+
+local function ScheduleGeneralPosRefresh()
+  if genPosRefreshPending then return end
+  genPosRefreshPending = true
+  C_Timer.After(GEN_POS_DEBOUNCE, function()
+    genPosRefreshPending = false
+    if UI:IsTabShown("general") then
+      UI:RefreshGeneralPos()
+    end
+  end)
 end
 
 local function EnsureDiscordPopup()
@@ -2170,7 +2307,7 @@ function UI:RefreshSearchList()
         local meta = R.GetMeta and R.GetMeta(row.recipeId)
         local name = (meta and meta.name) or string.format(U.L("PROF_RECIPE_ID"), row.recipeId)
         local outputName = nil
-        if meta and meta.outputItemID and R.ResolveItemName then
+        if q ~= "" and meta and meta.outputItemID and R.ResolveItemName then
           outputName = select(1, R.ResolveItemName(meta.outputItemID, nil))
         end
         local ok, rank = true, 1
@@ -2259,7 +2396,7 @@ function UI:RefreshSearchList()
       local meta = R.GetMeta and R.GetMeta(row.recipeId)
       local name = (meta and meta.name) or string.format(U.L("PROF_RECIPE_ID"), row.recipeId)
       local outputName = nil
-      if meta and meta.outputItemID and R.ResolveItemName then
+      if q ~= "" and meta and meta.outputItemID and R.ResolveItemName then
         outputName = select(1, R.ResolveItemName(meta.outputItemID, nil))
       end
       local ok, rank = true, 1
@@ -2745,7 +2882,11 @@ function UI:OnEnable()
     searchCat.visibleRows = nil
     searchCat.scrollY = 0
     searchProfKey = ""
+    InvalidateGenWantedCache()
     RefreshAdminAccess()
+    if UI:IsTabShown("general") then
+      ScheduleGeneralPosRefresh()
+    end
   end)
 
   GR:BindMessage(self, "PROF_RECIPE_CATEGORY_CHANGED", function()
@@ -2789,17 +2930,18 @@ function UI:OnEnable()
 
   GR:BindMessage(self, "POS_CACHE_CHANGED", function()
     if UI:IsTabShown("general") then
-      UI:RefreshGeneral()
+      ScheduleGeneralPosRefresh()
     end
   end)
   GR:BindMessage(self, "POS_REMOVED", function()
     if UI:IsTabShown("general") then
-      UI:RefreshGeneral()
+      ScheduleGeneralPosRefresh()
     end
   end)
   GR:BindMessage(self, "POS_CACHE_CLEARED", function()
+    InvalidateGenWantedCache()
     if UI:IsTabShown("general") then
-      UI:RefreshGeneral()
+      ScheduleGeneralPosRefresh()
     end
   end)
   GR:BindMessage(self, "SHARE_POS_CHANGED", function()
@@ -2849,6 +2991,7 @@ function UI:OnEnable()
   end)
 
   local function RefreshGeneralIfShown()
+    InvalidateGenWantedCache()
     if UI:IsTabShown("general") then
       UI:RefreshGeneral()
     end
