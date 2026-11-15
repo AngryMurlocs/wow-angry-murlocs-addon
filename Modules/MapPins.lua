@@ -24,10 +24,8 @@ MapPins.FADE_MIN = 0.25
 MapPins.SIGHT_PIN_FULL_SEC = 30 * 60
 MapPins.SIGHT_PIN_GONE_SEC = 3 * 3600
 MapPins.SIGHT_PIN_FADE_MIN = 0.3
-local SIGHT_RED_R, SIGHT_RED_G, SIGHT_RED_B = 0.85, 0.12, 0.12
-local SIGHT_OUTLINE_R, SIGHT_OUTLINE_G, SIGHT_OUTLINE_B = 0.05, 0.02, 0.02
-local WHITE_TEX = "Interface\\Buttons\\WHITE8X8"
-local SIGHT_BUST_PATH = PIN_BASE_HEADS .. "WARRIOR"
+MapPins.SIGHT_PIN_SIZE = 24 -- fixed screen px; independent of guild pinSize slider
+local SIGHT_TEX = "Interface\\AddOns\\AngryMurlocs\\Media\\WantedSight"
 -- First Blizzard icon band above map chrome (fog, quest shading). Pins stay under it.
 local SYMBOL_BAND = "PIN_FRAME_LEVEL_DIG_SITE"
 local CLUSTER_GAP_PX = 2 -- screen pixels between pin edges
@@ -358,121 +356,29 @@ local function ApplyPinFade(pin, dead, ageSec)
   end
 end
 
-local function EnsureSightLayers(pin)
-  if pin.sightOutline then return end
-  local outline = pin:CreateTexture(nil, "BACKGROUND", nil, -1)
-  outline:SetTexture(CIRCLE_TEX)
-  outline:SetPoint("CENTER")
-  pin.sightOutline = outline
-
-  local ring = pin:CreateTexture(nil, "BORDER")
-  ring:SetTexture(CIRCLE_TEX)
-  ring:SetPoint("CENTER")
-  pin.sightRing = ring
-
-  local ticks = {}
-  for i = 1, 4 do
-    local t = pin:CreateTexture(nil, "ARTWORK", nil, 1)
-    t:SetTexture(WHITE_TEX)
-    ticks[i] = t
-  end
-  pin.sightTicks = ticks
-end
-
-local function HideSightLayers(pin)
-  if pin.sightOutline then pin.sightOutline:Hide() end
-  if pin.sightRing then pin.sightRing:Hide() end
-  if pin.sightTicks then
-    for i = 1, #pin.sightTicks do
-      pin.sightTicks[i]:Hide()
-    end
-  end
-end
-
-local function SyncSightPinLayers(pin, size)
-  EnsureSightLayers(pin)
-  size = size or pin:GetWidth() or DEFAULT_SIZE
-  local outline = pin.sightOutline
-  outline:ClearAllPoints()
-  outline:SetSize(size * 1.18, size * 1.18)
-  outline:SetPoint("CENTER")
-  outline:Show()
-
-  local ring = pin.sightRing
-  ring:ClearAllPoints()
-  ring:SetSize(size, size)
-  ring:SetPoint("CENTER")
-  ring:Show()
-
-  -- Four short crosshair ticks at N/E/S/W
-  local tickLen = size * 0.22
-  local tickThick = math.max(1.5, size * 0.06)
-  local reach = size * 0.48
-  local ticks = pin.sightTicks
-  -- N
-  ticks[1]:ClearAllPoints()
-  ticks[1]:SetSize(tickThick, tickLen)
-  ticks[1]:SetPoint("BOTTOM", pin, "CENTER", 0, reach - tickLen)
-  ticks[1]:Show()
-  -- E
-  ticks[2]:ClearAllPoints()
-  ticks[2]:SetSize(tickLen, tickThick)
-  ticks[2]:SetPoint("LEFT", pin, "CENTER", reach - tickLen, 0)
-  ticks[2]:Show()
-  -- S
-  ticks[3]:ClearAllPoints()
-  ticks[3]:SetSize(tickThick, tickLen)
-  ticks[3]:SetPoint("TOP", pin, "CENTER", 0, -(reach - tickLen))
-  ticks[3]:Show()
-  -- W
-  ticks[4]:ClearAllPoints()
-  ticks[4]:SetSize(tickLen, tickThick)
-  ticks[4]:SetPoint("RIGHT", pin, "CENTER", -(reach - tickLen), 0)
-  ticks[4]:Show()
-
-  if pin.glow then pin.glow:Hide() end
-  if pin.tex then
-    local bust = size * 0.55
-    pin.tex:ClearAllPoints()
-    pin.tex:SetSize(bust, bust)
-    pin.tex:SetPoint("CENTER")
-  end
-end
-
 local function ApplySightPinFade(pin, ageSec)
   local fade = MapPins.SightPinFadeFactor(ageSec or 0)
-  if pin.sightOutline then
-    pin.sightOutline:SetVertexColor(SIGHT_OUTLINE_R, SIGHT_OUTLINE_G, SIGHT_OUTLINE_B, fade)
-  end
-  if pin.sightRing then
-    pin.sightRing:SetVertexColor(SIGHT_RED_R, SIGHT_RED_G, SIGHT_RED_B, fade * 0.95)
-  end
-  if pin.sightTicks then
-    for i = 1, #pin.sightTicks do
-      pin.sightTicks[i]:SetVertexColor(SIGHT_RED_R, SIGHT_RED_G, SIGHT_RED_B, fade)
-    end
-  end
   if pin.tex then
-    -- Pale head-shoulder silhouette
-    pin.tex:SetVertexColor(0.92, 0.9, 0.88, fade)
+    pin.tex:SetVertexColor(1, 1, 1, fade)
   end
 end
 
 local function BindSightPinArt(pin)
   if pin._artKey == "sight" then return end
   pin._artKey = "sight"
-  EnsureSightLayers(pin)
+  if pin.glow then pin.glow:Hide() end
   if pin.tex then
-    pin.tex:SetTexture(SIGHT_BUST_PATH)
-    local uL, uR, uT, uB = ClassUV("heads", "WARRIOR")
-    pin.tex:SetTexCoord(uL, uR, uT, uB)
+    pin.tex:SetTexture(SIGHT_TEX)
+    pin.tex:SetTexCoord(0, 1, 0, 1)
+    pin.tex:ClearAllPoints()
+    pin.tex:SetAllPoints()
   end
   pin._rings = false
-  pin._fillR, pin._fillG, pin._fillB = 0.92, 0.9, 0.88
+  pin._fillR, pin._fillG, pin._fillB = 1, 1, 1
 end
 
 local function ApplyPinArt(pin, classFile, dead, ageSec)
-  HideSightLayers(pin)
+  if pin.glow then pin.glow:Show() end
   local style = PinStyle()
   BindPinArt(pin, classFile, style)
   ApplyPinFade(pin, dead, ageSec)
@@ -586,8 +492,11 @@ local function ReleasePin(pin)
   pin.member = nil
   pin.kind = nil
   pin._artKey = nil
-  HideSightLayers(pin)
   if pin.glow then pin.glow:Show() end
+  if pin.tex then
+    pin.tex:ClearAllPoints()
+    pin.tex:SetAllPoints()
+  end
   pool[#pool + 1] = pin
 end
 
@@ -689,10 +598,13 @@ end
 local function SyncPinLayers(pin, size)
   size = size or pin:GetWidth() or DEFAULT_SIZE
   if pin.kind == "sight" then
-    SyncSightPinLayers(pin, size)
+    if pin.glow then pin.glow:Hide() end
+    if pin.tex then
+      pin.tex:ClearAllPoints()
+      pin.tex:SetAllPoints()
+    end
     return
   end
-  HideSightLayers(pin)
   if PinStyle() == "rings" then
     -- Outer gold = party size; class fill inset for thicker rim
     if pin.glow then
@@ -717,8 +629,12 @@ local function SyncPinLayers(pin, size)
 end
 
 local function ScreenPinSize()
-  -- Slider applies to all styles (heads / body / rings)
+  -- Slider applies to guild styles (heads / body / rings)
   return ClampPinSize(GR.db and GR.db.map and GR.db.map.pinSize)
+end
+
+local function SightScreenPinSize()
+  return MapPins.SIGHT_PIN_SIZE
 end
 
 local function CurrentMapId()
@@ -744,8 +660,10 @@ end
 function MapPins:SyncSizes()
   if not next(active) then return end
   local scale = GetCanvasScale()
-  local size = ScreenPinSize() / scale
+  local guildSize = ScreenPinSize() / scale
+  local sightSize = SightScreenPinSize() / scale
   for _, pin in pairs(active) do
+    local size = (pin.kind == "sight") and sightSize or guildSize
     pin:SetScale(1)
     pin:SetSize(size, size)
     SyncPinLayers(pin, size)
@@ -932,8 +850,9 @@ function MapPins:Refresh()
             pin.bandTop = sightLevel + 2
             pin:SetFrameLevel(pin.baseLevel)
             pin:SetScale(1)
-            pin:SetSize(size, size)
-            SyncPinLayers(pin, size)
+            local sightSize = SightScreenPinSize() / scale
+            pin:SetSize(sightSize, sightSize)
+            SyncPinLayers(pin, sightSize)
             pin.data = data
             pin.member = key
             ApplySightPinArt(pin, age)

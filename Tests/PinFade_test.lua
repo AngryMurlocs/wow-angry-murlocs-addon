@@ -29,6 +29,7 @@ check("sight full at 1800", M.SightPinFadeFactor(1800) == 1)
 check("sight fading after 30m", M.SightPinFadeFactor(1801) < 1)
 check("sight gone at 3h", M.SightPinFadeFactor(10800) == 0)
 check("sight constants", M.SIGHT_PIN_FULL_SEC == 1800 and M.SIGHT_PIN_GONE_SEC == 10800)
+check("sight size 24", M.SIGHT_PIN_SIZE == 24)
 
 print(string.format("\n%d failures", fails))
 if fails > 0 then error(fails .. " test failures") end

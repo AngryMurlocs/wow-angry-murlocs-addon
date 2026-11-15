@@ -35,7 +35,7 @@ Client-Build notieren: `/dump GetBuildInfo()` → ________
 
 Vorbereitung: zwei Gildenmitglieder A/B, gleicher bekannter Wanted-Eintrag, Karte + „Wanted-Sichtungen anzeigen“ an, Positionsfreigabe an.
 
-- [ ] A visiert das Wanted-Ziel an; B öffnet die Karte erst danach. Beide sehen denselben roten Fadenkreuz-Pin am Melder-Standort.
+- [ ] A visiert das Wanted-Ziel an; B öffnet die Karte erst danach. Beide sehen denselben roten Fadenkreuz-Pin (Asset, ca. 24 px) am Melder-Standort.
 - [ ] Tooltip: Name · Zone · Alter · gesehen von …; Zusatz „Ungefährer Sichtungsort“.
 - [ ] Kartenzoom: Pin bleibt am Ort; persönlicher Wegpunkt bleibt frei.
 - [ ] Karte offen lassen: Pin nach ~30 Min blasser; bei genau 3 h weg (ohne neue Sichtung).
