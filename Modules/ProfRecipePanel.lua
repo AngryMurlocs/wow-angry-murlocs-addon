@@ -285,7 +285,8 @@ local function BuildGroupedVisibleRows()
     local meta = R and R.GetMeta and R.GetMeta(id)
     local name = (meta and meta.name) or RecipeName(id)
     local outputName = nil
-    if meta and meta.outputItemID and R.ResolveItemName then
+    -- Output item names are only needed for non-empty search matching.
+    if searching and meta and meta.outputItemID and R.ResolveItemName then
       outputName = select(1, R.ResolveItemName(meta.outputItemID, nil))
     end
     local ok, rank = true, 1
@@ -712,9 +713,11 @@ local function BindCatalogListRows()
   end
 end
 
-RefreshList = function()
+RefreshList = function(opts)
   if not catalog or not state.open or state.view ~= "list" then return end
-  BuildGroupedVisibleRows()
+  if not (opts and opts.skipBuild) then
+    BuildGroupedVisibleRows()
+  end
   local totalRecipes = state.recipeCount or 0
   local totalCats = state.categoryCount or 0
   if catalog.pageText then
@@ -737,7 +740,7 @@ RefreshList = function()
   end)
 end
 
-RefreshHeader = function()
+RefreshHeader = function(opts)
   if not catalog then return end
   local R = Recipes()
   local name = state.player or "?"
@@ -791,7 +794,9 @@ RefreshHeader = function()
     catalog.emptyText:Show()
   else
     catalog.headerStatus:SetText(FormatDataAge(rec))
-    BuildGroupedVisibleRows()
+    if not (opts and opts.skipBuild) then
+      BuildGroupedVisibleRows()
+    end
     if (state.recipeCount or 0) == 0 and state.filter ~= "" then
       catalog.emptyText:SetText(U.L("PROF_RECIPE_EMPTY_FILTER"))
       catalog.emptyText:Show()
@@ -813,8 +818,9 @@ function UI:RefreshRecipeCatalog()
   if not state.open then return end
   if state.view == "list" then
     ShowListView()
-    RefreshHeader()
-    RefreshList()
+    BuildGroupedVisibleRows()
+    RefreshHeader({ skipBuild = true })
+    RefreshList({ skipBuild = true })
   else
     ShowDetailView()
     RefreshDetail()
@@ -995,8 +1001,8 @@ local function BackFromDetail()
   -- members: return to member recipe list
   state.selectedId = nil
   ShowListView()
-  RefreshHeader()
   RefreshList()
+  RefreshHeader({ skipBuild = true })
 end
 
 local function BackFromList()
@@ -1111,7 +1117,7 @@ local function EnsureCatalog(parent)
   catalog.searchBox:SetScript("OnTextChanged", function(self)
     state.filter = self:GetText() or ""
     RefreshList()
-    RefreshHeader()
+    RefreshHeader({ skipBuild = true })
   end)
 
   catalog.pageText = listPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -1501,6 +1507,7 @@ function UI:AttachRecipePanel(parent)
     U.SafeRegisterEvent(bf, "PLAYERBANKSLOTS_CHANGED")
   end
 
+  -- Clear fetch pending immediately; visible catalog paint uses UI.ScheduleProfViewRefresh.
   GR:BindMessage(UI, "PROF_RECIPES_CHANGED", function(_, sender, profKey)
     if not state.open then return end
     if state.fetchPending
@@ -1510,13 +1517,6 @@ function UI:AttachRecipePanel(parent)
     elseif state.fetchPending and not sender and not profKey then
       ClearFetchPending()
     end
-    UI:RefreshRecipeCatalog()
-  end)
-  GR:BindMessage(UI, "PROF_RECIPE_META_CHANGED", function()
-    if state.open then UI:RefreshRecipeCatalog() end
-  end)
-  GR:BindMessage(UI, "PROF_RECIPE_CATEGORY_CHANGED", function()
-    if state.open then UI:RefreshRecipeCatalog() end
   end)
   GR:BindMessage(UI, "PROF_RECIPE_REFRESH_DONE", function(_, profKey, ok, why)
     if not state.open then return end

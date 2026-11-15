@@ -763,7 +763,7 @@ function MapPins:OnEnable()
   HookMap()
 
   GR:BindMessage(self, "POS_CACHE_CHANGED", function()
-    PurgeSelfFromCache()
+    -- Self purge runs in Refresh when the map is open (not on every cache write).
     if MapShown() then
       ScheduleRefresh()
     end
@@ -777,7 +777,7 @@ function MapPins:OnEnable()
     ReleaseAll()
   end)
   GR:BindMessage(self, "MAP_SETTINGS_CHANGED", function()
-    DiscardPool()
+    -- Keep pooled frames; Refresh reapplies size, art, and clustering.
     MapPins:Refresh()
   end)
   -- Refresh via OnShow / OnMapChanged / scale / POS_* messages (no polling ticker)
