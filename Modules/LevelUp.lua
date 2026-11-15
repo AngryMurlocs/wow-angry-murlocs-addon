@@ -12,6 +12,12 @@ local displayDone
 local muteNextSound = false
 local previewGen = 0
 
+local function ToastStyle()
+  local s = GR.db.levelUp and GR.db.levelUp.toastStyle
+  if s == "classic" then return "classic" end
+  return "art"
+end
+
 local function Cfg()
   GR.db.levelUp = GR.db.levelUp or {}
   local c = GR.db.levelUp
@@ -19,6 +25,7 @@ local function Cfg()
   if c.scale == nil then c.scale = 1 end
   if c.duration == nil then c.duration = 8.0 end
   if c.locked == nil then c.locked = false end
+  c.toastStyle = ToastStyle()
   return c
 end
 
@@ -82,15 +89,32 @@ local function CancelSiblingPreview()
   if death and death.CancelPreview then death:CancelPreview() end
 end
 
+local function DiscardToast()
+  if not toast then return end
+  CancelToastTimers()
+  if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(toast) end
+  toast:Hide()
+  toast:SetParent(nil)
+  toast = nil
+end
+
 local function EnsureToast()
+  local style = ToastStyle()
+  if toast and toast._amToastStyle ~= style then
+    DiscardToast()
+  end
   if toast then
     ApplyToastLayout(toast)
     RaiseToast(toast)
     return toast
   end
-  -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
-  toast = GR.Theme.CreateArtToast("AngryMurlocsLevelUpToast", "levelup", { 0.5375, 0.577, 0.375, 0.345 },
-    { textSize = 16, titleSize = 24, maxLines = 2 })
+  if style == "classic" then
+    toast = GR.Theme.CreateClassicToast("AngryMurlocsLevelUpToastClassic", "levelup")
+  else
+    -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
+    toast = GR.Theme.CreateArtToast("AngryMurlocsLevelUpToast", "levelup", { 0.5375, 0.577, 0.375, 0.345 },
+      { textSize = 16, titleSize = 24, maxLines = 2 })
+  end
   RaiseToast(toast)
   toast.hint:SetText(U.L("TOAST_DRAG_HINT"))
 
@@ -109,14 +133,19 @@ local function EnsureToast()
   return toast
 end
 
+function LevelUp:HideToast()
+  if toast then toast:Hide() end
+end
+
 local function DisplayToast(item, done)
   item = item or {}
   if not layoutEdit and not item._preview and not Cfg().showToasts then
     if done then done() end
     return
   end
-  if not layoutEdit and AngryMurlocsDeathToast and AngryMurlocsDeathToast.Hide then
-    AngryMurlocsDeathToast:Hide()
+  if not layoutEdit then
+    local death = GR:GetModule("Death")
+    if death and death.HideToast then death:HideToast() end
   end
   local f = EnsureToast()
   ApplyToastLayout(f)
@@ -129,9 +158,14 @@ local function DisplayToast(item, done)
 
   displayDone = done
   local lvl = tonumber(item.level) or 1
-  -- Name on its own larger line, the rest below
-  if f.title then f.title:SetText("|cff00ff88" .. tostring(item.name or "?") .. "|r") end
-  f.text:SetText(string.format(U.L("LVL_TOAST"), lvl))
+  local name = tostring(item.name or "?")
+  if f._amToastStyle == "classic" then
+    f.text:SetText("|cff00ff88" .. name .. "|r  " .. string.format(U.L("LVL_TOAST"), lvl))
+  else
+    -- Name on its own larger line, the rest below
+    if f.title then f.title:SetText("|cff00ff88" .. name .. "|r") end
+    f.text:SetText(string.format(U.L("LVL_TOAST"), lvl))
+  end
   f:SetAlpha(1)
   f:Show()
 
@@ -159,6 +193,19 @@ local function DisplayToast(item, done)
       Finish()
     end
   end)
+end
+
+function LevelUp:RebuildToast()
+  local wasEdit = layoutEdit
+  DiscardToast()
+  if wasEdit then
+    muteNextSound = true
+    DisplayToast({
+      name = U.ShortName(U.PlayerName()),
+      level = UnitLevel("player") or 1,
+      _preview = true,
+    }, nil)
+  end
 end
 
 local function Enqueue(name, level)
@@ -255,8 +302,9 @@ function LevelUp:ResetAppearance()
   local c = Cfg()
   c.scale = 1
   c.duration = 8.0
+  c.toastStyle = "art"
   -- locked intentionally preserved
-  if toast then ApplyToastLayout(toast) end
+  DiscardToast()
 end
 
 function LevelUp:ResetLayout()

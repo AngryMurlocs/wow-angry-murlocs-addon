@@ -313,5 +313,46 @@ function T.CreateArtToast(globalName, art, box, opts)
   hint:SetPoint("BOTTOM", f, "TOPLEFT", cx, -(cy + bh / 2))
   f.hint = hint
 
+  f._amToastStyle = "art"
+  return f
+end
+
+-- Pre-0.11.1 floating bar (BackdropTemplate). kind = "death" | "levelup".
+function T.CreateClassicToast(globalName, kind)
+  local isDeath = kind == "death"
+  local w = isDeath and 520 or 360
+  local f = CreateFrame("Frame", globalName, UIParent, BackdropTemplate and "BackdropTemplate" or nil)
+  f:SetSize(w, 56)
+
+  if f.SetBackdrop then
+    f:SetBackdrop({
+      bgFile = "Interface\\Buttons\\WHITE8X8",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      edgeSize = 12,
+      insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    if isDeath then
+      f:SetBackdropColor(0.15, 0.02, 0.02, 0.9)
+      f:SetBackdropBorderColor(0.6, 0.1, 0.1, 1)
+    else
+      f:SetBackdropColor(0.05, 0.12, 0.05, 0.92)
+      f:SetBackdropBorderColor(0.2, 0.7, 0.2, 1)
+    end
+  end
+
+  local text = f:CreateFontString(nil, "OVERLAY", isDeath and "GameFontHighlight" or "GameFontNormalLarge")
+  text:SetPoint("CENTER", 0, 4)
+  text:SetWidth(w - 20)
+  do
+    local path, _, flags = text:GetFont()
+    if path then text:SetFont(path, 20, flags) end
+  end
+  f.text = text
+
+  local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  hint:SetPoint("BOTTOM", 0, 6)
+  f.hint = hint
+
+  f._amToastStyle = "classic"
   return f
 end
