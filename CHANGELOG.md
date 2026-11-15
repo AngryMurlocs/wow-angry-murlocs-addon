@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Death and level-up messages can use the old bar look again (Appearance → Message style)
+
 ## 0.11.13
 
 - Guild map pins and the main window stay smoother while many position updates arrive

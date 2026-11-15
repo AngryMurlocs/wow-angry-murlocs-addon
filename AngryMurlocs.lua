@@ -80,6 +80,7 @@ local defaults = {
     scale = 1,
     duration = 8.0,
     locked = false,
+    toastStyle = "art", -- "art" | "classic"
   },
   death = {
     showToasts = true,
@@ -87,6 +88,7 @@ local defaults = {
     scale = 1,
     duration = 10.0,
     locked = false,
+    toastStyle = "art", -- "art" | "classic"
   },
   diag = {
     enabled = false,

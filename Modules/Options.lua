@@ -131,6 +131,11 @@ function Options:BeginLayoutEdit(kind)
   BeginLayoutEditMode(kind)
 end
 
+local function NormalizeToastStyle(v)
+  if v == "classic" then return "classic" end
+  return "art"
+end
+
 local function EnsureDeathCfg()
   GR.db.death = GR.db.death or {}
   local c = GR.db.death
@@ -138,6 +143,7 @@ local function EnsureDeathCfg()
   if c.scale == nil then c.scale = 1 end
   if c.duration == nil then c.duration = 10.0 end
   if c.locked == nil then c.locked = false end
+  c.toastStyle = NormalizeToastStyle(c.toastStyle)
   return c
 end
 
@@ -148,6 +154,7 @@ local function EnsureLvlCfg()
   if c.scale == nil then c.scale = 1 end
   if c.duration == nil then c.duration = 8.0 end
   if c.locked == nil then c.locked = false end
+  c.toastStyle = NormalizeToastStyle(c.toastStyle)
   return c
 end
 
@@ -894,6 +901,48 @@ function Options:AttachPanel(parent)
     SoundRow(H, content, kind)
 
     H.GroupLabel("OPT_GRP_LOOK")
+    H.Hint("OPT_TOAST_STYLE")
+    local styleBtns = {}
+    local function RefreshToastStyleBtns()
+      local cur = NormalizeToastStyle(cfgFn().toastStyle)
+      for id, b in pairs(styleBtns) do
+        if T and T.StyleTabButton then
+          T.StyleTabButton(b, id == cur)
+        end
+      end
+    end
+    local function SetToastStyle(style)
+      cfgFn().toastStyle = NormalizeToastStyle(style)
+      RefreshToastStyleBtns()
+      local mod = GR:GetModule(previewMod)
+      if mod and mod.RebuildToast then mod:RebuildToast() end
+      RefreshLooks()
+      if mod and mod.Preview and not (mod.IsLayoutEdit and mod:IsLayoutEdit()) then
+        mod:Preview()
+      end
+    end
+    local styleDefs = {
+      { id = "art", key = "OPT_TOAST_STYLE_ART" },
+      { id = "classic", key = "OPT_TOAST_STYLE_CLASSIC" },
+    }
+    local styleRowTop = H.Place(BTN_H, 4, 8)
+    local styleGap = 8
+    local styleInnerW = H.innerW()
+    local styleTileW = math.floor((styleInnerW - styleGap) / #styleDefs)
+    if styleTileW < 100 then styleTileW = 100 end
+    for i = 1, #styleDefs do
+      local def = styleDefs[i]
+      local btn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+      btn:SetSize(styleTileW, BTN_H)
+      btn:SetPoint("TOPLEFT", content, "TOPLEFT", (i - 1) * (styleTileW + styleGap), -styleRowTop)
+      btn:SetText(U.L(def.key))
+      btn:SetScript("OnClick", function()
+        SetToastStyle(def.id)
+      end)
+      styleBtns[def.id] = btn
+    end
+    RefreshToastStyleBtns()
+
     H.Slider("OPT_SCALE", 0.6, 1.6, 0.1, function()
       return cfgFn().scale or 1
     end, function(v)
@@ -938,10 +987,11 @@ function Options:AttachPanel(parent)
       },
       {
         key = "OPT_RESET_LOOK",
-        width = 210,
+        width = 240,
         onClick = function()
           local mod = GR:GetModule(previewMod)
           if mod and mod.ResetAppearance then mod:ResetAppearance() end
+          RefreshToastStyleBtns()
           U.Print(U.L("OPT_RESET_DONE"))
         end,
       },

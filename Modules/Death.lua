@@ -69,6 +69,12 @@ local seenFeed = {}
 local eventIdSerial = 0
 local pendingEventId -- reused across resolve retries for one death
 
+local function ToastStyle()
+  local s = GR.db.death and GR.db.death.toastStyle
+  if s == "classic" then return "classic" end
+  return "art"
+end
+
 local function Cfg()
   GR.db.death = GR.db.death or {}
   local c = GR.db.death
@@ -76,6 +82,7 @@ local function Cfg()
   if c.scale == nil then c.scale = 1 end
   if c.duration == nil then c.duration = 10.0 end
   if c.locked == nil then c.locked = false end
+  c.toastStyle = ToastStyle()
   return c
 end
 
@@ -135,15 +142,32 @@ local function CancelSiblingPreview()
   if lvl and lvl.CancelPreview then lvl:CancelPreview() end
 end
 
+local function DiscardToast()
+  if not toast then return end
+  CancelDeathToastTimers()
+  if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(toast) end
+  toast:Hide()
+  toast:SetParent(nil)
+  toast = nil
+end
+
 local function EnsureToast()
+  local style = ToastStyle()
+  if toast and toast._amToastStyle ~= style then
+    DiscardToast()
+  end
   if toast then
     ApplyToastLayout(toast)
     RaiseToast(toast)
     return toast
   end
-  -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
-  toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.52, 0.38, 0.46 },
-    { textSize = 15, titleSize = 22, maxLines = 4, anchor = "top" })
+  if style == "classic" then
+    toast = GR.Theme.CreateClassicToast("AngryMurlocsDeathToastClassic", "death")
+  else
+    -- Art and text box: see GR.Theme.CreateArtToast and art/build_toasts.py
+    toast = GR.Theme.CreateArtToast("AngryMurlocsDeathToast", "death", { 0.55, 0.52, 0.38, 0.46 },
+      { textSize = 15, titleSize = 22, maxLines = 4, anchor = "top" })
+  end
   RaiseToast(toast)
   toast.hint:SetText(U.L("TOAST_DRAG_HINT"))
 
@@ -160,6 +184,10 @@ local function EnsureToast()
   ApplyToastLayout(toast)
   toast:Hide()
   return toast
+end
+
+function Death:HideToast()
+  if toast then toast:Hide() end
 end
 
 local function EnvKindFromType(envType)
@@ -299,8 +327,9 @@ local function DisplayDeathToast(item, done)
     if done then done() end
     return
   end
-  if not layoutEdit and AngryMurlocsLevelUpToast and AngryMurlocsLevelUpToast.Hide then
-    AngryMurlocsLevelUpToast:Hide()
+  if not layoutEdit then
+    local lvl = GR:GetModule("LevelUp")
+    if lvl and lvl.HideToast then lvl:HideToast() end
   end
   local f = EnsureToast()
   ApplyToastLayout(f)
@@ -310,10 +339,16 @@ local function DisplayDeathToast(item, done)
     UIFrameFadeRemoveFrame(f)
   end
   displayDone = done
-  -- Badge on its own larger line above the text (TOT / DEAD)
-  if f.title then f.title:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r") end
   local attack = ResolveAttackLine(item.cause, item.spellKind, item.spellId, item.spell)
-  f.text:SetText(FormatDeathLine(item.victim, item.cause, item.killer, attack, item.zone))
+  local body = FormatDeathLine(item.victim, item.cause, item.killer, attack, item.zone)
+  if f._amToastStyle == "classic" then
+    body = body:gsub("\n", " · ")
+    f.text:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r  " .. body)
+  else
+    -- Badge on its own larger line above the text (TOT / DEAD)
+    if f.title then f.title:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r") end
+    f.text:SetText(body)
+  end
   f:SetAlpha(1)
   f:Show()
 
@@ -341,6 +376,22 @@ local function DisplayDeathToast(item, done)
       Finish()
     end
   end)
+end
+
+function Death:RebuildToast()
+  local wasEdit = layoutEdit
+  DiscardToast()
+  if wasEdit then
+    muteNextSound = true
+    DisplayDeathToast({
+      victim = U.ShortName(U.PlayerName()),
+      cause = "mob",
+      killer = "Preview",
+      spell = U.L("DEATH_MELEE"),
+      zone = GetZoneText and GetZoneText() or "?",
+      _preview = true,
+    }, nil)
+  end
 end
 
 -- item: victim, cause, killer, spellKind, spellId, spell (legacy prose), zone, eventId
@@ -1063,7 +1114,8 @@ function Death:ResetAppearance()
   local c = Cfg()
   c.scale = 1
   c.duration = 10.0
-  if toast then ApplyToastLayout(toast) end
+  c.toastStyle = "art"
+  DiscardToast()
 end
 
 function Death:ResetLayout()
