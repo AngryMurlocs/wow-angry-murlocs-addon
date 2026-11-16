@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Professions and recipes from French (and other) clients share the same guild rows as English and German
 - Wanted sighting pins no longer have a dark outline glow around the crosshair
 
 ## 0.11.14

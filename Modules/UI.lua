@@ -452,13 +452,31 @@ function UI.MatchesProfessionFilter(name, entry, opts)
 
   if not filter then return true end
   if name:lower():find(filter, 1, true) then return true end
+  local prof = GR:GetModule("Professions")
+  local function ProfLabel(p)
+    if not p then return "" end
+    local canon = p.key
+    if prof and prof.CanonicalProfKey and canon then
+      canon = prof.CanonicalProfKey(canon)
+    end
+    if prof and prof.DisplayName and canon then
+      return string.lower(tostring(prof.DisplayName(canon) or ""))
+    end
+    return string.lower(tostring(p.name or p.key or ""))
+  end
   local fKey, fSkill = filter:match("^(%S+)%s+(%d+)$")
   if fKey and fSkill then
     fSkill = tonumber(fSkill)
     for i = 1, #(entry.list or {}) do
       local p = entry.list[i]
-      local n = (p.name or ""):lower()
-      if (p.key == fKey or n:find(fKey, 1, true)) and p.skill >= fSkill then
+      local label = ProfLabel(p)
+      local canon = p.key
+      if prof and prof.CanonicalProfKey and canon then
+        canon = prof.CanonicalProfKey(canon)
+      end
+      if ((canon and canon == fKey) or (canon and tostring(canon):find(fKey, 1, true))
+          or (label ~= "" and label:find(fKey, 1, true)))
+          and (tonumber(p.skill) or 0) >= fSkill then
         return true
       end
     end
@@ -466,7 +484,13 @@ function UI.MatchesProfessionFilter(name, entry, opts)
   end
   for i = 1, #(entry.list or {}) do
     local p = entry.list[i]
-    if (p.key and p.key:find(filter, 1, true)) or ((p.name or ""):lower():find(filter, 1, true)) then
+    local label = ProfLabel(p)
+    local canon = p.key or ""
+    if prof and prof.CanonicalProfKey then
+      canon = prof.CanonicalProfKey(canon) or canon
+    end
+    if (canon and tostring(canon):find(filter, 1, true))
+        or (label ~= "" and label:find(filter, 1, true)) then
       return true
     end
   end

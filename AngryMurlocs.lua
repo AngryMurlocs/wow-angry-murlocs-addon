@@ -21,6 +21,12 @@ local function RunGuildSync()
   local prof = GR:GetModule("Professions")
   if prof then
     if prof.MigrateCache then prof:MigrateCache() end
+    -- Per-guild key canon (independent of account _movedToScope).
+    if prof.MigrateAllScopeKeys then
+      prof:MigrateAllScopeKeys()
+    elseif prof.MigrateActiveScopeKeys then
+      prof:MigrateActiveScopeKeys()
+    end
     if prof.ClearEmptyRemoteStubs then prof:ClearEmptyRemoteStubs() end
     if prof.RequestAll then prof:RequestAll() end
   end
