@@ -964,7 +964,12 @@ local function MaybeAutoFetchRecipes()
   state.quietFetch = true
   state.fetchPending = "request"
   UI:RefreshRecipeCatalog()
-  local ok, why = R:RequestProfession(state.profKey, false)
+  if R.NoteCatalogOpen then
+    R:NoteCatalogOpen(state.player, state.profKey)
+  end
+  local ok, why = R:RequestProfession(state.profKey, false, {
+    playerName = state.player,
+  })
   if not ok or why ~= "sent" then
     ClearFetchPending()
     UI:RefreshRecipeCatalog()
@@ -1551,6 +1556,8 @@ function UI:CloseRecipeCatalog(restoreNav)
   state.selectedId = nil
   state.crafters = nil
   ClearFetchPending()
+  local Rclose = Recipes()
+  if Rclose and Rclose.NoteCatalogClose then Rclose:NoteCatalogClose() end
   HidePreview()
   HideCrafterMenu()
   if catalog then catalog:Hide() end
@@ -1585,6 +1592,10 @@ function UI:OpenRecipeCatalog(playerName, profKey)
   state.page = 1
   state.listScrollY = 0
   ClearFetchPending()
+  local Ropen = Recipes()
+  if Ropen and Ropen.NoteCatalogOpen then
+    Ropen:NoteCatalogOpen(playerName, profKey)
+  end
   if catalog.searchBox then catalog.searchBox:SetText("") end
   if catalog.qtyBox then catalog.qtyBox:SetText("1") end
   if catalog.matsBringCb then catalog.matsBringCb:SetChecked(true) end

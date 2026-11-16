@@ -95,9 +95,20 @@ local GATHERING_KEYS = {
 local lastReqSend = nil -- nil = never sent
 local lastReqReply = nil -- nil = never replied
 local lastSentFp = {} -- profKey -> content fingerprint (excludes scanAt)
+local emptyFallback = nil -- { gen, playerName, canonKey, used }
+local emptyFallbackGen = 0
+local catalogOpen = nil -- { playerName, profKey }
 
 local function ProfMod()
   return GR:GetModule("Professions")
+end
+
+local function CanonProfKey(key)
+  local prof = ProfMod()
+  if prof and prof.CanonicalProfKey then
+    return prof.CanonicalProfKey(key)
+  end
+  return key
 end
 
 local function Cache()
@@ -113,7 +124,8 @@ local function EnsureMetaDB()
 end
 
 function ProfRecipes.IsGathering(key)
-  return key ~= nil and GATHERING_KEYS[key] == true
+  if key == nil then return false end
+  return GATHERING_KEYS[CanonProfKey(key)] == true
 end
 
 function ProfRecipes.ClampQty(n)
@@ -270,15 +282,22 @@ function ProfRecipes.PruneRecipesToProfessionList(recipes, list, owner)
     local p = list[i]
     local key = p and p.key
     if type(key) == "string" and key ~= "" then
-      keep[key] = true
+      keep[CanonProfKey(key)] = true
     end
   end
   if not next(keep) then return recipes end
   local out = {}
   local removed = false
   for key, rec in pairs(recipes) do
-    if keep[key] then
-      out[key] = rec
+    local canon = CanonProfKey(key)
+    if keep[canon] then
+      -- Prefer already-canonical bucket key when both exist.
+      if out[canon] and key ~= canon then
+        -- keep existing canon entry
+      else
+        out[canon] = rec
+      end
+      if key ~= canon then removed = true end
     else
       removed = true
       if owner then
@@ -298,7 +317,7 @@ local function ProfessionKeysFromList(list)
   for i = 1, #list do
     local key = list[i] and list[i].key
     if type(key) == "string" and key ~= "" then
-      keys[key] = true
+      keys[CanonProfKey(key)] = true
     end
   end
   return keys
@@ -392,7 +411,7 @@ function ProfRecipes.Decode(rest)
   end
   return {
     ver = ver,
-    profKey = profKey,
+    profKey = CanonProfKey(profKey),
     epoch = epoch,
     rev = rev,
     scanAt = scanAt,
@@ -405,7 +424,8 @@ function ProfRecipes.GetEntry(playerName, profKey)
   if not playerName or not profKey then return nil end
   local entry = Cache()[U.NormalizeName(playerName)]
   if not entry or type(entry.recipes) ~= "table" then return nil end
-  return entry.recipes[profKey]
+  local canon = CanonProfKey(profKey)
+  return entry.recipes[canon] or entry.recipes[profKey]
 end
 
 function ProfRecipes.GetStatus(playerName, profKey)
@@ -1141,10 +1161,30 @@ local function EachProfessionIndex(fn)
   end
 end
 
+local function ResolveKeyOrdered(name, parentId, childId, skillLine)
+  local prof = ProfMod()
+  if not prof then return nil end
+  -- Parent first, then child, then skillLine — each probed separately (0 is not valid).
+  local ids = {}
+  local function push(id)
+    id = tonumber(id)
+    if id and id > 0 then ids[#ids + 1] = id end
+  end
+  push(parentId)
+  push(childId)
+  push(skillLine)
+  if prof.ResolveProfessionKey then
+    return prof.ResolveProfessionKey(name, ids)
+  end
+  if prof.KeyFromSkillName then
+    return prof.KeyFromSkillName(name)
+  end
+  return nil
+end
+
 local function KeyFromProfessionIndex(idx)
   local name, _, _, _, _, _, skillLine = GetProfessionInfo(idx)
-  local prof = ProfMod()
-  local key = prof and prof.KeyFromSkillName and prof.KeyFromSkillName(name)
+  local key = ResolveKeyOrdered(name, nil, nil, skillLine)
   return key, name, skillLine
 end
 
@@ -1163,14 +1203,22 @@ local function CurrentProfessionContext()
   end
   if not info then return nil end
   local name = info.professionName or info.parentProfessionName
-  local prof = ProfMod()
-  local key = prof and prof.KeyFromSkillName and prof.KeyFromSkillName(name)
-  local professionID = info.professionID or info.parentProfessionID
-  if not key or not professionID or professionID == 0 then return nil end
+  local parentId = info.parentProfessionID
+  local childId = info.professionID
+  -- Preserve original IDs for GetProfessionSpells / OpenTradeSkill.
+  local professionID = (childId and childId > 0 and childId)
+    or (parentId and parentId > 0 and parentId)
+    or nil
+  local key = ResolveKeyOrdered(name, parentId, childId, nil)
+  if not key or not professionID then return nil end
+  local skillLineID
+  if parentId and parentId > 0 and childId and childId > 0 and childId ~= parentId then
+    skillLineID = childId
+  end
   return {
     profKey = key,
     professionID = professionID,
-    skillLineID = info.parentProfessionID and info.professionID or nil,
+    skillLineID = skillLineID,
     name = name,
   }
 end
@@ -1189,11 +1237,19 @@ local function ContextFromSkillLineList(profKey)
       local ok, info = pcall(api.GetProfessionInfoBySkillLineID, skillLine)
       if ok and type(info) == "table" then
         local name = info.professionName or info.parentProfessionName
-        local key = prof and prof.KeyFromSkillName and prof.KeyFromSkillName(name)
+        local key = ResolveKeyOrdered(
+          name,
+          info.parentProfessionID,
+          info.professionID,
+          skillLine
+        )
         if key == profKey then
+          local professionID = (info.professionID and info.professionID > 0 and info.professionID)
+            or (info.parentProfessionID and info.parentProfessionID > 0 and info.parentProfessionID)
+            or nil
           return {
             profKey = key,
-            professionID = info.professionID or info.parentProfessionID,
+            professionID = professionID,
             skillLineID = skillLine,
             name = name,
           }
@@ -1811,21 +1867,104 @@ function ProfRecipes:ScheduleRelayWave(profKeyFilter, scopeKey, startDelay)
   return #window
 end
 
-function ProfRecipes:RequestAll(profKey, force)
+function ProfRecipes:NoteCatalogOpen(playerName, profKey)
+  if not playerName or not profKey then
+    catalogOpen = nil
+    return
+  end
+  catalogOpen = {
+    playerName = U.NormalizeName(playerName),
+    profKey = CanonProfKey(profKey),
+  }
+end
+
+function ProfRecipes:NoteCatalogClose()
+  catalogOpen = nil
+  emptyFallbackGen = emptyFallbackGen + 1
+  emptyFallback = nil
+end
+
+function ProfRecipes:CancelEmptyFallback()
+  emptyFallbackGen = emptyFallbackGen + 1
+  emptyFallback = nil
+end
+
+local function CatalogStillOpen(playerName, canonKey)
+  if not catalogOpen then return false end
+  if catalogOpen.profKey ~= canonKey then return false end
+  if playerName and catalogOpen.playerName ~= U.NormalizeName(playerName) then
+    return false
+  end
+  return true
+end
+
+local function ScheduleEmptyFallback(playerName, canonKey)
+  if not playerName or not canonKey or canonKey == "" then return end
+  if emptyFallback and emptyFallback.used then return end
+  emptyFallbackGen = emptyFallbackGen + 1
+  local gen = emptyFallbackGen
+  emptyFallback = {
+    gen = gen,
+    playerName = U.NormalizeName(playerName),
+    canonKey = canonKey,
+    used = false,
+  }
+  C_Timer.After(PROFRQ_SEND_CD + 0.05, function()
+    local pend = emptyFallback
+    if not pend or pend.gen ~= gen or pend.used then return end
+    if not ProfRecipes.enabled then return end
+    if not CatalogStillOpen(pend.playerName, pend.canonKey) then return end
+    local rec = ProfRecipes.GetEntry(pend.playerName, pend.canonKey)
+    if rec and rec.complete then
+      emptyFallback = nil
+      return
+    end
+    pend.used = true
+    lastReqSend = U.Now()
+    Comm:Send("PROFRQ|" .. tostring(PROFRQ_WIRE_VER) .. "|", "ctrl", "sync")
+  end)
+end
+
+function ProfRecipes:RequestAll(profKey, force, opts)
+  opts = opts or {}
   if not IsInGuild or not IsInGuild() then return false, "no_guild" end
   local now = U.Now()
   if not force and lastReqSend and (now - lastReqSend) < PROFRQ_SEND_CD then
     return false, "cooldown"
   end
+  local wireKey = ""
+  local canon = nil
+  if profKey and tostring(profKey) ~= "" then
+    canon = CanonProfKey(profKey)
+    wireKey = canon
+    local playerName = opts.playerName
+    if playerName then
+      local entry = Cache()[U.NormalizeName(playerName)]
+      local prof = ProfMod()
+      if prof and prof.WireRequestKey then
+        wireKey = prof.WireRequestKey(entry, canon) or canon
+      end
+      if opts.noteOpen ~= false then
+        ProfRecipes:NoteCatalogOpen(playerName, canon)
+      end
+    end
+  end
   lastReqSend = now
-  -- PROFRQ wire version stays 1 (independent of PROFR knowledge wire).
-  local body = tostring(PROFRQ_WIRE_VER) .. "|" .. (profKey and tostring(profKey) or "")
+  local body = tostring(PROFRQ_WIRE_VER) .. "|" .. tostring(wireKey or "")
   local ok = Comm:Send("PROFRQ|" .. body, "ctrl", "sync")
+  if ok and canon and opts.playerName and wireKey ~= "" then
+    ScheduleEmptyFallback(opts.playerName, canon)
+  end
   return ok and true or false, ok and "sent" or "send_fail"
 end
 
-function ProfRecipes:RequestProfession(profKey, force)
-  return self:RequestAll(profKey, force)
+function ProfRecipes:RequestProfession(profKey, force, opts)
+  if type(force) == "table" then
+    opts = force
+    force = opts.force
+  end
+  opts = opts or {}
+  return self:RequestAll(profKey, force, opts)
 end
 
 -- User-clicked "Refresh recipes". Opens trade skill if needed for self.
@@ -1842,7 +1981,9 @@ function ProfRecipes:RefreshProfession(profKey, opts)
   end
 
   if remote then
-    local ok, why = self:RequestProfession(profKey, true)
+    local ok, why = self:RequestProfession(profKey, true, {
+      playerName = opts.playerName,
+    })
     return ok, why
   end
 
@@ -1897,6 +2038,7 @@ end
 -- provenance: "direct" (live PROFR, wire sender == owner) or "relay" (PROFRO).
 function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
   if not data or not data.profKey or not data.complete then return end
+  data.profKey = CanonProfKey(data.profKey)
   if ProfRecipes.IsGathering(data.profKey) then return end
   provenance = provenance or "direct"
   local cache = Cache()
@@ -1962,6 +2104,12 @@ function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
     complete = true,
     epoch = incomingEpoch,
   }
+  if emptyFallback and emptyFallback.canonKey == data.profKey then
+    local open = catalogOpen
+    if open and open.profKey == data.profKey then
+      ProfRecipes:CancelEmptyFallback()
+    end
+  end
   ProfRecipes.InvalidateGuildRecipeIndex()
   GR:SendMessage("PROF_RECIPES_CHANGED", sender, data.profKey)
   if ProfRecipes.EnsureMetaForIds then
@@ -2003,15 +2151,16 @@ end
 function ProfRecipes.ListRelayCandidates(profKeyFilter)
   local cache = Cache()
   local out = {}
-  local filter = (profKeyFilter and profKeyFilter ~= "") and profKeyFilter or nil
+  local filter = (profKeyFilter and profKeyFilter ~= "") and CanonProfKey(profKeyFilter) or nil
   for owner, entry in pairs(cache) do
     if type(owner) == "string" and entry and type(entry.recipes) == "table"
         and not U.IsSelfName(owner)
         and not ProfRecipes.IsPeerOnlineForRelay(owner) then
       for profKey, rec in pairs(entry.recipes) do
-        if rec and rec.complete and not ProfRecipes.IsGathering(profKey)
-            and (not filter or profKey == filter) then
-          out[#out + 1] = { owner = owner, profKey = profKey, rec = rec }
+        local canon = CanonProfKey(profKey)
+        if rec and rec.complete and not ProfRecipes.IsGathering(canon)
+            and (not filter or canon == filter) then
+          out[#out + 1] = { owner = owner, profKey = canon, rec = rec }
         end
       end
     end
@@ -2351,7 +2500,8 @@ function ProfRecipes:OnEnable()
     if not scopeKey or scopeKey == "" then return end
     if not GR.db or not GR.db.privacy.shareProfessions then return end
     lastReqReply = now
-    local filter = (profKey and profKey ~= "") and profKey or nil
+    -- Old peers may request legacy keys (couture); reply with canonical catalogs.
+    local filter = (profKey and profKey ~= "") and CanonProfKey(profKey) or nil
     C_Timer.After(1 + math.random() * 4, function()
       if not ProfRecipes.enabled then return end
       if not ScopeStillValid(scopeKey) then return end
@@ -2420,6 +2570,12 @@ function ProfRecipes:OnEnable()
   GR:BindMessage(self, "GUILD_UPDATE", function()
     wipe(lastSentFp)
     wipe(relayCursor)
+    ProfRecipes:CancelEmptyFallback()
+    ProfRecipes:NoteCatalogClose()
+    local prof = ProfMod()
+    if prof and prof.MigrateActiveScopeKeys then
+      prof:MigrateActiveScopeKeys()
+    end
     ProfRecipes.AbortAllBackgroundWork()
     -- Derived index must not outlive the active guild scope.
     ProfRecipes.InvalidateGuildRecipeIndex()

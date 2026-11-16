@@ -53,6 +53,9 @@ _G.UISpecialFrames = {}
 _G.tinsert = table.insert
 _G.GameTooltip_Hide = function() end
 
+-- Professions needed for DisplayName-based text search after locale migrate.
+_G.GetLocale = function() return "deDE" end
+dofile("Modules/Professions.lua")
 dofile("Modules/UI.lua")
 
 local Match = GR:GetModule("UI").MatchesProfessionFilter
@@ -61,6 +64,12 @@ local entry = {
   list = {
     { key = "ench", skill = 225, name = "Enchanting" },
     { key = "tail", skill = 300, name = "Tailoring" },
+  },
+}
+
+local migrated = {
+  list = {
+    { key = "tail", skill = 200, name = "couture" }, -- stored wire name, display is Schneiderei
   },
 }
 
@@ -88,6 +97,9 @@ check("active only allows online", Match("Bob", entry, {
   me = "Me",
   isOnline = function(n) return online[n] end,
 }))
+
+check("search DisplayName Schneiderei 200", Match("Fran", migrated, { text = "schneiderei 200" }))
+check("search DisplayName skill fail", not Match("Fran", migrated, { text = "schneiderei 250" }))
 
 print(string.format("\n%d failures", fails))
 if fails > 0 then
