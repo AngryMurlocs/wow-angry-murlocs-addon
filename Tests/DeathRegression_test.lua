@@ -437,5 +437,277 @@ do
     and a.deaths[1].data.cause == "unknown" and Sim.Entries(a) == 0)
 end
 
+local function Swing(stamp, overkill, name, guid)
+  local hit = Hit(name or "MineWorker", guid or "Creature-0-1-0-0-1-0", stamp, overkill)
+  hit.event, hit.spellName = "SWING_DAMAGE", nil
+  return hit
+end
+
+-- Reproduce the epoch rejection and exercise the actual event -> wire -> toast path.
+for _, diagOn in ipairs({ false, true }) do
+  local sim, a, b, d = Pair()
+  sim:Run(30)
+  a.GR.Diag:SetEnabled(diagOn)
+  World(a, { dead = true })
+  Recap(a, { Swing(sim:Wall()-10, 0) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(3)
+  local sent = a.deaths[1] and a.deaths[1].data
+  local received = b.deaths[1] and b.deaths[1].data
+  local toast = b.toasts[1]
+  check("older NPC recap is recovered with diag=" .. tostring(diagOn), sent
+    and sent.cause == "mob" and sent.killer == "MineWorker" and not sent.isPlayer)
+  check("recovered NPC wire carries melee", received and received.cause == "mob"
+    and received.spellKind == "MELEE" and received.killer == "MineWorker")
+  check("recovered NPC recipient toast carries killer and attack", toast and toast.cause == "mob"
+    and toast.killer == "MineWorker" and toast.spellKind == "MELEE")
+  check("recovered NPC is published once without self-toast", #a.deaths == 1 and #b.deaths == 1
+    and #b.toasts == 1 and #a.toasts == 0 and sim:Count("DEATH") == 1)
+  check("recovered NPC never creates Wanted", Sim.Entries(a) == 0 and Sim.Entries(b) == 0 and sim:Count("WK") == 0)
+  if diagOn then
+    local dump = table.concat(a.GR.Diag.deaths[1].lines, "\n")
+    check("NPC recovery diagnostic explains both decisions", dump:find("epoch_out_of_window", 1, true)
+      and dump:find("npc_recovered", 1, true) and dump:find("delta=-10", 1, true), dump)
+  end
+end
+
+for _, case in ipairs({
+  { "inclusive NPC past boundary", -15, "mob" },
+  { "outside NPC past boundary", -15.01, "unknown" },
+  { "inclusive existing future boundary", 2, "mob" },
+  { "outside future boundary", 2.01, "unknown" },
+  { "hour-old NPC", -3600, "unknown" },
+}) do
+  local sim, a, _, d = Pair()
+  sim:Run(30)
+  Recap(a, { Swing(sim:Wall()+case[2], 1) })
+  local info = d.ResolveDeath()
+  check(case[1], info.cause == case[3] and not info.reliable and not info.isPlayer, info.cause)
+end
+
+-- Public mapper behaviour for absent/relative clocks is retained, never extended.
+do
+  local sim, a, b, d = Pair()
+  sim:Step(30)
+  local deathWall = sim:Wall()
+  World(a, { dead = true })
+  Recap(a, { Swing(deathWall-10, 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Step(0.2)
+  check("NPC recovery does not shorten existing unknown retries", #a.deaths == 0)
+  Recap(a, { Hit("DelayedPlayer", "Player-1-ABCDEF", deathWall, 1) })
+  sim:Run(3)
+  check("later reliable player wins before final NPC recovery", #a.deaths == 1
+    and a.deaths[1].data.cause == "player" and a.deaths[1].data.killer == "DelayedPlayer"
+    and Sim.Level(a, "DelayedPlayer-Realm") == 1 and Sim.Level(b, "DelayedPlayer-Realm") == 1)
+end
+do
+  local sim, a, _, d = Pair()
+  sim:Run(30)
+  for _, guid in ipairs({ "Player-1-ABCDEF", "Creature-0-1-0-0-1-0" }) do
+    Recap(a, { Swing(sim:Wall()*1000, 1, "Milliseconds", guid) })
+    check("milliseconds never gain acceptance: " .. guid, d.ResolveDeath().cause == "unknown")
+  end
+  for _, guid in ipairs({ "Creature-0-1-0-0-1-0", "Vehicle-0-1-0-0-1-0", "Pet-0-1-0-0-1-0" }) do
+    Recap(a, { Swing(sim:Wall()-10, 1, "Npc", guid) })
+    check("non-player GUID recovers: " .. guid, d.ResolveDeath().cause == "mob")
+  end
+  Recap(a, { Swing(sim:Wall()-10, -1) })
+  check("explicitly nonlethal NPC never recovers", d.ResolveDeath().cause == "unknown")
+  local nameless = Swing(sim:Wall()-10, 1)
+  nameless.sourceName = nil
+  Recap(a, { nameless })
+  check("nameless old NPC stays unknown", d.ResolveDeath().cause == "unknown")
+  local flagPlayer = Swing(sim:Wall()-10, 1)
+  flagPlayer.sourceFlags = 0x548
+  Recap(a, { flagPlayer })
+  check("player flag cannot use NPC window", d.ResolveDeath().cause == "unknown")
+  local pet = Swing(sim:Wall()-10, 1, "Pet", "Pet-0-1-0-0-9-0")
+  pet.sourceFlags = 0x1140
+  Recap(a, { pet })
+  check("unresolved player pet cannot use NPC window", d.ResolveDeath().cause == "unknown")
+end
+
+for _, oldIsPlayer in ipairs({ false, true }) do
+  local sim, a, b, d = Pair()
+  sim:Run(30)
+  local oldGuid = oldIsPlayer and "Player-1-ABCDEF" or "Creature-0-1-0-0-1-0"
+  local newGuid = oldIsPlayer and "Creature-0-1-0-0-1-0" or "Player-1-ABCDEF"
+  Recap(a, { Swing(sim:Wall()-60, 1, "Old", oldGuid), Swing(sim:Wall()-1, nil, "Recent", newGuid) })
+  d:BroadcastLocalDeath()
+  sim:Run(3)
+  check("mixed recap never reselects after stale winner: " .. oldGuid,
+    a.deaths[1].data.cause == "unknown" and b.deaths[1].data.cause == "unknown"
+    and Sim.Entries(a) == 0 and sim:Count("WK") == 0)
+end
+
+-- A new NPC path must not mask secrets or an environmental contradiction.
+do
+  local sim, a, _, d = Pair()
+  sim:Run(30)
+  local secret = {}
+  a.env.issecretvalue = function(v) return rawequal(v, secret) end
+  for _, field in ipairs({ "sourceName", "sourceGUID", "sourceFlags", "amount", "overkill", "currentHP",
+    "spellName", "spellId", "spellID", "environmentalType", "envType" }) do
+    local hit = Swing(sim:Wall()-10, 1)
+    hit[field] = secret
+    Recap(a, { hit })
+    check("old NPC with secret " .. field .. " is not recovered", d.ResolveDeath().cause == "unknown")
+  end
+  Recap(a, { Swing(sim:Wall()-10, 1), secret })
+  check("secret event blocks NPC recovery", d.ResolveDeath().cause == "unknown")
+  a.env.C_DeathRecap = { GetRecapEvents = function() return secret end }
+  a.env.DeathRecap_GetEvents = function() return { Swing(sim:Wall()-10, 1) } end
+  check("secret current recap blocks recovery from legacy fallback", d.ResolveDeath().cause == "unknown")
+  a.env.DeathRecap_GetEvents = nil
+  Recap(a, { Swing(sim:Wall()-10, 1) })
+  Event(d, "MIRROR_TIMER_START", "BREATH", 0, 60000, -1, 0, "Breath")
+  check("environment hint blocks even lethal NPC recovery", d.ResolveDeath().cause == "unknown")
+  Recap(a, { { event = "ENVIRONMENTAL_DAMAGE", environmentalType = "DROWNING",
+    timestamp = sim:Wall(), amount = 100, overkill = 0 } })
+  check("existing environmental result stays intact", d.ResolveDeath().cause == "env")
+end
+
+-- The boundary belongs to the previous life, not to a retry or duplicate event.
+for _, stopTimer in ipairs({ false, true }) do
+  local sim, a, _, d = Pair()
+  sim:Step(30)
+  Event(d, "MIRROR_TIMER_START", "BREATH", 0, 60000, -1, 0, "Breath")
+  sim:Step(4.5)
+  World(a, { dead = true })
+  Recap(a, { Swing(sim:Wall()-10, 1) })
+  Event(d, "PLAYER_DEAD")
+  if stopTimer then
+    Event(d, "MIRROR_TIMER_STOP", "BREATH")
+    check("direct resolver retains active death hint", d.ResolveDeath().cause == "unknown")
+    Event(d, "PLAYER_DEAD") -- duplicate must also retain the death's hint
+  end
+  sim:Run(2)
+  check("death hint survives retry expiry/stop=" .. tostring(stopTimer), #a.deaths == 1
+    and a.deaths[1].data.cause == "unknown")
+  -- It must not leak into a different life.
+  World(a)
+  Event(d, "PLAYER_ALIVE")
+  sim:Step(20)
+  World(a, { dead = true })
+  Recap(a, { Swing(sim:Wall()-10, 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("NPC hint block resets on resurrection=" .. tostring(stopTimer), #a.deaths == 2
+    and a.deaths[2].data.cause == "mob")
+end
+do
+  local sim, a, b, d = Pair()
+  sim:Run(30)
+  local firstDeath = sim:Wall()
+  World(a, { dead = true })
+  Recap(a, { Swing(firstDeath, 1, "FirstWolf") })
+  Event(d, "PLAYER_DEAD")
+  World(a)
+  Event(d, "PLAYER_ALIVE")
+  sim:Run(8)
+  local secondDeath = sim:Wall()
+  World(a, { dead = true })
+  Event(d, "PLAYER_DEAD") -- unchanged recap belongs to the first death
+  sim:Run(3)
+  check("previous death recap inside NPC window stays unknown", #a.deaths == 2
+    and a.deaths[2].data.cause == "unknown" and #b.deaths == 2)
+  World(a)
+  Event(d, "PLAYER_UNGHOST")
+  sim:Run(10)
+  local boundary = secondDeath
+  Recap(a, { Swing(boundary+2, 1) })
+  check("previous-life boundary plus skew is excluded", d.ResolveDeath().cause == "unknown")
+  Recap(a, { Swing(sim:Wall()-10, 1, "NewWolf") })
+  World(a, { dead = true })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("new life can recover a newer NPC hit", #a.deaths == 3 and a.deaths[3].data.cause == "mob"
+    and a.deaths[3].data.killer == "NewWolf")
+end
+do
+  local sim, a, _, d = Pair()
+  sim:Run(30)
+  World(a, { dead = true })
+  local stamp = sim:Wall()-10
+  Recap(a, {})
+  Event(d, "PLAYER_DEAD")
+  Event(d, "PLAYER_ALIVE") -- ghost release, still dead
+  sim:Step(0.1)
+  Event(d, "PLAYER_DEAD") -- duplicate before pending resolution completes
+  Recap(a, { Swing(stamp, 1) })
+  sim:Run(2)
+  check("ghost and repeated death preserve recovery boundary", #a.deaths == 1
+    and a.deaths[1].data.cause == "mob")
+end
+do
+  local sim, a, _, d = Pair()
+  sim:Run(30)
+  local enabledAt = sim:Wall()
+  d:OnDisable()
+  d:OnEnable()
+  sim:Step(10)
+  Recap(a, { Swing(enabledAt+2, 1) })
+  check("reload boundary plus skew is excluded", d.ResolveDeath().cause == "unknown")
+  Recap(a, { Swing(enabledAt+2.01, 1) })
+  check("hit after reload boundary can recover", d.ResolveDeath().cause == "mob")
+  Recap(a, { Swing(enabledAt-1, 1) })
+  check("pre-reload hit cannot recover", d.ResolveDeath().cause == "unknown")
+  a.env.GetServerTime = function() return enabledAt-5 end
+  Recap(a, { Swing(enabledAt-15, 1) })
+  check("clock rollback cannot recover", d.ResolveDeath().cause == "unknown")
+end
+do
+  local sim, a, b, d = Pair()
+  sim:Run(30)
+  World(a, { dead = true })
+  Recap(a, { Hit("CurrentPlayer", "Player-1-ABCDEF", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(3)
+  check("valid player remains the same killer", a.deaths[1].data.cause == "player"
+    and a.deaths[1].data.killer == "CurrentPlayer" and b.deaths[1].data.killer == "CurrentPlayer")
+  check("valid player still counts exactly once", Sim.Level(a, "CurrentPlayer-Realm") == 1
+    and Sim.Level(b, "CurrentPlayer-Realm") == 1 and sim:Count("WK") == 1)
+end
+do
+  local sim, a, _, d = Pair()
+  sim:Step(30)
+  local originalDeath = sim:Wall()
+  Recap(a, { Swing(originalDeath+1, 1, "OldWolf") })
+  World(a, { dead = true })
+  Event(d, "PLAYER_DEAD")
+  World(a)
+  Event(d, "PLAYER_ALIVE")
+  -- One death observed during a clock rollback must not lower the boundary
+  -- and admit an earlier life's recap once the clock catches up.
+  a.env.GetServerTime = function() return originalDeath-5 end
+  World(a, { dead = true })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  World(a)
+  Event(d, "PLAYER_ALIVE")
+  a.env.GetServerTime = function() return originalDeath+8 end
+  World(a, { dead = true })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("death during clock rollback cannot lower NPC life boundary", #a.deaths == 3
+    and a.deaths[3].data.cause == "unknown")
+end
+
+do
+  local sim, a, _, d = Pair()
+  sim:Step(30)
+  local originalDeath = sim:Wall()
+  World(a, { dead = true })
+  Recap(a, {})
+  Event(d, "PLAYER_DEAD")
+  a.env.GetServerTime = function() return originalDeath-5 end
+  Recap(a, { Swing(originalDeath-15, 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("duplicate death during rollback cannot recover NPC", #a.deaths == 1
+    and a.deaths[1].data.cause == "unknown")
+end
+
 print(string.format("\n%d failures", failures))
 if failures > 0 then os.exit(1) end
