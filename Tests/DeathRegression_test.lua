@@ -218,7 +218,7 @@ do
   Event(d, "PLAYER_DEAD")
   Event(d, "PLAYER_DEAD")
   sim:Run(3)
-  check("new death supersedes pending resolution", #a.deaths == 1 and #b.deaths == 1)
+  check("repeat PLAYER_DEAD keeps single pending resolution", #a.deaths == 1 and #b.deaths == 1)
   check("exhausted retries publish honest unknown", a.deaths[1] and a.deaths[1].data.cause == "unknown")
 end
 
@@ -707,6 +707,378 @@ do
   sim:Run(2)
   check("duplicate death during rollback cannot recover NPC", #a.deaths == 1
     and a.deaths[1].data.cause == "unknown")
+end
+
+-- One death event per life: duplicate PLAYER_DEAD must not republish.
+do
+  local sim, a, b, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  check("valid mob publishes once immediately", #a.deaths == 1 and a.deaths[1].data.killer == "FatalWolf")
+  local id1 = a.deaths[1].data.eventId
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("repeat PLAYER_DEAD after publish stays one local update", #a.deaths == 1)
+  check("repeat PLAYER_DEAD after publish stays one DEATH wire", sim:Count("DEATH") == 1)
+  check("repeat PLAYER_DEAD after publish stays one guild toast", #b.toasts == 1)
+  check("repeat PLAYER_DEAD after publish no self toast", #a.toasts == 0)
+  check("repeat PLAYER_DEAD after publish no Wanted", Sim.Entries(a) == 0 and sim:Count("WK") == 0)
+  check("repeat PLAYER_DEAD after publish keeps same eventId", a.deaths[1].data.eventId == id1)
+end
+
+do
+  local sim, a, b, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("Ganker", "Player-1-ABCDEF", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  local lvlA = Sim.Level(a, "Ganker-Realm")
+  local lvlB = Sim.Level(b, "Ganker-Realm")
+  check("valid player Wanted once locally", lvlA == 1)
+  check("valid player Wanted once on guild peer", lvlB == 1)
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("repeat PLAYER_DEAD does not add second Wanted", Sim.Level(a, "Ganker-Realm") == 1
+    and Sim.Level(b, "Ganker-Realm") == 1)
+  check("repeat PLAYER_DEAD player death still one wire", sim:Count("DEATH") == 1 and #a.deaths == 1)
+end
+
+do
+  local sim, a, b, d = Pair()
+  World(a, { dead = true })
+  Recap(a, {})
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.2)
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.85)
+  check("SHORT duplicate does not restart deadline", #a.deaths == 1)
+  sim:Run(2)
+  check("SHORT duplicate ends as single unknown", #a.deaths == 1 and #b.deaths == 1
+    and a.deaths[1].data.cause == "unknown")
+end
+
+do
+  local sim, a, b, d = Pair()
+  local SECRET = {}
+  a.env.issecretvalue = function(v) return v == SECRET end
+  World(a, { dead = true })
+  Recap(a, { { event = "SPELL_DAMAGE", sourceName = SECRET, sourceGUID = SECRET,
+    amount = 80, overkill = 1 } })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.3)
+  Event(d, "PLAYER_DEAD")
+  check("LONG duplicate keeps pending before settle", #a.deaths == 0)
+  a.env.issecretvalue = function() return false end
+  Recap(a, { Hit("Ganker", "Player-1-ABCDEF", sim:Wall(), 1) })
+  sim:Run(10)
+  check("LONG duplicate settles once after secrets clear", #a.deaths == 1 and #b.deaths == 1
+    and a.deaths[1].data.killer == "Ganker")
+  check("LONG duplicate single Wanted", Sim.Level(a, "Ganker-Realm") == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, {})
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("unknown already published", #a.deaths == 1 and a.deaths[1].data.cause == "unknown")
+  Recap(a, { Hit("LatePlayer", "Player-1-ABCDEF", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("late recap after publish does not republish", #a.deaths == 1)
+  check("late recap after publish adds no Wanted", Sim.Entries(a) == 0)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, {})
+  Event(d, "PLAYER_DEAD")
+  Event(d, "PLAYER_ALIVE")
+  check("ghost release before publish keeps pending", #a.deaths == 0)
+  sim:Run(2)
+  check("ghost release before publish still publishes once", #a.deaths == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  Event(d, "PLAYER_ALIVE")
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("ghost release after publish does not republish", #a.deaths == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  Event(d, "PLAYER_UNGHOST")
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("PLAYER_UNGHOST while dead does not unlock cycle", #a.deaths == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  a.env.UnitIsDeadOrGhost = function() return nil end
+  Event(d, "PLAYER_UNGHOST")
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  check("PLAYER_UNGHOST with nil DeadOrGhost keeps lock", #a.deaths == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  local SECRET = {}
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  a.env.issecretvalue = function(v) return v == SECRET end
+  a.env.UnitIsDeadOrGhost = function() return SECRET end
+  Event(d, "PLAYER_UNGHOST")
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  check("PLAYER_UNGHOST with secret DeadOrGhost keeps lock", #a.deaths == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  a.env.UnitIsDeadOrGhost = function() error("dead api failed") end
+  local okUnghost = pcall(function() Event(d, "PLAYER_UNGHOST") end)
+  local okDead = pcall(function() Event(d, "PLAYER_DEAD") end)
+  local okTick = pcall(function() sim:Run(1) end)
+  check("PLAYER_UNGHOST with DeadOrGhost error does not throw", okUnghost)
+  check("PLAYER_DEAD after DeadOrGhost error does not throw", okDead)
+  check("DeadOrGhost error during ticker does not throw", okTick)
+  check("PLAYER_UNGHOST with DeadOrGhost error keeps lock", #a.deaths == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FirstWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  a.env.UnitIsDeadOrGhost = function() return true end
+  Event(d, "PLAYER_ALIVE")
+  sim:Run(0.6)
+  check("alive event while still dead keeps lock", #a.deaths == 1)
+  a.env.UnitIsDeadOrGhost = function() return false end
+  sim:Run(0.6)
+  Recap(a, { Hit("SecondWolf", "Creature-0-1-0-0-2-0", sim:Wall(), 1) })
+  World(a, { dead = true })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  check("ticker confirmed alive unlocks next death", #a.deaths == 2
+    and a.deaths[2].data.killer == "SecondWolf")
+end
+
+do
+  local sim, a, b, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("Ganker", "Player-1-ABCDEF", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  World(a)
+  Event(d, "PLAYER_ALIVE")
+  sim:Run(0.2)
+  World(a, { dead = true })
+  -- Different killer so existing Wanted pair-cooldown does not hide a death-cycle bug.
+  Recap(a, { Hit("Other", "Player-1-ABCD02", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  check("two real deaths after rez publish twice", #a.deaths == 2 and #b.deaths == 2)
+  check("two real deaths use distinct eventIds", a.deaths[1].data.eventId ~= a.deaths[2].data.eventId)
+  check("fast second death is not suppressed by a death cooldown", sim:Count("DEATH") == 2)
+  check("two real deaths Wanted for each killer", Sim.Level(a, "Ganker-Realm") == 1
+    and Sim.Level(a, "Other-Realm") == 1
+    and Sim.Level(b, "Ganker-Realm") == 1
+    and Sim.Level(b, "Other-Realm") == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  local ready = false
+  a.env.C_DeathRecap = { GetRecapEvents = function()
+    if ready then return { Hit("ActualKiller", "Player-1-ABCDEF", sim:Wall(), 1) } end
+    return {}
+  end }
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.2)
+  World(a)
+  Event(d, "PLAYER_ALIVE")
+  ready = true
+  sim:Run(2)
+  check("rez during retry cancels old callback", #a.deaths == 0)
+  World(a, { dead = true })
+  Recap(a, { Hit("NextKiller", "Player-1-ABCD02", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  check("new death after mid-retry rez publishes once", #a.deaths == 1
+    and a.deaths[1].data.killer == "NextKiller")
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, {})
+  Event(d, "PLAYER_DEAD")
+  d:OnDisable()
+  sim:Run(2)
+  check("disable while pending publishes nothing", #a.deaths == 0)
+  d:OnEnable()
+  World(a, { dead = true })
+  Recap(a, { Hit("AfterEnable", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  check("enable while still dead does not late-report old death", #a.deaths == 0)
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("enable while still dead ignores further PLAYER_DEAD", #a.deaths == 0)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  d:OnDisable()
+  d:OnEnable()
+  World(a, { dead = true })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(2)
+  check("disable/enable after publish while dead does not republish", #a.deaths == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  d:OnDisable()
+  World(a)
+  d:OnEnable()
+  World(a, { dead = true })
+  Recap(a, { Hit("NextWolf", "Creature-0-1-0-0-2-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  check("disable then rez then enable alive allows new death", #a.deaths == 2
+    and a.deaths[2].data.killer == "NextWolf")
+end
+
+do
+  local sim, a, _, d = Pair()
+  d:OnDisable()
+  World(a, { dead = true })
+  Recap(a, { Hit("AlreadyDead", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  d:OnEnable()
+  sim:Run(2)
+  check("module start while dead does not invent a death", #a.deaths == 0)
+  World(a)
+  Event(d, "PLAYER_ALIVE")
+  sim:Run(0.05)
+  World(a, { dead = true })
+  Recap(a, { Hit("FreshWolf", "Creature-0-1-0-0-2-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  check("after start-dead then rez a new death publishes", #a.deaths == 1
+    and a.deaths[1].data.killer == "FreshWolf")
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  local reentered = false
+  a.GR:RegisterMessage("DEATH_UPDATE", function()
+    if reentered then return end
+    reentered = true
+    Event(d, "PLAYER_DEAD")
+  end)
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  check("reentrant PLAYER_DEAD during publish stays once", #a.deaths == 1)
+end
+
+do
+  local sim, a, b, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  local data = a.deaths[1].data
+  b.GR:SendMessage("DEATH_UPDATE", "Alice-Realm", data)
+  b.GR:SendMessage("DEATH_UPDATE", "Alice-Realm", data)
+  check("receiver same eventId still one toast", #b.toasts == 1)
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  local phase = 0
+  a.env.UnitIsDeadOrGhost = function()
+    phase = phase + 1
+    if phase <= 2 then return nil end
+    if phase == 3 then error("transient dead api") end
+    return true
+  end
+  local ready = false
+  a.env.C_DeathRecap = { GetRecapEvents = function()
+    if ready then return { Hit("Recovered", "Player-1-ABCDEF", sim:Wall(), 1) } end
+    return {}
+  end }
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.4)
+  ready = true
+  World(a, { dead = true })
+  a.env.UnitIsDeadOrGhost = function() return true end
+  Recap(a, { Hit("Recovered", "Player-1-ABCDEF", sim:Wall(), 1) })
+  sim:Run(2)
+  check("transient nil/error DeadOrGhost does not lose death", #a.deaths == 1
+    and a.deaths[1].data.killer == "Recovered")
+end
+
+do
+  local sim, a, _, d = Pair()
+  World(a, { dead = true })
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  World(a, { dead = true, falling = true })
+  a.env.UnitIsDeadOrGhost = function() return nil end
+  sim:Run(0.6)
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  check("nil DeadOrGhost over ticker keeps lock", #a.deaths == 1)
+  a.env.UnitIsDeadOrGhost = function() return false end
+  sim:Run(0.6)
+  World(a, { dead = true })
+  Recap(a, { Hit("AfterNil", "Creature-0-1-0-0-9-0", sim:Wall(), 1) })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.05)
+  check("after nil ticker period confirmed alive allows next death", #a.deaths == 2
+    and a.deaths[2].data.killer == "AfterNil")
 end
 
 print(string.format("\n%d failures", failures))
