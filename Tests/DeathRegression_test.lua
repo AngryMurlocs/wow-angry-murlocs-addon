@@ -373,5 +373,69 @@ do
   check("old death line is not blue", not line:find("|cff0070dd", 1, true))
 end
 
+-- A diagnostic must describe the same read that decided the published death.
+for _, diagOn in ipairs({ false, true }) do
+  local sim, a, _, d = Pair()
+  a.GR.Diag:SetEnabled(diagOn)
+  World(a, { dead = true })
+  local reads = 0
+  a.env.C_DeathRecap = { GetRecapEvents = function()
+    reads = reads + 1
+    if reads == 1 then return {} end
+    return { Hit("RetryWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) }
+  end }
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  check("retry reads fresh recap with diag=" .. tostring(diagOn), reads == 2
+    and #a.deaths == 1 and a.deaths[1].data.killer == "RetryWolf", reads)
+end
+do
+  local _, a, _, d = Pair()
+  a.GR.Diag:SetEnabled(true)
+  Recap(a, {})
+  d:BroadcastLocalDeath()
+  local dump = table.concat(a.GR.Diag.deaths[1].lines, "\n")
+  check("empty recap diagnostic has no invented pick", dump:find("result=empty", 1, true)
+    and not dump:find("recap[1]", 1, true), dump)
+end
+do
+  local sim, a, _, d = Pair()
+  a.GR.Diag:SetEnabled(true)
+  local reads = 0
+  a.env.C_DeathRecap = { GetRecapEvents = function()
+    reads = reads + 1
+    return { Hit(reads == 1 and "OriginalWolf" or "DifferentWolf",
+      "Creature-0-1-0-0-1-0", sim:Wall(), 1) }
+  end }
+  d:BroadcastLocalDeath()
+  local diag = a.GR.Diag.deaths[1]
+  local dump = diag and table.concat(diag.lines, "\n") or ""
+  check("diagnostics do not fetch a different recap", reads == 1, reads)
+  check("diagnostics describe published killer", dump:find("OriginalWolf", 1, true)
+    and not dump:find("DifferentWolf", 1, true), dump)
+end
+do
+  local sim, a, _, d = Pair()
+  a.GR.Diag:SetEnabled(true)
+  Recap(a, { Hit("StaleWolf", "Creature-0-1-0-0-1-0", sim:Wall()-3600, 1) })
+  d:BroadcastLocalDeath()
+  local dump = table.concat(a.GR.Diag.deaths[1].lines, "\n")
+  check("rejected recap diagnostic explains timestamp rejection",
+    dump:find("epoch_out_of_window", 1, true) and dump:find("delta=-3600", 1, true), dump)
+  check("diagnostic records death wall time", dump:find("deathWall=" .. sim:Wall(), 1, true), dump)
+end
+do
+  local sim, a, _, d = Pair()
+  local secret = setmetatable({}, { __tostring = function() error("secret formatted") end })
+  a.env.issecretvalue = function(v) return rawequal(v, secret) end
+  a.GR.Diag:SetEnabled(true)
+  Recap(a, { { event = "SWING_DAMAGE", sourceName = secret, sourceGUID = secret,
+    amount = secret, overkill = secret, timestamp = secret } })
+  local ok, err = pcall(function() d:BroadcastLocalDeath() end)
+  check("recap diagnostics never format secret fields", ok, err)
+  check("diagnostics preserve secret unknown attribution", a.deaths[1]
+    and a.deaths[1].data.cause == "unknown" and Sim.Entries(a) == 0)
+end
+
 print(string.format("\n%d failures", failures))
 if failures > 0 then os.exit(1) end

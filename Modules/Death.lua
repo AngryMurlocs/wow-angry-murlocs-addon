@@ -572,6 +572,7 @@ local function RecapEventFields(ev)
     spellId = PlainNumber(Plain(ev.spellId) or Plain(ev.spellID)),
     environmentalType = Plain(Plain(ev.environmentalType) or Plain(ev.envType)),
     timestamp = PlainNumber(ev.timestamp),
+    timestampSecret = IsSecret(ev.timestamp),
     overkill = PlainNumber(ev.overkill),
     amount = PlainNumber(ev.amount),
     currentHP = PlainNumber(ev.currentHP),
@@ -715,7 +716,7 @@ end
 
 -- Recap event list -> attribution. Owner lookup uses unit tokens when present.
 -- A Player-* GUID, or a plain name plus the player flag, is a reliable player kill.
-local function AttributionFromRecapEvents(events)
+local function AttributionFromRecapEvents(events, context)
   events = Plain(events)
   if type(events) ~= "table" then return nil end
   local pick
@@ -725,6 +726,16 @@ local function AttributionFromRecapEvents(events)
     local ev = Plain(events[i])
     if type(ev) == "table" then
       local f = RecapEventFields(ev)
+      if context then
+        -- Keep only plain fields, never raw API tables, for the later dump.
+        context.events[#context.events + 1] = f
+        f.index = i
+        f.hasSecret = f.nameSecret or f.guidSecret
+        for _, key in ipairs({ "event", 2, "sourceFlags", "timestamp", "amount", "overkill", "currentHP" }) do
+          if IsSecret(ev[key]) then f.hasSecret = true end
+        end
+        context.hasSecret = context.hasSecret or f.hasSecret
+      end
       if IsRecapDamageEvent(f.event) and (f.amount == nil or f.amount > 0) then
         f.lethal = (f.overkill ~= nil and f.overkill >= 0) or (f.currentHP ~= nil and f.currentHP <= 0)
         if not pick or (f.lethal and not pick.lethal)
@@ -732,8 +743,11 @@ local function AttributionFromRecapEvents(events)
           pick = f
         end
       end
+    elseif context and IsSecret(events[i]) then
+      context.hasSecret = true
     end
   end
+  if context then context.pickedFields = pick end
   if not pick then return nil end
 
   local guid = tostring(pick.sourceGUID or "")
@@ -810,26 +824,38 @@ local function AttributionFromRecapEvents(events)
   return HitResult(pick, atk, { cause = "unknown", suspect = name })
 end
 
-local function ReadRecapAttribution(deathWall)
-  local info = AttributionFromRecapEvents(FetchRecapEvents())
-  if not info then return nil end
-  -- Known epoch timestamps must match this death. Relative-time client formats
-  -- are not compared to a different clock domain.
-  deathWall = deathWall or U.WallTime()
-  if info.timestamp and info.timestamp >= 1000000000 and deathWall >= 1000000000
-    and (info.timestamp < deathWall - 2 or info.timestamp > deathWall + 2) then
+local function ReadRecapAttribution(deathWall, context)
+  context = context or {}
+  context.events = {}
+  local events, src = FetchRecapEvents()
+  context.source = src
+  context.deathWall = deathWall or U.WallTime()
+  local info = AttributionFromRecapEvents(events, context)
+  context.picked = info
+  context.pending = info and info.pending or false
+  if not info then
+    context.rejectReason = events and "no_damage_candidate" or "empty"
     return nil
   end
+  -- Known epoch timestamps must match this death. Relative-time client formats
+  -- are not compared to a different clock domain.
+  deathWall = context.deathWall
+  if info.timestamp and info.timestamp >= 1000000000 and deathWall >= 1000000000
+    and (info.timestamp < deathWall - 2 or info.timestamp > deathWall + 2) then
+    context.rejectReason = "epoch_out_of_window"
+    return nil
+  end
+  context.rejectReason = info.pending and "pending" or (info.cause == "unknown" and "incomplete" or "accepted")
   return info
 end
 
 -- reliable = Death Recap with Player-* GUID. Forever has no usable combat log.
 -- Target / unit-token guesses are never reliable: target switches, DoTs, pets,
 -- NPC and environment deaths would blame whoever happens to be targeted.
-local function ResolveDeath(deathWall)
+local function ResolveRecapDeath(deathWall, context)
   -- Forever (no CLEU): Death Recap is the honest killer source for toast + Wanted.
   local hint = FreshEnvHint()
-  local recap = ReadRecapAttribution(deathWall)
+  local recap = ReadRecapAttribution(deathWall, context)
   if recap then
     -- A recent fall/depleted timer can contradict an incomplete recap, but is
     -- never sufficient to override an explicitly lethal mob/player hit.
@@ -875,6 +901,12 @@ local function ResolveDeath(deathWall)
     envHint = hint,
     source = "fallback",
   }
+end
+
+local function ResolveDeath(deathWall)
+  local context = {}
+  local info = ResolveRecapDeath(deathWall, context)
+  return info, context
 end
 
 local function Sanitize(s)
@@ -968,7 +1000,7 @@ local function GuidKind(guid)
   return kind or "?"
 end
 
-local function AppendRecapDump(lines)
+local function AppendRecapDump(lines, context)
   local hasCRecap = C_DeathRecap ~= nil
   local hasGetEvents = hasCRecap and type(C_DeathRecap.GetRecapEvents) == "function"
   local hasHasEvents = hasCRecap and type(C_DeathRecap.HasRecapEvents) == "function"
@@ -980,53 +1012,36 @@ local function AppendRecapDump(lines)
     tostring(hasLegacy), tostring(hasLink)
   )
 
-  if hasHasEvents then
-    local ok, has = pcall(function() return C_DeathRecap.HasRecapEvents() end)
-    if ok then
-      lines[#lines + 1] = "recap: HasRecapEvents=" .. tostring(has)
-    else
-      lines[#lines + 1] = "recap: HasRecapEvents err " .. ClipDiag(has, 60)
-    end
+  if not context then
+    lines[#lines + 1] = "recap: supplied attribution (no snapshot)"
+    return
   end
-
-  local events, src = FetchRecapEvents()
-  if type(events) ~= "table" then
-    lines[#lines + 1] = "recap: none"
-  else
-    lines[#lines + 1] = "recap: via " .. tostring(src)
-    local n = 0
-    for i = 1, #events do
-      local ev = events[i]
-      if type(ev) == "table" then
-        n = n + 1
-        if n > 5 then break end
-        local f = RecapEventFields(ev)
-        local amount = ev.amount or ev.overkill or ""
-        lines[#lines + 1] = string.format(
-          "recap[%d]: event=%s source=%s guid=%s amount=%s",
-          n, ClipDiag(f.event, 40), ClipDiag(f.sourceName, 40),
-          GuidKind(f.sourceGUID), ClipDiag(amount, 24)
-        )
-      end
+  lines[#lines + 1] = string.format("recap: via=%s deathWall=%s result=%s pending=%s",
+    tostring(context.source or "none"), tostring(context.deathWall),
+    tostring(context.rejectReason), tostring(context.pending))
+  for _, f in ipairs(context.events) do
+    local reason = "not_selected"
+    if f == context.pickedFields then
+      reason = context.rejectReason
+    elseif not IsRecapDamageEvent(f.event) then
+      reason = "not_damage"
+    elseif f.amount and f.amount <= 0 then
+      reason = "nonpositive_damage"
     end
-    if n == 0 then
-      lines[#lines + 1] = "recap: empty table"
+    local delta = "n/a"
+    if f.timestamp and f.timestamp >= 1000000000 and f.timestamp < 100000000000
+      and context.deathWall >= 1000000000 then
+      delta = tostring(f.timestamp - context.deathWall)
     end
-  end
-
-  if hasLink then
-    local ok, link = pcall(function() return GetDeathRecapLink(1) end)
-    if not ok then
-      lines[#lines + 1] = "recap link: err " .. ClipDiag(link, 60)
-    elseif link == nil or link == "" then
-      lines[#lines + 1] = "recap link: nil"
-    else
-      lines[#lines + 1] = "recap link: " .. ClipDiag(link, 100)
-    end
+    lines[#lines + 1] = string.format(
+      "recap[%d]: event=%s source=%s guid=%s amount=%s timestamp=%s delta=%s lethal=%s overkill=%s secret=%s result=%s",
+      f.index, ClipDiag(f.event, 40), ClipDiag(f.sourceName, 40), GuidKind(f.sourceGUID),
+      tostring(f.amount), f.timestampSecret and "secret" or tostring(f.timestamp), delta,
+      tostring(f.lethal), tostring(f.overkill), tostring(f.hasSecret), tostring(reason))
   end
 end
 
-local function SnapshotDeath(info, ctx, zone, verdict)
+local function SnapshotDeath(info, ctx, zone, verdict, recapContext)
   local diag = GR.Diag
   if not diag or not diag:Enabled() then return end
   local now = U.Now()
@@ -1041,9 +1056,9 @@ local function SnapshotDeath(info, ctx, zone, verdict)
     tostring(CombatLogGetCurrentEventInfo ~= nil)
   )
   lines[#lines + 1] = string.format("units: attacking=%s target=%s targetPlayer=%s canAttack=%s",
-    tostring(UnitExists("attacking")), tostring(UnitName("target")),
-    tostring(UnitIsPlayer("target")), tostring(UnitCanAttack and UnitCanAttack("player", "target")))
-  AppendRecapDump(lines)
+    tostring(Plain(UnitExists("attacking"))), tostring(Plain(UnitName("target"))),
+    tostring(Plain(UnitIsPlayer("target"))), tostring(Plain(UnitCanAttack and UnitCanAttack("player", "target"))))
+  AppendRecapDump(lines, recapContext)
   lines[#lines + 1] = "registered: " .. (#diagRegistered > 0 and table.concat(diagRegistered, ",") or "-")
   for i = 1, #diagEvents do
     local e = diagEvents[i]
@@ -1068,9 +1083,9 @@ local function CaptureDeathContext()
   }
 end
 
-function Death:BroadcastLocalDeath(info, snapshot)
+function Death:BroadcastLocalDeath(info, snapshot, recapContext)
   snapshot = snapshot or CaptureDeathContext()
-  info = info or ResolveDeath(snapshot.wallTime)
+  if not info then info, recapContext = ResolveDeath(snapshot.wallTime) end
   ApplyFaction(info)
   local ctx, zone, mapId = snapshot.ctx, snapshot.zone, snapshot.mapId
   local cause = info.cause or "unknown"
@@ -1121,7 +1136,7 @@ function Death:BroadcastLocalDeath(info, snapshot)
       GR.Diag:Reject(why, tostring(info.suspect or info.killer))
     end
   end
-  SnapshotDeath(info, ctx, zone, verdict)
+  SnapshotDeath(info, ctx, zone, verdict, recapContext)
 
   if not IsInGuild() then return end
   -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId|faction|pet
@@ -1184,7 +1199,7 @@ local function QueueLocalDeath()
     resolveTimer = nil
     if serial ~= deathSerial or not Death.enabled then return end
     if attempt > 0 and UnitIsDeadOrGhost and not UnitIsDeadOrGhost("player") then return end
-    local info = ResolveDeath(snapshot.wallTime)
+    local info, recapContext = ResolveDeath(snapshot.wallTime)
     local waits = (info and info.pending) and LONG or SHORT
     local settled = info and not info.pending and (
       info.source == "cleu" or (info.source == "recap" and info.cause ~= "unknown") or attempt >= #waits
@@ -1197,7 +1212,7 @@ local function QueueLocalDeath()
       settled = true
     end
     if settled then
-      Death:BroadcastLocalDeath(info, snapshot)
+      Death:BroadcastLocalDeath(info, snapshot, recapContext)
       ClearDeathEvidence()
       return
     end
@@ -1205,7 +1220,7 @@ local function QueueLocalDeath()
     local delay = waits[attempt]
     if not delay then
       if info and info.pending then ReleasePending(info) end
-      Death:BroadcastLocalDeath(info, snapshot)
+      Death:BroadcastLocalDeath(info, snapshot, recapContext)
       ClearDeathEvidence()
       return
     end
