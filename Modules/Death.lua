@@ -253,16 +253,23 @@ local function ResolveAttackLine(cause, spellKind, spellId, legacySpell)
   return ""
 end
 
-local function KillerForDisplay(killer)
+local ALLIANCE_COLOR = "|cff0070dd"
+
+local function KillerForDisplay(killer, faction, pet, cause)
   if type(killer) ~= "string" or killer == "" or killer == "?" then
-    return U.L("UNKNOWN_KILLER")
+    killer = U.L("UNKNOWN_KILLER")
+  elseif cause == "player" and type(pet) == "string" and pet ~= "" then
+    killer = string.format(U.L("DEATH_KILLER_PET"), killer, pet)
+  end
+  if faction == "A" then
+    return ALLIANCE_COLOR .. killer .. " " .. U.L("DEATH_SIDE_ALLIANCE")
   end
   return killer
 end
 
-local function FormatDeathLine(victim, cause, killer, spell, zone)
+local function FormatDeathLine(victim, cause, killer, spell, zone, faction, pet)
   zone = (zone and zone ~= "") and zone or "?"
-  killer = KillerForDisplay(killer)
+  killer = KillerForDisplay(killer, faction, pet, cause)
   local body
   if cause == "unknown" then
     body = string.format(U.L("DEATH_TOAST_UNKNOWN"), victim, zone)
@@ -321,6 +328,10 @@ function Death.ResolveAttackLine(cause, spellKind, spellId, legacySpell)
   return ResolveAttackLine(cause, spellKind, spellId, legacySpell)
 end
 
+function Death.FormatDeathLine(victim, cause, killer, spell, zone, faction, pet)
+  return FormatDeathLine(victim, cause, killer, spell, zone, faction, pet)
+end
+
 local function DisplayDeathToast(item, done)
   item = item or {}
   if not layoutEdit and not item._preview and not Cfg().showToasts then
@@ -340,7 +351,7 @@ local function DisplayDeathToast(item, done)
   end
   displayDone = done
   local attack = ResolveAttackLine(item.cause, item.spellKind, item.spellId, item.spell)
-  local body = FormatDeathLine(item.victim, item.cause, item.killer, attack, item.zone)
+  local body = FormatDeathLine(item.victim, item.cause, item.killer, attack, item.zone, item.faction, item.pet)
   if f._amToastStyle == "classic" then
     body = body:gsub("\n", " · ")
     f.text:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r  " .. body)
@@ -412,6 +423,8 @@ local function ShowDeathToast(item)
       spellId = item.spellId,
       zone = item.zone,
       eventId = item.eventId,
+      faction = item.faction,
+      pet = item.pet,
     })
     return
   end
@@ -523,11 +536,38 @@ local function PlainName(v)
   return v ~= "" and v or nil
 end
 
+local function IsSecret(v)
+  return type(issecretvalue) == "function" and v ~= nil and issecretvalue(v) or false
+end
+
+-- Combat-log source flags. Single bits, so a missing bit library still works.
+local FLAG_FRIENDLY = 0x10
+local FLAG_HOSTILE = 0x40
+local FLAG_CONTROL_PLAYER = 0x100
+local FLAG_TYPE_PLAYER = 0x400
+local FLAG_TYPE_PET = 0x1000
+local FLAG_TYPE_GUARDIAN = 0x2000
+
+local function HasBit(flags, mask)
+  if type(flags) ~= "number" or type(mask) ~= "number" or mask == 0 then return false end
+  if bit and type(bit.band) == "function" then
+    return bit.band(flags, mask) == mask
+  end
+  return math.floor(flags / mask) % 2 == 1
+end
+
 local function RecapEventFields(ev)
+  local rawName = ev.sourceName
+  if rawName == nil then rawName = ev[5] end
+  local rawGuid = ev.sourceGUID
+  if rawGuid == nil then rawGuid = ev[4] end
   return {
     event = PlainName(Plain(ev.event) or Plain(ev[2])),
-    sourceName = PlainName(Plain(ev.sourceName) or Plain(ev[5])),
-    sourceGUID = PlainName(Plain(ev.sourceGUID) or Plain(ev[4])),
+    sourceName = PlainName(rawName),
+    sourceGUID = PlainName(rawGuid),
+    nameSecret = IsSecret(rawName),
+    guidSecret = IsSecret(rawGuid),
+    sourceFlags = PlainNumber(ev.sourceFlags),
     spellName = PlainName(ev.spellName),
     spellId = PlainNumber(Plain(ev.spellId) or Plain(ev.spellID)),
     environmentalType = Plain(Plain(ev.environmentalType) or Plain(ev.envType)),
@@ -563,8 +603,118 @@ local function AttackFromRecap(f)
   return { spellKind = kind, spellId = f.spellId, spell = f.spellName }
 end
 
--- Pure mapping: Recap event list -> attribution (testable without WoW APIs).
--- Player-* GUID is reliable (Wanted + toast). Creature/Vehicle/Pet = mob toast only.
+-- Name is the 6th return, realm the 7th. Realm is appended before normalize.
+local function NameFromPlayerGUID(guid)
+  if type(guid) ~= "string" or not guid:find("^Player%-") then return nil end
+  if type(GetPlayerInfoByGUID) ~= "function" then return nil end
+  local ok, _, _, _, _, _, name, realm = pcall(GetPlayerInfoByGUID, guid)
+  if not ok then return nil end
+  name = PlainName(name)
+  if not name then return nil end
+  realm = PlainName(realm)
+  if realm then return U.NormalizeName(name .. "-" .. realm) end
+  return U.NormalizeName(name)
+end
+
+local function SameGuid(unit, guid)
+  if type(UnitGUID) ~= "function" then return false end
+  if UnitExists and not UnitExists(unit) then return false end
+  local ok, got = pcall(UnitGUID, unit)
+  got = ok and PlainName(got) or nil
+  return got == guid
+end
+
+-- Owner only from a unit whose GUID is this pet. Never from the current target.
+local function TokenForGUID(guid)
+  if type(guid) ~= "string" or guid == "" then return nil end
+  if type(UnitTokenFromGUID) == "function" then
+    local ok, token = pcall(UnitTokenFromGUID, guid)
+    token = ok and PlainName(token) or nil
+    if token then return token end
+  end
+  if SameGuid("targetpet", guid) then return "targetpet" end
+  if SameGuid("focuspet", guid) then return "focuspet" end
+  if C_NamePlate and type(C_NamePlate.GetNamePlates) == "function" then
+    local ok, plates = pcall(C_NamePlate.GetNamePlates)
+    if ok and type(plates) == "table" then
+      for i = 1, #plates do
+        local plate = plates[i]
+        local token = type(plate) == "table" and (plate.namePlateUnitToken or plate.unitToken) or nil
+        if type(token) == "string" and SameGuid(token, guid) then return token end
+      end
+    end
+  end
+  return nil
+end
+
+local function OwnerNameFromPetGUID(guid)
+  local token = TokenForGUID(guid)
+  if not token or type(UnitOwnerGUID) ~= "function" then return nil end
+  local ok, ownerGuid = pcall(UnitOwnerGUID, token)
+  ownerGuid = ok and PlainName(ownerGuid) or nil
+  if not ownerGuid then return nil end
+  return NameFromPlayerGUID(ownerGuid)
+end
+
+local function IsPlayerControlledCompanion(guid, flags)
+  if not HasBit(flags, FLAG_CONTROL_PLAYER) then return false end
+  if HasBit(flags, FLAG_TYPE_PET) or HasBit(flags, FLAG_TYPE_GUARDIAN) then return true end
+  if guid:find("^Pet%-") or guid:find("^Vehicle%-") then return true end
+  return false
+end
+
+local function SelfSide()
+  if type(UnitFactionGroup) ~= "function" then return nil end
+  local ok, fac = pcall(UnitFactionGroup, "player")
+  if not ok then return nil end
+  fac = Plain(fac)
+  if fac == "Alliance" then return "A" end
+  if fac == "Horde" then return "H" end
+  return nil
+end
+
+-- Hostile/friendly is relative to the dead player. Absolute side is what we send.
+local function FactionFromFlags(flags)
+  if type(flags) ~= "number" then return nil end
+  local side = SelfSide()
+  if not side then return nil end
+  local hostile = HasBit(flags, FLAG_HOSTILE)
+  local friendly = HasBit(flags, FLAG_FRIENDLY)
+  if hostile == friendly then return nil end
+  if friendly then return side end
+  return side == "A" and "H" or "A"
+end
+
+local function ApplyFaction(info)
+  if type(info) ~= "table" or info.faction then return info end
+  if info.cause ~= "player" and not info.companion then return info end
+  info.faction = FactionFromFlags(info.flags)
+  return info
+end
+
+local function HitResult(pick, atk, extra)
+  local info = {
+    killer = extra.killer,
+    isPlayer = extra.isPlayer and true or false,
+    cause = extra.cause,
+    spell = atk.spell,
+    spellKind = atk.spellKind,
+    spellId = atk.spellId,
+    reliable = extra.reliable and true or false,
+    source = "recap",
+    lethal = pick.lethal,
+    timestamp = pick.timestamp,
+    suspect = extra.suspect,
+    flags = pick.sourceFlags,
+    pet = extra.pet,
+    companion = extra.companion and true or false,
+    pending = extra.pending and true or false,
+  }
+  return info
+end
+
+-- Recap event list -> attribution. Owner lookup uses unit tokens when present.
+-- A Player-* GUID, or a plain name plus the player flag, is a reliable player kill.
 local function AttributionFromRecapEvents(events)
   events = Plain(events)
   if type(events) ~= "table" then return nil end
@@ -610,50 +760,54 @@ local function AttributionFromRecapEvents(events)
     }
   end
 
-  if guid:find("^Player%-") and name then
-    return {
-      killer = name,
-      isPlayer = true,
-      cause = "player",
-      spell = atk.spell,
-      spellKind = atk.spellKind,
-      spellId = atk.spellId,
-      reliable = true,
-      source = "recap",
-      lethal = pick.lethal,
-      timestamp = pick.timestamp,
-    }
+  -- A player-controlled pet or guardian belongs to its owner, not to the pet name.
+  if IsPlayerControlledCompanion(guid, pick.sourceFlags) then
+    if not pick.guidSecret and guid ~= "" then
+      local owner = OwnerNameFromPetGUID(guid)
+      if owner then
+        return HitResult(pick, atk, {
+          killer = owner, isPlayer = true, cause = "player", reliable = true,
+          pet = name, companion = true,
+        })
+      end
+      return HitResult(pick, atk, {
+        killer = name, isPlayer = false, cause = "mob", reliable = false,
+        pet = name, companion = true, pending = true,
+      })
+    end
+    return HitResult(pick, atk, {
+      killer = name, isPlayer = false, cause = "mob", reliable = false,
+      pet = name, companion = true, pending = pick.nameSecret or pick.guidSecret,
+    })
+  end
+
+  local playerGuid = guid:find("^Player%-") ~= nil
+  if playerGuid or (name and HasBit(pick.sourceFlags, FLAG_TYPE_PLAYER)) then
+    local killer = name
+    if playerGuid and not killer then
+      killer = NameFromPlayerGUID(guid)
+    end
+    if killer then
+      return HitResult(pick, atk, {
+        killer = killer, isPlayer = true, cause = "player", reliable = true,
+      })
+    end
+    return HitResult(pick, atk, { cause = "unknown", pending = true })
   end
 
   if guid:find("^Creature%-") or guid:find("^Vehicle%-") or guid:find("^Pet%-") then
-    return {
-      killer = name,
-      isPlayer = false,
-      cause = "mob",
-      spell = atk.spell,
-      spellKind = atk.spellKind,
-      spellId = atk.spellId,
-      reliable = false,
-      source = "recap",
-      lethal = pick.lethal,
-      timestamp = pick.timestamp,
-    }
+    return HitResult(pick, atk, {
+      killer = name, isPlayer = false, cause = "mob", reliable = false,
+    })
+  end
+
+  -- Secret name or GUID may become readable after combat. Do not guess a target.
+  if pick.nameSecret or pick.guidSecret then
+    return HitResult(pick, atk, { cause = "unknown", pending = true })
   end
 
   -- An incomplete identity does not prove either a mob or an environmental kill.
-  return {
-    killer = nil,
-    isPlayer = false,
-    cause = "unknown",
-    spell = "",
-    spellKind = nil,
-    spellId = nil,
-    reliable = false,
-    source = "recap",
-    suspect = name,
-    lethal = pick.lethal,
-    timestamp = pick.timestamp,
-  }
+  return HitResult(pick, atk, { cause = "unknown", suspect = name })
 end
 
 local function ReadRecapAttribution(deathWall)
@@ -679,7 +833,10 @@ local function ResolveDeath(deathWall)
   if recap then
     -- A recent fall/depleted timer can contradict an incomplete recap, but is
     -- never sufficient to override an explicitly lethal mob/player hit.
-    if not hint or recap.lethal or recap.cause == "env" then return recap end
+    -- A still-secret identity keeps waiting; the fall hint must not replace it.
+    if recap.pending or not hint or recap.lethal or recap.cause == "env" then
+      return ApplyFaction(recap)
+    end
     return {
       killer = nil, isPlayer = false, cause = "unknown",
       spell = "", spellKind = nil, spellId = nil,
@@ -914,6 +1071,7 @@ end
 function Death:BroadcastLocalDeath(info, snapshot)
   snapshot = snapshot or CaptureDeathContext()
   info = info or ResolveDeath(snapshot.wallTime)
+  ApplyFaction(info)
   local ctx, zone, mapId = snapshot.ctx, snapshot.zone, snapshot.mapId
   local cause = info.cause or "unknown"
   local spellKind = info.spellKind
@@ -923,20 +1081,12 @@ function Death:BroadcastLocalDeath(info, snapshot)
   local eventId = snapshot.eventId or pendingEventId or NewEventId()
   snapshot.eventId = eventId
   pendingEventId = nil
-  local me = U.ShortName(U.PlayerName())
   local fullName = U.NormalizeName(U.PlayerName())
   local killerWire = (cause == "unknown" or not info.killer or info.killer == "") and "?" or Sanitize(info.killer)
+  local faction = (info.faction == "A" or info.faction == "H") and info.faction or nil
+  local pet = (type(info.pet) == "string" and info.pet ~= "") and info.pet or nil
 
-  ShowDeathToast({
-    victim = me,
-    cause = cause,
-    killer = info.killer,
-    spell = legacySpell,
-    spellKind = spellKind,
-    spellId = spellId,
-    zone = zone,
-    eventId = eventId,
-  })
+  -- No local toast. Guildmates still get DEATH_UPDATE and the guild message.
   GR:SendMessage("DEATH_UPDATE", fullName, {
     killer = killerWire,
     isPlayer = cause == "player",
@@ -947,6 +1097,8 @@ function Death:BroadcastLocalDeath(info, snapshot)
     spellKind = spellKind,
     spellId = spellId,
     eventId = eventId,
+    faction = faction,
+    pet = pet,
   })
 
   local verdict = "no_player"
@@ -972,9 +1124,9 @@ function Death:BroadcastLocalDeath(info, snapshot)
   SnapshotDeath(info, ctx, zone, verdict)
 
   if not IsInGuild() then return end
-  -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId
+  -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId|faction|pet
   Comm:Send(string.format(
-    "DEATH|%s|%d|%s|%d|%s|%s|%s|%s|%s",
+    "DEATH|%s|%d|%s|%d|%s|%s|%s|%s|%s|%s|%s",
     killerWire,
     cause == "player" and 1 or 0,
     Sanitize(zone),
@@ -983,7 +1135,9 @@ function Death:BroadcastLocalDeath(info, snapshot)
     Sanitize(legacySpell),
     Sanitize(eventId),
     Sanitize(spellKind or ""),
-    spellId and tostring(math.floor(tonumber(spellId) or 0)) or ""
+    spellId and tostring(math.floor(tonumber(spellId) or 0)) or "",
+    faction or "",
+    Sanitize(pet or "")
   ), "kill", "death")
 end
 
@@ -997,26 +1151,65 @@ local function ClearDeathEvidence()
   envHint.spell, envHint.t = nil, 0
 end
 
+-- Drop the wait flag once retries are exhausted. A pet with no owner stays a mob.
+local function ReleasePending(info)
+  if not info or not info.pending then return info end
+  info.pending = false
+  if info.cause == "player" and info.reliable then return info end
+  if info.companion then
+    info.cause = "mob"
+    info.isPlayer = false
+    info.reliable = false
+    return info
+  end
+  info.cause = "unknown"
+  info.isPlayer = false
+  info.reliable = false
+  info.killer = nil
+  return info
+end
+
 local function QueueLocalDeath()
   CancelPendingDeath()
   local serial = deathSerial
   local snapshot = CaptureDeathContext()
   snapshot.eventId = NewEventId()
   pendingEventId = snapshot.eventId
-  local delays = { 0.15, 0.35, 0.5 }
+  -- Short waits when the recap is simply empty. Longer waits while a name,
+  -- GUID, or pet owner is still secret.
+  local SHORT = { 0.15, 0.35, 0.5 }
+  local LONG = { 0.2, 0.5, 1.0, 2.0, 4.0 }
   local attempt = 0
   local function TryResolve()
     resolveTimer = nil
     if serial ~= deathSerial or not Death.enabled then return end
     if attempt > 0 and UnitIsDeadOrGhost and not UnitIsDeadOrGhost("player") then return end
     local info = ResolveDeath(snapshot.wallTime)
-    if info.source == "cleu" or (info.source == "recap" and info.cause ~= "unknown") or attempt == #delays then
+    local waits = (info and info.pending) and LONG or SHORT
+    local settled = info and not info.pending and (
+      info.source == "cleu" or (info.source == "recap" and info.cause ~= "unknown") or attempt >= #waits
+    )
+    if not settled and info and info.pending and attempt >= #waits then
+      ReleasePending(info)
+      settled = true
+    end
+    if not settled and info and not info.pending and attempt >= #SHORT then
+      settled = true
+    end
+    if settled then
       Death:BroadcastLocalDeath(info, snapshot)
       ClearDeathEvidence()
       return
     end
     attempt = attempt + 1
-    resolveTimer = C_Timer.NewTimer(delays[attempt], TryResolve)
+    local delay = waits[attempt]
+    if not delay then
+      if info and info.pending then ReleasePending(info) end
+      Death:BroadcastLocalDeath(info, snapshot)
+      ClearDeathEvidence()
+      return
+    end
+    resolveTimer = C_Timer.NewTimer(delay, TryResolve)
   end
   TryResolve()
 end
@@ -1146,6 +1339,8 @@ function Death:OnEnable()
       spellId = data.spellId,
       zone = data.zone or "",
       eventId = data.eventId,
+      faction = data.faction,
+      pet = data.pet,
     })
   end)
 

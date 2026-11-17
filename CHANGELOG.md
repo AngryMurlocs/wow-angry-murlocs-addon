@@ -1,7 +1,12 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.15
 
+- Death and level-up toasts use the game font, so unusual letters in names stay readable
+- Your own death and level-up no longer show on your screen; guildmates still see them
+- A death to a player of the other faction names that player
+- A death to a player's pet names that player, and an Alliance killer is shown in blue
+- Guild head and body map pins no longer show a white circle behind the murloc
 - Professions and recipes from French (and other) clients share the same guild rows as English and German
 - Wanted sighting pins no longer have a dark outline glow around the crosshair
 

@@ -222,5 +222,156 @@ do
   check("exhausted retries publish honest unknown", a.deaths[1] and a.deaths[1].data.cause == "unknown")
 end
 
+do
+  local sim, a, b, d = Pair()
+  Recap(a, { Hit("FatalWolf", "Creature-0-1-0-0-1-0", sim:Wall(), 1) })
+  d:BroadcastLocalDeath()
+  sim:Run(2)
+  check("own death is not toasted locally", #a.toasts == 0)
+  check("guild still receives own death", b.deaths[1] and b.deaths[1].data.cause == "mob"
+    and b.deaths[1].data.killer == "FatalWolf")
+end
+do
+  local sim = Sim.New(880)
+  local function LFrame()
+    local f = Sim.Stub()
+    f._scripts = {}
+    f.SetScript = function(self, name, fn) self._scripts[name] = fn end
+    return f
+  end
+  local a = sim:AddClient("Alice", { extraFiles = { "Modules/LevelUp.lua" }, env = { CreateFrame = LFrame } })
+  local b = sim:AddClient("Bob", { extraFiles = { "Modules/LevelUp.lua" }, env = { CreateFrame = LFrame } })
+  a.toasts = {}
+  a.GR.ToastQueue.Enqueue = function(item) a.toasts[#a.toasts + 1] = item return true end
+  local got = {}
+  b.GR:RegisterMessage("LVL_UPDATE", function(_, sender, level)
+    got[#got + 1] = { sender = sender, level = level }
+  end)
+  local frame = a.GR:GetModule("LevelUp")._eventFrame
+  frame._scripts.OnEvent(frame, "PLAYER_LEVEL_UP", 42)
+  sim:Run(2)
+  check("own level-up is not toasted locally", #a.toasts == 0)
+  check("guild still receives own level-up", got[1] and got[1].level == 42 and tostring(got[1].sender):find("Alice"))
+end
+do
+  local _, a, _, d = Pair()
+  a.env.GetPlayerInfoByGUID = function(guid)
+    if guid == "Player-1-ABCDEF" then
+      return "Warrior", "WARRIOR", "Human", "Human", 2, "Ganker", nil
+    end
+  end
+  local info = d.AttributionFromRecapEvents({
+    Hit(nil, "Player-1-ABCDEF", nil, 1),
+  })
+  check("player guid names killer via GetPlayerInfoByGUID", info and info.cause == "player"
+    and info.reliable and info.killer == "Ganker-Realm", info and info.killer)
+  local named = d.AttributionFromRecapEvents({ Hit("PlainName", "Player-1-ABCDEF", nil, 1) })
+  check("plain recap name is kept", named and named.killer == "PlainName")
+end
+do
+  local _, a, _, d = Pair()
+  a.env.UnitFactionGroup = function() return "Horde" end
+  local info = d.ResolveDeath()
+  a.env.C_DeathRecap = { GetRecapEvents = function()
+    return { { event = "SPELL_DAMAGE", sourceName = "Ganker", sourceFlags = 0x548, amount = 50, overkill = 1 } }
+  end }
+  info = d.ResolveDeath()
+  check("player flag without guid is a reliable player", info and info.cause == "player"
+    and info.reliable and info.killer == "Ganker", info and info.killer)
+  check("horde victim, hostile killer is Alliance", info and info.faction == "A", info and info.faction)
+  local line = d.FormatDeathLine("Bob", info.cause, info.killer, "Hit", "Zone", info.faction, nil)
+  check("alliance killer is blue", line:find("|cff0070dd", 1, true) and line:find("Alliance", 1, true), line)
+  a.env.UnitFactionGroup = function() return "Alliance" end
+  info = d.ResolveDeath()
+  check("alliance victim, hostile killer is Horde", info and info.faction == "H")
+  line = d.FormatDeathLine("Bob", info.cause, info.killer, "Hit", "Zone", info.faction, nil)
+  check("horde killer is not blue", not line:find("|cff0070dd", 1, true), line)
+end
+do
+  local sim, a, _, d = Pair()
+  local SECRET = {}
+  a.env.issecretvalue = function(v) return v == SECRET end
+  World(a, { combat = true, units = { target = { name = "WrongTarget", realm = "Realm", player = true, hostile = true } } })
+  Recap(a, { { event = "SPELL_DAMAGE", sourceName = SECRET, sourceGUID = SECRET, amount = 80, overkill = 1 } })
+  local info = d.ResolveDeath()
+  check("secret identity waits", info and info.pending and info.cause == "unknown" and info.killer == nil, info and info.cause)
+  check("secret identity does not use the target", info and info.suspect ~= "WrongTarget-Realm")
+  World(a, { dead = true, combat = true, units = { target = { name = "WrongTarget", realm = "Realm", player = true, hostile = true } } })
+  Event(d, "PLAYER_DEAD")
+  sim:Run(0.3)
+  check("secret identity is not published early", #a.deaths == 0)
+  sim:Run(10)
+  check("secret identity ends unknown", a.deaths[1] and a.deaths[1].data.cause == "unknown"
+    and a.deaths[1].data.killer == "?")
+  check("secret identity never wanted the target", Sim.Entries(a) == 0)
+end
+do
+  local sim, a, b, d = Pair()
+  local petGuid = "Pet-0-1-0-0-9-0"
+  World(a, {})
+  a.env.UnitFactionGroup = function() return "Horde" end
+  a.env.UnitExists = function(token) return token == "player" or token == "targetpet" end
+  a.env.UnitGUID = function(token)
+    if token == "targetpet" then return petGuid end
+  end
+  a.env.UnitOwnerGUID = function(token)
+    if token == "targetpet" then return "Player-1-OWNER" end
+  end
+  a.env.GetPlayerInfoByGUID = function(guid)
+    if guid == "Player-1-OWNER" then
+      return "Hunter", "HUNTER", "Human", "Human", 2, "Hunter", "Realm"
+    end
+  end
+  a.env.UnitTokenFromGUID = nil
+  Recap(a, { { event = "SPELL_DAMAGE", sourceName = "Wolf", sourceGUID = petGuid,
+    sourceFlags = 0x1140, spellName = "Bite", amount = 40, overkill = 2 } })
+  local info = d.ResolveDeath()
+  check("pet kill names the owner", info and info.cause == "player" and info.reliable
+    and info.killer == "Hunter-Realm" and info.pet == "Wolf", info and info.killer)
+  check("pet owner on the alliance side", info and info.faction == "A")
+  local line = d.FormatDeathLine("Bob", info.cause, info.killer, "Bite", "Zone", info.faction, info.pet)
+  check("pet toast shows owner, pet, and blue", line:find("Hunter", 1, true) and line:find("Wolf", 1, true)
+    and line:find("|cff0070dd", 1, true) and line:find("Alliance", 1, true), line)
+  d:BroadcastLocalDeath()
+  sim:Run(2)
+  check("pet owner is wanted", Sim.Entries(a) >= 1)
+  check("guild death names the owner", b.deaths[1] and b.deaths[1].data.killer == "Hunter-Realm"
+    and b.deaths[1].data.cause == "player" and b.deaths[1].data.pet == "Wolf"
+    and b.deaths[1].data.faction == "A")
+end
+do
+  local sim, a, _, d = Pair()
+  local petGuid = "Pet-0-1-0-0-9-0"
+  World(a, { dead = true })
+  a.env.UnitTokenFromGUID = function() return "pet1" end
+  a.env.UnitOwnerGUID = function() return nil end
+  Recap(a, { { event = "SPELL_DAMAGE", sourceName = "Wolf", sourceGUID = petGuid,
+    sourceFlags = 0x1140, amount = 40, overkill = 2 } })
+  check("missing owner keeps waiting", d.ResolveDeath().pending and d.ResolveDeath().cause == "mob")
+  Event(d, "PLAYER_DEAD")
+  sim:Run(1)
+  check("missing owner is not published early", #a.deaths == 0)
+  sim:Run(10)
+  check("missing owner stays a mob", a.deaths[1] and a.deaths[1].data.cause == "mob"
+    and a.deaths[1].data.killer == "Wolf")
+  check("missing owner is not wanted", Sim.Entries(a) == 0)
+end
+do
+  local _, a, _, d = Pair()
+  a.env.UnitFactionGroup = function() return "Horde" end
+  Recap(a, { Hit("Trash", "Creature-0-1-0-0-1-0", nil, 1) })
+  local info = d.ResolveDeath()
+  check("npc has no faction and no owner", info and info.cause == "mob" and info.faction == nil and not info.companion)
+end
+do
+  local sim, _, b = Pair()
+  b.GR.Comm:OnAddonMessage("GildenRadar", "DEATH|Wolf|0|Zone|0|mob|Bite||||", "GUILD", "Alice-Realm")
+  sim:Run(1)
+  local item = b.toasts[#b.toasts]
+  check("old death wire has no faction", item and item.faction == nil and item.pet == nil, item and item.faction)
+  local line = b.GR:GetModule("Death").FormatDeathLine("Bob", "mob", "Wolf", "Bite", "Zone", nil, nil)
+  check("old death line is not blue", not line:find("|cff0070dd", 1, true))
+end
+
 print(string.format("\n%d failures", failures))
 if failures > 0 then os.exit(1) end
