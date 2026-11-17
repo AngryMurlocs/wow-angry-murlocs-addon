@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## 0.11.16
+
+- Fixed some monster deaths appearing with an unknown cause
+
 ## 0.11.15
 
 - Death and level-up toasts use the game font, so unusual letters in names stay readable
