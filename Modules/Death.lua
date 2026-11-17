@@ -18,12 +18,15 @@ local deathSerial = 0
 -- retry timing remain independent. Nothing is persisted across reloads.
 local npcEnabledWall, npcLastDeathWall, npcDeathBoundary, npcDeathHint
 local npcDeathActive = false
+local deathCycleActive = false
 local NPC_RECAP_LEAD = 15
 local RECAP_CLOCK_SKEW = 2
 local layoutEdit = false
 local displayDone
 local muteNextSound = false
 local previewGen = 0
+-- PollFalling is defined before Plain; assign bodies after cancel/clear helpers.
+local ReadPlayerDeadOrGhost, ResetConfirmedDeathCycle
 
 -- Wire / attribution spellKind codes (not locale keys). RAW = use legacy spell text.
 local SPELLKIND_LOCALE = {
@@ -471,7 +474,12 @@ local function OnMirrorTimerStop(timer)
 end
 
 local function PollFalling()
-  if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then return end
+  local deadOrGhost = ReadPlayerDeadOrGhost()
+  if deadOrGhost == nil then return end
+  if deadOrGhost then return end
+  if deathCycleActive then
+    ResetConfirmedDeathCycle()
+  end
   if IsFalling and IsFalling() then
     CacheEnvHint("ENV_FALL")
   elseif envHint.spell == "ENV_FALL" then
@@ -1231,6 +1239,22 @@ local function ClearDeathEvidence()
   envHint.spell, envHint.t = nil, 0
 end
 
+ReadPlayerDeadOrGhost = function()
+  if type(UnitIsDeadOrGhost) ~= "function" then return nil end
+  local ok, value = pcall(UnitIsDeadOrGhost, "player")
+  if not ok then return nil end
+  value = Plain(value)
+  if value == true or value == false then return value end
+  return nil
+end
+
+ResetConfirmedDeathCycle = function()
+  deathCycleActive = false
+  npcDeathActive, npcDeathBoundary, npcDeathHint = false, nil, nil
+  CancelPendingDeath()
+  ClearDeathEvidence()
+end
+
 -- Drop the wait flag once retries are exhausted. A pet with no owner stays a mob.
 local function ReleasePending(info)
   if not info or not info.pending then return info end
@@ -1250,6 +1274,8 @@ local function ReleasePending(info)
 end
 
 local function QueueLocalDeath()
+  if deathCycleActive then return end
+  deathCycleActive = true
   CancelPendingDeath()
   local serial = deathSerial
   local snapshot = CaptureDeathContext()
@@ -1269,7 +1295,10 @@ local function QueueLocalDeath()
   local function TryResolve()
     resolveTimer = nil
     if serial ~= deathSerial or not Death.enabled then return end
-    if attempt > 0 and UnitIsDeadOrGhost and not UnitIsDeadOrGhost("player") then return end
+    if attempt > 0 and ReadPlayerDeadOrGhost() == false then
+      ResetConfirmedDeathCycle()
+      return
+    end
     local info, recapContext = ResolveDeath(snapshot.wallTime, snapshot, true)
     -- A death's contradictory hint must not disappear just because the short
     -- retry crossed its TTL, a mirror timer stopped, or PLAYER_DEAD repeated.
@@ -1456,12 +1485,10 @@ function Death:OnEnable()
     if event == "PLAYER_DEAD" then
       QueueLocalDeath()
     elseif event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
-      -- PLAYER_ALIVE also accompanies releasing spirit. Ghosts are still dead
-      -- and must retain the pending report until the recap/retry completes.
-      if event == "PLAYER_UNGHOST" or not UnitIsDeadOrGhost or not UnitIsDeadOrGhost("player") then
-        npcDeathActive, npcDeathBoundary, npcDeathHint = false, nil, nil
-        CancelPendingDeath()
-        ClearDeathEvidence()
+      -- Only a confirmed living player ends the death cycle. Ghost release and
+      -- unreadable Dead/Ghost values must keep pending work and the claim.
+      if ReadPlayerDeadOrGhost() == false then
+        ResetConfirmedDeathCycle()
       end
     elseif event == "MIRROR_TIMER_START" then
       OnMirrorTimerStart(...)
@@ -1483,6 +1510,13 @@ function Death:OnEnable()
     fallTicker = C_Timer.NewTicker(0.5, PollFalling)
   end
 
+  local life = ReadPlayerDeadOrGhost()
+  if life == false then
+    ResetConfirmedDeathCycle()
+  elseif life == true then
+    deathCycleActive = true
+  end
+
   GR:BindMessage(self, "DIAG_CHANGED", function(_, on)
     SetDeathCapture(on)
   end)
@@ -1496,6 +1530,7 @@ function Death:OnDisable()
   self.enabled = false
   CancelPendingDeath()
   ClearDeathEvidence()
+  -- Keep deathCycleActive: disable must not clear the claim for this life.
   if layoutEdit then
     self:EndLayoutEdit()
     if GR.ToastQueue and GR.ToastQueue.Resume then GR.ToastQueue.Resume() end

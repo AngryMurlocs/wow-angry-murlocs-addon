@@ -1,0 +1,55 @@
+Setze ausschließlich den Fix gegen doppelte Todesmeldungen desselben Todes in AngryMurlocs um. Erstelle keinen weiteren reinen Plan und füge keine anderen Funktionen hinzu.
+
+Repository:
+C:\Users\Mani\Desktop\AngryMurlocs\AngryMurlocs
+
+Verbindlicher Fix-Plan:
+Cursor-Plan „Ein Todesereignis pro Leben“ (death_toast_once) — Branch fix/death-toast-once-per-death von aktuellem main.
+
+Lies AGENTS.md und den Plan. Prüfe den tatsächlichen aktuellen main-Stand, erhalte fremde Änderungen. Die geprüfte Ausgangsversion war 0.11.16 / 06afac7; nicht blind darauf zurücksetzen.
+
+Belegter Fehler:
+Nach einer bereits veröffentlichten Todesmeldung löst ein weiteres PLAYER_DEAD bei weiterhin totem Charakter erneut QueueLocalDeath aus. Es entsteht eine neue eventId, sodass der Empfänger einen zweiten Toast zeigt. Der Fall wurde in 0.11.15 und 0.11.16 reproduziert.
+
+Implementiere eine separate modul-lokale Todeszyklus-Sperre (deathCycleActive) am Eingang von QueueLocalDeath. Prüfe/setze sie VOR CancelPendingDeath, Kontextaufnahme und NewEventId. Weitere PLAYER_DEAD desselben Zyklus werden ignoriert: kein Timer-Neustart, keine neue ID, keine zusätzliche Veröffentlichung und kein zusätzlicher Wanted-Zuwachs. Bestehende Retries dürfen ihre erste Zuordnung regulär abschließen.
+
+Sichere Dead/Ghost-Lesung:
+- ReadPlayerDeadOrGhost(): true / false / nil. API-Existenz, pcall, Secrets über Plain entfernen; nur echte Booleans.
+- ResetConfirmedDeathCycle(): Sperre löschen, CancelPendingDeath, ClearDeathEvidence, NPC-Live-Flags wie beim heutigen Rez-Pfad (npcDeathActive/Boundary/Hint = false/nil/nil); npcLastDeathWall behalten.
+- Beide Helfer VOR PollFalling lokal vorwärtsdeklarieren und später zuweisen (PollFalling steht vor Plain).
+
+TryResolve (Pflicht):
+Ersetze die ungeschützte Abfrage. Nicht UnitIsDeadOrGhost roh verwenden.
+  if attempt > 0 and ReadPlayerDeadOrGhost() == false then
+    ResetConfirmedDeathCycle()
+    return
+  end
+Bei nil, Secret oder API-Fehler laufen die bestehenden begrenzten Retries weiter. Zeiten und Zuordnungsregeln unverändert.
+
+PollFalling: Roh-UnitIsDeadOrGhost ersetzen; Zustand einmal über den Helfer lesen.
+- nil → sofort return; Sperre und Env-Hints unberührt.
+- true → return (tot/Geist).
+- false → bei gesetzter Sperre einmal ResetConfirmedDeathCycle, danach Falling-Logik wie bisher.
+
+Gib den nächsten Zyklus nur bei sicher lesbarem false frei. PLAYER_ALIVE und PLAYER_UNGHOST allein sind kein Beweis. Disable cancelt Arbeit, löscht die Sperre nicht. Enable: sicher lebend/tot/unbekannt wie im Plan. Bereits beim Modulstart tote Charaktere nicht nachmelden.
+
+Unverändert bleiben:
+- Recap-Auswahl, NPC-Zeitfenster und aktuelle NPC-Schutzmechanismen.
+- Spieler-/Pet-Owner-Zuordnung und Wanted-Zulässigkeitsregeln.
+- SHORT-/LONG-Zeiten, Wire-Format, Empfangs-Deduplizierung und ToastQueue.
+- Eigene Todes-Toasts bleiben aus.
+- Keine SavedVariables, neuen APIs/Events, Bibliotheken, Module oder Zeit-Cooldowns.
+- Keine zusätzliche Sperre in BroadcastLocalDeath.
+
+Die beabsichtigte Wanted-Änderung ist ausschließlich: derselbe Tod zählt einmal statt mehrfach. Zwei echte Spielertode mit bestätigter Wiederbelebung dazwischen zählen weiterhin zweimal, auch bei gleichem Killer/Ort und sehr kurzem Abstand.
+
+Arbeite testgetrieben: Post-Publish-Doppelereignis zuerst rot nachweisen. Ergänze die Ereignisfolgen aus dem Plan inklusive: Duplikate vor/nach Veröffentlichung, SHORT/LONG, spätes Spieler-Recap, Ghost-Release, Secret/nil/Fehler bei Alive-Prüfung, verzögertes Alive, schnelle echte Folgetode, Wiederbelebung während Retry, Disable/Enable, Modulstart tot, reentrantes PLAYER_DEAD, Empfänger gleiche ID zweimal, und Verlustfall: Dead/Ghost-API während Auflösung vorübergehend nil/Fehler, danach true + gültiger Recap → genau eine Meldung; unbekannter Zustand über fallTicker/PollFalling-Tick → Sperre bleibt, Auflösung später einmal.
+
+Korrigiere den Testnamen „new death supersedes pending resolution“: ohne Wiederbelebung ist das ein wiederholtes Ereignis desselben Todes; erstes Snapshot/Deadline erhalten.
+
+Führe luajit Tests/DeathRegression_test.lua und luajit Tests/run_all.lua aus dem Addon-Root aus. Unabhängigen Review auf Dauer-Sperren, verlorene Tode bei nil/Fehler, Ghost, Reentranz, Disable/Enable und doppelte Wanted-Zählung richten.
+
+Ergänze unter Unreleased:
+- Fixed duplicate death notifications for the same death
+
+Berichte Änderungen, tatsächlich ausgeführte Tests und offene Ingame-Abnahme. Keine Garantie ohne Nachweis. Keine Versionsanhebung, kein Merge und kein Release-Tag; vorherige Freigaben für 0.11.16 gelten nicht für diesen Fix. Push/MR nur im aktuell autorisierten Rahmen.
