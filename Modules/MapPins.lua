@@ -378,7 +378,6 @@ local function BindSightPinArt(pin)
 end
 
 local function ApplyPinArt(pin, classFile, dead, ageSec)
-  if pin.glow then pin.glow:Show() end
   local style = PinStyle()
   BindPinArt(pin, classFile, style)
   ApplyPinFade(pin, dead, ageSec)
@@ -409,12 +408,13 @@ local function AcquirePin()
   pin:SetSize(DEFAULT_SIZE, DEFAULT_SIZE)
   pin:EnableMouse(true)
 
-  -- Glow / gold rim layer (texture + blend set in ApplyPinArt)
+  -- Glow / gold rim layer (texture + blend set in BindPinArt)
   local glow = pin:CreateTexture(nil, "BACKGROUND")
   glow:SetSize(DEFAULT_SIZE, DEFAULT_SIZE)
   glow:SetPoint("CENTER")
   glow:SetTexture(CIRCLE_TEX)
   glow:SetVertexColor(0.8, 0.8, 0.8, 0.65)
+  glow:Hide()
   pin.glow = glow
 
   local tex = pin:CreateTexture(nil, "ARTWORK")
@@ -492,7 +492,7 @@ local function ReleasePin(pin)
   pin.member = nil
   pin.kind = nil
   pin._artKey = nil
-  if pin.glow then pin.glow:Show() end
+  if pin.glow then pin.glow:Hide() end
   if pin.tex then
     pin.tex:ClearAllPoints()
     pin.tex:SetAllPoints()
@@ -598,7 +598,6 @@ end
 local function SyncPinLayers(pin, size)
   size = size or pin:GetWidth() or DEFAULT_SIZE
   if pin.kind == "sight" then
-    if pin.glow then pin.glow:Hide() end
     if pin.tex then
       pin.tex:ClearAllPoints()
       pin.tex:SetAllPoints()
@@ -611,7 +610,6 @@ local function SyncPinLayers(pin, size)
       pin.glow:ClearAllPoints()
       pin.glow:SetSize(size, size)
       pin.glow:SetPoint("CENTER")
-      pin.glow:Show()
     end
     if pin.tex then
       local inner = size * RING_INNER_FRAC
@@ -621,7 +619,6 @@ local function SyncPinLayers(pin, size)
     end
     return
   end
-  if pin.glow then pin.glow:Show() end
   if pin.tex then
     pin.tex:ClearAllPoints()
     pin.tex:SetAllPoints()
