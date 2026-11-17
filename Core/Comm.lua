@@ -674,9 +674,11 @@ local function DispatchParsed(tag, rest, sender)
     Count("recv_PROFRC")
     GR:SendMessage("PROF_RECIPE_CATEGORY_UPDATE", sender, entries)
   elseif tag == "DEATH" then
-    -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId
+    -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId|faction|pet
     -- parts[6] spell = legacy sender-locale prose for old clients; new peers prefer
     -- eventId/spellKind/spellId when usable (see Modules/Death.lua ResolveAttackLine).
+    -- faction is A or H when the killer's side is known. pet is the pet name when
+    -- the killer field is that pet's owner. Older clients ignore both.
     local parts = U.SplitKeepEmpty(rest, "|")
     local cause = parts[5]
     if cause ~= "player" and cause ~= "mob" and cause ~= "env" and cause ~= "unknown" then
@@ -686,6 +688,10 @@ local function DispatchParsed(tag, rest, sender)
     if spellKind == "" then spellKind = nil end
     local eventId = U.SanitizeText(parts[7] or "", 48)
     if eventId == "" then eventId = nil end
+    local faction = U.SanitizeText(parts[10] or "", 1)
+    if faction ~= "A" and faction ~= "H" then faction = nil end
+    local pet = U.SanitizeText(parts[11] or "", 48)
+    if pet == "" then pet = nil end
     GR:SendMessage("DEATH_UPDATE", sender, {
       killer = U.SanitizeText(parts[1] or "?", 48),
       isPlayer = cause == "player",
@@ -696,6 +702,8 @@ local function DispatchParsed(tag, rest, sender)
       eventId = eventId,
       spellKind = spellKind,
       spellId = tonumber(parts[9]),
+      faction = faction,
+      pet = pet,
       time = U.Now(),
     })
   elseif tag == "WANTED" or tag == "SYNCREQ" then

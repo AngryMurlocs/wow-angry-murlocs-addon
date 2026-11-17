@@ -335,7 +335,7 @@ function LevelUp:OnEnable()
     if event == "PLAYER_LEVEL_UP" then
       local level = ...
       level = tonumber(level) or UnitLevel("player")
-      Enqueue(U.PlayerName(), level)
+      -- Guildmates see the level-up. This character does not toast or list its own.
       GR:SendMessage("LVL_UPDATE", U.PlayerName(), level)
       if GR.db and GR.db.privacy and GR.db.privacy.shareLevelUp and IsInGuild and IsInGuild() then
         Comm:Send("LVL|" .. tostring(level), "ctrl", "lvl")

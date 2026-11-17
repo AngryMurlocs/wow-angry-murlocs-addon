@@ -2990,6 +2990,7 @@ function UI:OnEnable()
   end)
 
   GR:BindMessage(self, "DEATH_UPDATE", function(_, victim, data)
+    if U.IsSelfName(victim) then return end
     data = data or {}
     PushActivity({
       kind = "death",
@@ -3001,6 +3002,7 @@ function UI:OnEnable()
   end)
 
   GR:BindMessage(self, "LVL_UPDATE", function(_, sender, level)
+    if U.IsSelfName(sender) then return end
     PushActivity({ kind = "lvl", player = sender or "?", level = tonumber(level) or 0, at = U.WallTime() })
   end)
 

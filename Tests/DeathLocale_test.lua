@@ -258,5 +258,16 @@ do
   check("A8 snapshot eventId on wire data", b.deaths[1] and b.deaths[1].data.eventId == "fixed-id-1")
 end
 
+do
+  local _, _, b = Pair(911)
+  UI(b).ResetActivityForTest()
+  b.GR:SendMessage("DEATH_UPDATE", "Bob-Realm", { eventId = "self-d", cause = "mob", killer = "Wolf" })
+  b.GR:SendMessage("LVL_UPDATE", "Bob-Realm", 40)
+  check("own death and level stay out of the feed", #UI(b).ActivityForTest() == 0, #UI(b).ActivityForTest())
+  b.GR:SendMessage("DEATH_UPDATE", "Alice-Realm", { eventId = "other-d", cause = "mob", killer = "Wolf", zone = "Z" })
+  b.GR:SendMessage("LVL_UPDATE", "Alice-Realm", 41)
+  check("other death and level stay in the feed", #UI(b).ActivityForTest() == 2, #UI(b).ActivityForTest())
+end
+
 print(string.format("DeathLocale: %d failures", fails))
 if fails > 0 then os.exit(1) end

@@ -248,6 +248,59 @@ do
   check("recap mob: guild toast mob", bob.deaths[1] and bob.deaths[1].data.cause == "mob")
 end
 
+-- 12) Player GUID with no recap name uses GetPlayerInfoByGUID. Flags name a player too.
+do
+  local _, alice = NewPair(12)
+  alice.env.GetPlayerInfoByGUID = function(guid)
+    if guid == "Player-1-ABCDEF" then
+      return "Rogue", "ROGUE", "Human", "Human", 3, "Ganker", "Realm"
+    end
+  end
+  local info = Death(alice).AttributionFromRecapEvents({
+    { event = "SPELL_DAMAGE", sourceGUID = "Player-1-ABCDEF", spellName = "Eviscerate", overkill = 4, amount = 20 },
+  })
+  check("guid lookup names the player", info and info.killer == "Ganker-Realm" and info.reliable and info.cause == "player")
+  alice.env.UnitFactionGroup = function() return "Horde" end
+  alice.env.C_DeathRecap = { GetRecapEvents = function()
+    return { { event = "SWING_DAMAGE", sourceName = "Ganker", sourceFlags = 0x548, amount = 10, overkill = 1 } }
+  end }
+  info = Death(alice).ResolveDeath()
+  check("flag names a player without a guid", info and info.cause == "player" and info.killer == "Ganker" and info.faction == "A")
+end
+
+-- 13) Pet owner is the wanted player. No owner, no wanted. Target is not the owner.
+do
+  local sim, alice, bob = NewPair(13)
+  SetWorld(alice, { combat = true, units = { target = { name = "WrongGuy", realm = "Realm", player = true, hostile = true } } })
+  local petGuid = "Pet-0-1-0-0-3-0"
+  alice.env.UnitFactionGroup = function() return "Horde" end
+  alice.env.UnitTokenFromGUID = function(guid)
+    if guid == petGuid then return "pettoken" end
+  end
+  alice.env.UnitOwnerGUID = function(token)
+    if token == "pettoken" then return "Player-1-OWNER" end
+  end
+  alice.env.GetPlayerInfoByGUID = function(guid)
+    if guid == "Player-1-OWNER" then
+      return "Hunter", "HUNTER", "Human", "Human", 2, "Hunter", "Realm"
+    end
+  end
+  alice.env.C_DeathRecap = { GetRecapEvents = function()
+    return { { event = "SPELL_DAMAGE", sourceName = "Wolf", sourceGUID = petGuid, sourceFlags = 0x1140,
+      spellName = "Bite", amount = 30, overkill = 1 } }
+  end }
+  local info = Death(alice).ResolveDeath()
+  check("pet owner is not the target", info and info.killer == "Hunter-Realm" and info.pet == "Wolf" and info.reliable)
+  Death(alice):BroadcastLocalDeath()
+  sim:Run(3)
+  check("pet owner wanted", Sim.Entries(alice) >= 1)
+  check("pet owner guild toast", bob.deaths[1] and bob.deaths[1].data.faction == "A"
+    and bob.deaths[1].data.pet == "Wolf")
+  alice.env.UnitOwnerGUID = function() return nil end
+  info = Death(alice).ResolveDeath()
+  check("pet without owner is not a player yet", info and info.pending and info.cause == "mob" and info.reliable == false)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")
