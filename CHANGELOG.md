@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.16
 
 - Fixed some monster deaths appearing with an unknown cause
 
