@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.17
 
 - Fixed duplicate death notifications for the same death
 
