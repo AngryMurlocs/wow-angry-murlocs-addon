@@ -244,14 +244,46 @@ end
 -- center x, center y, width, height.
 T.TOAST_W = 720
 T.TOAST_H = 240
-T.TOAST_FONT = "Interface\\AddOns\\AngryMurlocs\\Media\\Fonts\\Cinzel-Bold.ttf"
 T.TOAST_TEXT = { 0.914, 0.886, 0.831 } -- #E9E2D4
 
 local TOAST_ART_V = 341 / 512
 
+-- The face the client already uses for its own UI text (Friz Quadrata on this
+-- locale). Same file as unit names, so letters like ð in "Minð" match the game.
+-- Source Sans is only used when that file cannot be set.
+-- License for the spare file: Media/Fonts/SourceSans3-OFL.txt
+local SOURCE_SANS = "Interface\\AddOns\\AngryMurlocs\\Media\\Fonts\\SourceSans3-Bold.ttf"
+local FRIZ = "Fonts\\FRIZQT__.TTF"
+
+local function FontPath(fs)
+  if not fs or not fs.GetFont then return nil end
+  local path = fs:GetFont()
+  if type(path) ~= "string" or path == "" then return nil end
+  return path:lower():gsub("/", "\\")
+end
+
 local function ToastFont(fs, size, fallbackTemplate)
-  local ok = fs:SetFont(T.TOAST_FONT, size, "")
-  if ok == false and fallbackTemplate then
+  local gamePath, _, gameFlags
+  if fallbackTemplate and fallbackTemplate.GetFont then
+    gamePath, _, gameFlags = fallbackTemplate:GetFont()
+  end
+  local flags = type(gameFlags) == "string" and gameFlags or ""
+  if type(gamePath) == "string" and gamePath ~= "" then
+    fs:SetFont(gamePath, size, flags)
+  end
+  local got = FontPath(fs)
+  local want = type(gamePath) == "string" and gamePath:lower():gsub("/", "\\") or nil
+  if got ~= want then
+    fs:SetFont(FRIZ, size, "")
+    got = FontPath(fs)
+  end
+  if not got or not got:find("frizqt", 1, true) then
+    if not (want and got == want) then
+      fs:SetFont(SOURCE_SANS, size, "")
+      got = FontPath(fs)
+    end
+  end
+  if not got and fallbackTemplate then
     fs:SetFontObject(fallbackTemplate)
   end
   fs:SetShadowColor(0, 0, 0, 1)
@@ -343,10 +375,7 @@ function T.CreateClassicToast(globalName, kind)
   local text = f:CreateFontString(nil, "OVERLAY", isDeath and "GameFontHighlight" or "GameFontNormalLarge")
   text:SetPoint("CENTER", 0, 4)
   text:SetWidth(w - 20)
-  do
-    local path, _, flags = text:GetFont()
-    if path then text:SetFont(path, 20, flags) end
-  end
+  ToastFont(text, 20, isDeath and GameFontHighlight or GameFontNormalLarge)
   f.text = text
 
   local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
