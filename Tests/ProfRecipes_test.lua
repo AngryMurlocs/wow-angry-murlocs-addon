@@ -114,6 +114,7 @@ local function FlushTimers()
   end
 end
 
+dofile("Core/ActivityLog.lua")
 dofile("Modules/ProfRecipes.lua")
 local R = GR:GetModule("ProfRecipes")
 
@@ -1209,17 +1210,19 @@ do
 end
 
 -- Leveling a profession: every craft fires a list update, and scans alternate
--- between incomplete and complete with the same recipes. That must not print
+-- between incomplete and complete with the same recipes. That must not log
 -- "recipes captured" again or resend the list to the guild each time.
 do
   local bodies, prints = {}, {}
   local realCommSend = GR.Comm.Send
   local realPrint = AngryMurlocs.Util.Print
+  local Log = AngryMurlocs.ActivityLog
   GR.Comm.Send = function(_, body)
     bodies[#bodies + 1] = body
     return true
   end
   AngryMurlocs.Util.Print = function(msg) prints[#prints + 1] = msg end
+  Log:Clear()
   R.enabled = true
   wipe(R._lastSentFp)
   local me = AngryMurlocs.Util.NormalizeName(AngryMurlocs.Util.PlayerName())
@@ -1227,7 +1230,8 @@ do
   scope.prof.cache[me] = { list = { { key = "alch", skill = 1, name = "Alchemy" } }, recipes = {} }
 
   R:ApplyLocalScan("alch", { 10, 20 }, true, {})
-  check("skilling first capture prints once", #prints == 1, #prints)
+  check("skilling first capture status once", #Log:Entries() == 1, #Log:Entries())
+  check("skilling first capture no chat", #prints == 0, #prints)
   check("skilling first capture sends once", #bodies == 1, #bodies)
   local rev = R.GetEntry(me, "alch").rev
   for _ = 1, 5 do
@@ -1235,14 +1239,21 @@ do
     R:ApplyLocalScan("alch", { 10 }, false, {})
     R:ApplyLocalScan("alch", { 10, 20 }, true, {})
   end
-  check("skilling no repeated chat message", #prints == 1, #prints)
+  check("skilling no repeated status", #Log:Entries() == 1, #Log:Entries())
+  check("skilling no repeated chat message", #prints == 0, #prints)
   check("skilling no repeated guild send", #bodies == 1, #bodies)
   check("skilling keeps revision", R.GetEntry(me, "alch").rev == rev, R.GetEntry(me, "alch").rev)
   check("skilling clears partial mark", R.GetEntry(me, "alch").partialSeenAt == nil)
 
   R:ApplyLocalScan("alch", { 10, 20, 30 }, true, {})
-  check("new recipe still reported once", #prints == 2, #prints)
+  check("new recipe still status once more", #Log:Entries() == 2, #Log:Entries())
+  check("new recipe still no chat", #prints == 0, #prints)
   check("new recipe still sent", #bodies == 2, #bodies)
+
+  Log:Clear()
+  R:ApplyLocalScan("alch", { 10, 20, 30 }, true, {})
+  check("after status clear unchanged scan silent", #Log:Entries() == 0 and #prints == 0 and #bodies == 2,
+    string.format("status=%d chat=%d bodies=%d", #Log:Entries(), #prints, #bodies))
 
   GR.Comm.Send = realCommSend
   AngryMurlocs.Util.Print = realPrint
@@ -1255,11 +1266,13 @@ do
   local bodies, prints = {}, {}
   local realCommSend = GR.Comm.Send
   local realPrint = AngryMurlocs.Util.Print
+  local Log = AngryMurlocs.ActivityLog
   GR.Comm.Send = function(_, body)
     bodies[#bodies + 1] = body
     return true
   end
   AngryMurlocs.Util.Print = function(msg) prints[#prints + 1] = msg end
+  Log:Clear()
   R.enabled = true
   wipe(R._lastSentFp)
   local me = AngryMurlocs.Util.NormalizeName(AngryMurlocs.Util.PlayerName())
@@ -1270,7 +1283,8 @@ do
     Advance(3)
     R:ApplyLocalScan("aid", { 3276, 3275 }, true, {})
   end
-  check("unsorted game order prints once", #prints == 1, #prints)
+  check("unsorted game order status once", #Log:Entries() == 1, #Log:Entries())
+  check("unsorted game order no chat", #prints == 0, #prints)
   check("unsorted game order sends once", #bodies == 1, #bodies)
 
   GR.Comm.Send = realCommSend
