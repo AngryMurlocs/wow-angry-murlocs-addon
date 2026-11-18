@@ -1208,5 +1208,46 @@ do
   check("cat decode", dec and #dec == 2 and dec[1].categoryName == "Potions", why)
 end
 
+-- Leveling a profession: every craft fires a list update, and scans alternate
+-- between incomplete and complete with the same recipes. That must not print
+-- "recipes captured" again or resend the list to the guild each time.
+do
+  local bodies, prints = {}, {}
+  local realCommSend = GR.Comm.Send
+  local realPrint = AngryMurlocs.Util.Print
+  GR.Comm.Send = function(_, body)
+    bodies[#bodies + 1] = body
+    return true
+  end
+  AngryMurlocs.Util.Print = function(msg) prints[#prints + 1] = msg end
+  R.enabled = true
+  wipe(R._lastSentFp)
+  local me = AngryMurlocs.Util.NormalizeName(AngryMurlocs.Util.PlayerName())
+  local scope = AngryMurlocs.Util.GetScopeDB()
+  scope.prof.cache[me] = { list = { { key = "alch", skill = 1, name = "Alchemy" } }, recipes = {} }
+
+  R:ApplyLocalScan("alch", { 10, 20 }, true, {})
+  check("skilling first capture prints once", #prints == 1, #prints)
+  check("skilling first capture sends once", #bodies == 1, #bodies)
+  local rev = R.GetEntry(me, "alch").rev
+  for _ = 1, 5 do
+    Advance(3)
+    R:ApplyLocalScan("alch", { 10 }, false, {})
+    R:ApplyLocalScan("alch", { 10, 20 }, true, {})
+  end
+  check("skilling no repeated chat message", #prints == 1, #prints)
+  check("skilling no repeated guild send", #bodies == 1, #bodies)
+  check("skilling keeps revision", R.GetEntry(me, "alch").rev == rev, R.GetEntry(me, "alch").rev)
+  check("skilling clears partial mark", R.GetEntry(me, "alch").partialSeenAt == nil)
+
+  R:ApplyLocalScan("alch", { 10, 20, 30 }, true, {})
+  check("new recipe still reported once", #prints == 2, #prints)
+  check("new recipe still sent", #bodies == 2, #bodies)
+
+  GR.Comm.Send = realCommSend
+  AngryMurlocs.Util.Print = realPrint
+  R.enabled = false
+end
+
 print(string.format("%d failures", fails))
 if fails > 0 then os.exit(1) end
