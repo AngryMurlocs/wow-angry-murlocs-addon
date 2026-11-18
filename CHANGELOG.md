@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Recipe capture and normal refresh messages now appear under Options → Log instead of in chat; local diagnostics are available there too
+
 ## 0.11.20
 
 - Fixed the "recipes captured" chat message still repeating while leveling a profession

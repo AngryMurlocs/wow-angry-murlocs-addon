@@ -1,6 +1,6 @@
-# AngryMurlocs – Discord-Anleitung (Auszug Rezepte)
+# AngryMurlocs – Discord-Anleitung (Auszug Rezepte / Protokoll)
 
-**Entwicklungsstand – Veröffentlichung nicht bestätigt.** Stand: Arbeitsbaum `feature/recipe-subcategories`, Addon-Basis 0.11.6 + Unreleased.
+**Entwicklungsstand – Veröffentlichung nicht bestätigt.** Stand: Arbeitsbaum `feature/options-activity-log`, Addon-Basis 0.11.20 + Unreleased.
 
 ## Rezepte in Unterkategorien
 
@@ -19,3 +19,13 @@
 - Globale Suche (Text ohne gewählten Beruf) bleibt eine flache Trefferliste.
 
 **Grenze:** Kategorie kommt aus WoW-Berufsdaten. Ohne auflösbaren Namen bleibt das Rezept unter Sonstiges, bis die Daten nachziehen. Client-Darstellung für diese Version noch nicht im Forever-Client abgehakt.
+
+## Protokoll (Status und Debug)
+
+**Nutzen:** Erfassung und normale Aktualisierungsmeldungen zu Rezepten landen nicht mehr im Chat, sondern unter Einstellungen → **Protokoll**.
+
+**Wo:** `/am` → Einstellungen → **Protokoll**
+- **Status:** z. B. „Rezepte erfasst“, erfolgreiches Aktualisieren (nur diese Sitzung; Button **Status leeren**).
+- **Debug:** lokale Diagnose an/aus (wie `/am diag`), Liste und Zähler nur auf deinem Rechner.
+
+**Grenze:** Fehler und nötige Aktionen (Beruf öffnen, API fehlt, …) bleiben im Chat. Nach `/reload` ist die Statusliste leer.

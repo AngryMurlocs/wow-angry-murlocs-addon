@@ -26,7 +26,7 @@ Die meisten Funktionen leben vom Austausch mit der Gilde. Je mehr Gildenmitglied
 
 ### Berufe und Rezepte
 - Liste aller Berufe in der Gilde mit Fertigkeitsstufe, Online-Status, Sortierung und Suche.
-- Rezept-Katalog: Wer in der Gilde kann was herstellen, mit benötigten Materialien. Die Rezepte eines Mitglieds erscheinen, sobald es seinen Beruf einmal im Spiel geöffnet hat.
+- Rezept-Katalog: Wer in der Gilde kann was herstellen, mit benötigten Materialien. Die Rezepte eines Mitglieds erscheinen, sobald es seinen Beruf einmal im Spiel geöffnet hat. Erfassungs- und normale Aktualisierungsmeldungen stehen unter **Einstellungen → Protokoll** (Status), nicht im Chat.
 - Innerhalb eines Berufs sind Rezepte in aufklappbaren WoW-Unterkategorien gruppiert (Mitgliederkatalog und Rezeptsuche nach Berufswahl). Die globale Textsuche bleibt eine flache Trefferliste. Rezepte ohne bekannte Kategorie stehen unter „Sonstiges“.
 - Den Hersteller direkt anflüstern oder eine fertige Anfrage in den Chat übernehmen.
 
@@ -56,7 +56,7 @@ Deutsch und Englisch, je nach Spielsprache.
 | `/am map` | Kartenpins an/aus |
 | `/am share on` / `off` | Eigene Position teilen an/aus |
 | `/am prof share on` / `off` | Eigene Berufe teilen an/aus |
-| `/am diag on` / `off` / `show` / `death` | Diagnose für Fehlersuche, bleibt auf deinem Rechner |
+| `/am diag on` / `off` / `show` / `death` | Diagnose für Fehlersuche, bleibt auf deinem Rechner (auch unter Einstellungen → Protokoll → Debug) |
 | `/am help` | Hilfe |
 
 Weitere Kurzformen: `/angrymurlocs`, `/gr`. Minimap-Knopf: Linksklick öffnet das Hauptfenster, Rechtsklick die Einstellungen.
