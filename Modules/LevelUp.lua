@@ -37,6 +37,7 @@ local function ApplyToastLayout(f)
   if not f then return end
   local c = Cfg()
   U.ApplyPoint(f, c.point, DefaultPoint)
+  if GR.ToastQueue and GR.ToastQueue.ResetDodge then GR.ToastQueue.ResetDodge(f) end
   f:SetScale(U.Clamp(tonumber(c.scale) or 1, 0.6, 1.6))
   if f.hint then
     f.hint:SetShown(layoutEdit or not c.locked)
@@ -44,7 +45,9 @@ local function ApplyToastLayout(f)
 end
 
 local function RaiseToast(f)
-  f:SetFrameStrata("FULLSCREEN_DIALOG")
+  -- Below game dialogs (DIALOG strata) so "Release spirit" and other
+  -- popups always stay on top and clickable.
+  f:SetFrameStrata("HIGH")
   f:SetFrameLevel(500)
   if f.Raise then f:Raise() end
 end
@@ -168,6 +171,12 @@ local function DisplayToast(item, done)
   end
   f:SetAlpha(1)
   f:Show()
+  -- Move below an open game dialog it would cover (not while positioning).
+  if GR.ToastQueue and GR.ToastQueue.DodgeSoon then
+    local skip = function() return layoutEdit end
+    GR.ToastQueue.WatchDialogs(f, skip)
+    GR.ToastQueue.DodgeSoon(f, skip)
+  end
 
   if not muteNextSound and not layoutEdit and not item._preview then
     if GR.Sounds and GR.Sounds.Play then GR.Sounds.Play("lvl") end
