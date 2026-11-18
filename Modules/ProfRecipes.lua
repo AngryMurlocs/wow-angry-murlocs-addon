@@ -958,7 +958,9 @@ local function SetSelfRecipes(profKey, ids, complete, scanAt)
   ids = SortIds(ids)
   local nowScan = scanAt or U.WallTime()
   local rev = (prev and tonumber(prev.rev) or 0) + 1
-  if prev and ProfRecipes.IdsEqual(prev.ids, ids) and prev.complete == complete and not prev.partialSeenAt then
+  -- A partial mark from an incomplete scan in between (e.g. while crafting to
+  -- level a profession) does not make the same list new content.
+  if prev and ProfRecipes.IdsEqual(prev.ids, ids) and prev.complete == complete then
     -- Same content: keep rev; only advance scanAt when newer/valid.
     rev = prev.rev or rev
     local prevScan = tonumber(prev.scanAt) or 0
@@ -1650,7 +1652,9 @@ function ProfRecipes:ApplyLocalScan(profKey, ids, complete, opts)
     complete = false
   end
   local prev = ProfRecipes.GetEntry(U.NormalizeName(U.PlayerName()), profKey)
-  local prevComplete = prev and prev.complete and not prev.partialSeenAt
+  -- Ignore the partial mark here: incomplete and complete scans alternate while
+  -- crafting, and the same confirmed list must not count as a new capture.
+  local prevComplete = prev and prev.complete
   local prevIds = prev and prev.ids
   local contentChanged = not prev
       or (prevComplete ~= (complete and true or false))
