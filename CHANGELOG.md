@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Fixed the "recipes captured" chat message still repeating while leveling a profession
+
 ## 0.11.19
 
 - Leveling a profession no longer fills the chat with "recipes captured" messages

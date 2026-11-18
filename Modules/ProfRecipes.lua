@@ -1647,6 +1647,9 @@ end
 function ProfRecipes:ApplyLocalScan(profKey, ids, complete, opts)
   if not profKey or ProfRecipes.IsGathering(profKey) then return end
   opts = opts or {}
+  -- The game lists recipes in its own order; the stored list is sorted by ID.
+  -- Compare like with like, or every scan looks like new content.
+  ids = SortIds(ids or {})
   -- Never commit an empty "complete" list unless explicitly allowed (true empty after filtered clear).
   if complete and (not ids or #ids == 0) and not opts.allowEmptyComplete then
     complete = false
