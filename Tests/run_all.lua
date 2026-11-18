@@ -44,6 +44,7 @@ local tests = {
   "Tests/FragTimeout_test.lua",
   "Tests/Whisper_test.lua",
   "Tests/ForeverApi_test.lua",
+  "Tests/ToastDodge_test.lua",
 }
 
 local failed = {}

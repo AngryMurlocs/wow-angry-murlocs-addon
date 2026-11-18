@@ -165,4 +165,138 @@ function T._StateForTest()
   return state
 end
 
+-- Dialog dodge ----------------------------------------------------------------
+-- A toast must never hide a game dialog such as "Release spirit". Toasts sit on
+-- a lower frame strata than dialogs, and if a toast overlaps an open dialog it
+-- moves once to just below it for the rest of that display. Rects are screen
+-- pixels { left, bottom, right, top }.
+
+T.DODGE_GAP = 8
+
+function T.RectsOverlap(a, b)
+  return a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4]
+end
+
+-- Vertical move in screen pixels (negative = down), or nil when the toast
+-- overlaps no dialog. Goes below the lowest overlapping dialog, stays on screen.
+function T.DodgeOffset(toastRect, dialogRects, screenBottom)
+  local lowest
+  for i = 1, #dialogRects do
+    local d = dialogRects[i]
+    if T.RectsOverlap(toastRect, d) and (not lowest or d[2] < lowest) then
+      lowest = d[2]
+    end
+  end
+  if not lowest then return nil end
+  -- After moving, the toast may hit another dialog stacked further down: keep
+  -- going below until its new place is free.
+  local height = toastRect[4] - toastRect[2]
+  local moved = true
+  while moved do
+    moved = false
+    local top = lowest - T.DODGE_GAP
+    local target = { toastRect[1], top - height, toastRect[3], top }
+    for i = 1, #dialogRects do
+      local d = dialogRects[i]
+      if d[2] < lowest and T.RectsOverlap(target, d) then
+        lowest = d[2]
+        moved = true
+      end
+    end
+  end
+  local dy = (lowest - T.DODGE_GAP) - toastRect[4]
+  local newBottom = toastRect[2] + dy
+  if screenBottom and newBottom < screenBottom then
+    dy = screenBottom - toastRect[2]
+  end
+  if dy >= 0 then return nil end
+  return dy
+end
+
+local dialogFramesOverride
+local function DialogFrames()
+  if dialogFramesOverride then return dialogFramesOverride end
+  local list = {}
+  for i = 1, 4 do
+    local f = _G["StaticPopup" .. i]
+    if f then list[#list + 1] = f end
+  end
+  return list
+end
+
+function T._SetDialogFramesForTest(frames)
+  dialogFramesOverride = frames
+end
+
+local function ScreenRect(f)
+  if not f or not f.GetLeft then return nil end
+  local l, b, r, t = f:GetLeft(), f:GetBottom(), f:GetRight(), f:GetTop()
+  if not (l and b and r and t) then return nil end
+  local s = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+  return { l * s, b * s, r * s, t * s }
+end
+
+-- Moves `frame` below an overlapping open dialog. At most once per display.
+-- Returns true when it moved.
+function T.TryDodge(frame)
+  if not frame or frame._amDodged then return false end
+  if not (frame.IsShown and frame:IsShown()) then return false end
+  local rects = {}
+  for _, d in ipairs(DialogFrames()) do
+    if d.IsShown and d:IsShown() then
+      local r = ScreenRect(d)
+      if r then rects[#rects + 1] = r end
+    end
+  end
+  if #rects == 0 then return false end
+  local mine = ScreenRect(frame)
+  if not mine then return false end
+  local dy = T.DodgeOffset(mine, rects, 0)
+  if not dy then return false end
+  local p, rel, rp, x, y = frame:GetPoint(1)
+  if not p then return false end
+  local scale = (frame.GetEffectiveScale and frame:GetEffectiveScale()) or 1
+  frame:ClearAllPoints()
+  frame:SetPoint(p, rel, rp, x or 0, (y or 0) + dy / scale)
+  frame._amDodged = true
+  return true
+end
+
+-- Called when a toast goes back to its saved position (each new display).
+function T.ResetDodge(frame)
+  if frame then frame._amDodged = nil end
+end
+
+-- Toasts that may need to dodge a dialog opening while they are shown.
+-- skip() returns true while the player is positioning toasts in the settings.
+local dodgeFrames = {}
+local dialogHooked = false
+
+local function DodgeAllSoon()
+  local function Run()
+    for frame, skip in pairs(dodgeFrames) do
+      if not (skip and skip()) then T.TryDodge(frame) end
+    end
+  end
+  if C_Timer and C_Timer.After then C_Timer.After(0, Run) else Run() end
+end
+
+function T.WatchDialogs(frame, skip)
+  if not frame then return end
+  dodgeFrames[frame] = skip or false
+  if not dialogHooked and type(hooksecurefunc) == "function" and type(StaticPopup_Show) == "function" then
+    dialogHooked = true
+    hooksecurefunc("StaticPopup_Show", DodgeAllSoon)
+  end
+end
+
+-- Check right after a toast appeared (its rect is known one frame later).
+function T.DodgeSoon(frame, skip)
+  if not frame then return end
+  local function Run()
+    if not (skip and skip()) then T.TryDodge(frame) end
+  end
+  if C_Timer and C_Timer.After then C_Timer.After(0, Run) else Run() end
+end
+
 return T
