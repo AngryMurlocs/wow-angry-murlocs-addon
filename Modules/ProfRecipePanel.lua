@@ -1065,19 +1065,19 @@ local function EnsureCatalog(parent)
     })
     if why == "opening" or why == "retrying" then
       ArmFetchTimeout(20)
-      U.Print(U.L("PROF_RECIPE_REFRESH_OPENING"))
+      U.Status(U.L("PROF_RECIPE_REFRESH_OPENING"))
     elseif why == "sent" then
       ArmFetchTimeout(15)
-      U.Print(U.L("PROF_RECIPE_REFRESH_SENT"))
+      U.Status(U.L("PROF_RECIPE_REFRESH_SENT"))
     elseif why == "ok_empty" then
       ClearFetchPending()
-      U.Print(U.L("PROF_RECIPE_REFRESH_OK_EMPTY"))
+      U.Status(U.L("PROF_RECIPE_REFRESH_OK_EMPTY"))
     elseif ok and why ~= "empty_suspect" then
       ClearFetchPending()
-      U.Print(string.format(U.L("PROF_RECIPE_REFRESH_OK"), DisplayProf(state.profKey)))
+      U.Status(string.format(U.L("PROF_RECIPE_REFRESH_OK"), DisplayProf(state.profKey)))
     elseif why == "cooldown" then
       ClearFetchPending()
-      U.Print(U.L("PROF_RECIPE_REFRESH_CD"))
+      U.Status(U.L("PROF_RECIPE_REFRESH_CD"))
     elseif why == "no_api" then
       ClearFetchPending()
       U.Print(U.L("PROF_RECIPE_REFRESH_NO_API"))
@@ -1089,7 +1089,7 @@ local function EnsureCatalog(parent)
       U.Print(U.L("PROF_RECIPE_REFRESH_NEED_OPEN"))
     elseif why == "gathering" then
       ClearFetchPending()
-      U.Print(U.L("PROF_RECIPE_EMPTY_GATHERING"))
+      U.Status(U.L("PROF_RECIPE_EMPTY_GATHERING"))
     elseif why == "no_guild" then
       ClearFetchPending()
       U.Print(U.L("PROF_RECIPE_REFRESH_NO_GUILD"))
@@ -1531,9 +1531,9 @@ function UI:AttachRecipePanel(parent)
     end
     if not quiet then
       if ok and why == "ok_empty" then
-        U.Print(U.L("PROF_RECIPE_REFRESH_OK_EMPTY"))
+        U.Status(U.L("PROF_RECIPE_REFRESH_OK_EMPTY"))
       elseif ok then
-        U.Print(string.format(U.L("PROF_RECIPE_REFRESH_OK"), DisplayProf(profKey or state.profKey)))
+        U.Status(string.format(U.L("PROF_RECIPE_REFRESH_OK"), DisplayProf(profKey or state.profKey)))
       elseif why == "empty_suspect" then
         U.Print(U.L("PROF_RECIPE_REFRESH_EMPTY_SUSPECT"))
       elseif why == "spells_fail" or why == "no_ctx" then

@@ -1671,13 +1671,13 @@ function ProfRecipes:ApplyLocalScan(profKey, ids, complete, opts)
   if complete and ids and #ids > 0 and not opts.skipBroadcast then
     self:BroadcastProfession(profKey, false)
   end
-  -- Chat confirm only on first complete capture or real content change (not every list event).
+  -- Status log on first complete capture or real content change (not every list event).
   -- Manual refresh with unchanged data is handled by ProfRecipePanel refresh messages.
   if complete and (firstCapture or contentChanged) then
     if ids and #ids > 0 then
-      U.Print(string.format(U.L("PROF_RECIPE_CAPTURED"), #ids))
+      U.Status(string.format(U.L("PROF_RECIPE_CAPTURED"), #ids))
     elseif opts.allowEmptyComplete and (firstCapture or contentChanged) then
-      U.Print(U.L("PROF_RECIPE_REFRESH_OK_EMPTY"))
+      U.Status(U.L("PROF_RECIPE_REFRESH_OK_EMPTY"))
     end
   end
   return entry, contentChanged, firstCapture
