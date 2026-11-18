@@ -116,6 +116,19 @@ Voraussetzung: Forever-Build + Locale notieren. Lua-Suite deckt Logik ab; Darste
 - [ ] DE/EN Labels; UI-Skalierung; großer Katalog (Pool bleibt begrenzt).
 - [ ] Eigenes + fremdes Rezept: `categoryID` + lokalisierter Name verfügbar (sonst Restfall dokumentieren).
 
+### Options → Log (Unreleased — Client noch ungeprüft)
+
+Client-Build notieren: `/dump GetBuildInfo()` → ________ · Basis lokal: Addon-Branch mit ActivityLog.
+
+- [ ] Einstellungen → **Protokoll**: Unteransicht Status standardmäßig; Wechsel Status|Debug bleibt in der Sitzung.
+- [ ] Beruf öffnen / craften / neues Rezept lernen: Erfassung erscheint unter Status, **nicht** im Chat (Wiederholungen beim Skillen bleiben still).
+- [ ] Manuell **Rezepte aktualisieren**: Erfolg/Öffnen/Gesendet/Cooldown → Status; Fehler (API fehlt, Fenster nötig, leer verdächtig, keine Gilde, Fail) → Chat.
+- [ ] Status leeren: Liste leer; unveränderter erneuter Scan erzeugt keine neue Erfassungszeile; Rezeptkatalog/Revision unverändert.
+- [ ] Debug: Checkbox = `/am diag on|off`; Zeilen und Zähler erscheinen live ohne Toggle-Flip; Ausschalten leert Debugzeilen, Zähler bleiben; gespeichertes „an“ überlebt `/reload`.
+- [ ] Scroll: ältere Zeilen lesen → neue Einträge verschieben die Position nicht unnötig; ganz oben → neue Zeilen sichtbar.
+- [ ] `/reload`: Status- und Debugzeilen leer; Diag-Flag wie gespeichert; Options öffnen holt neue Ereignisse nach.
+- [ ] Lange Texte / UI-Skalierung lesbar. Offene Punkte ehrlich notieren.
+
 ### Rezeptsuche + Detail (gemeinsam)
 
 Voraussetzung: Forever `C_TradeSkillUI` (Interface 16001). Nur erfasste Cache-Rezepte.

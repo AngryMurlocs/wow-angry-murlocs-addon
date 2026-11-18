@@ -2,11 +2,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| Datum | 2026-11-11 |
-| Quelle | AngryMurlocs Arbeitsbaum `feature/recipe-subcategories` |
-| Basis | main / 0.11.6 |
-| Status | Entwicklungsstand – nicht veröffentlicht |
-| Codebeleg | `Core/RecipeCategories.lua`, `Modules/ProfRecipePanel.lua`, `Modules/UI.lua`, `Modules/ProfRecipes.lua` (`ResolveRecipeCategory`, `PROFRC`) |
-| Tests | `luajit Tests/run_all.lua` grün |
-| Client | Forever Ingame **ungeprüft** (siehe `Tests/CLIENT_CHECKLIST.md` Abschnitt Rezept-Unterkategorien) |
-| Offene Punkte | Live-Beleg categoryID+Name für fremde Rezepte ohne Berufsfenster |
+| Datum | 2026-11-19 |
+| Quelle | AngryMurlocs Release 0.11.21 |
+| Basis | `v0.11.21` / main nach release: 0.11.21 |
+| Status | Veröffentlichung über Tag geplant / CurseForge nach Tag-Push |
+| Codebeleg | `Core/ActivityLog.lua`, `Core/Util.lua` (`U.Status`), `Modules/Options.lua` (Log), `Modules/ProfRecipes.lua` / `ProfRecipePanel.lua` (Routing), `Core/Diag.lua` |
+| Tests | `luajit Tests/run_all.lua` |
+| Client | Forever Ingame teilweise (lokal installiert); Checklist-Punkte Options → Log offen |
+| Offene Punkte | Volle CLIENT_CHECKLIST Options → Log |

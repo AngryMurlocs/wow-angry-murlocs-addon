@@ -17,6 +17,7 @@ local tests = {
   "Tests/RecipeCategories_test.lua",
   "Tests/RecipeListView_test.lua",
   "Tests/ProfRecipes_test.lua",
+  "Tests/ActivityLog_test.lua",
   "Tests/Freshness_test.lua",
   "Tests/PinFade_test.lua",
   "Tests/SightPins_test.lua",

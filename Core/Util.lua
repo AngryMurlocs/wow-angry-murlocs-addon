@@ -10,6 +10,14 @@ function U.Print(msg)
   end
 end
 
+-- Player-facing status: Options → Log → Status only (no chat, no network).
+function U.Status(msg)
+  local log = AngryMurlocs and AngryMurlocs.ActivityLog
+  if log and log.Add then
+    return log:Add(msg)
+  end
+end
+
 function U.L(key)
   local locale = AngryMurlocsLocale
   if locale and locale[key] ~= nil then return locale[key] end

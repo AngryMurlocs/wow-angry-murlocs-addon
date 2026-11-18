@@ -89,13 +89,14 @@ do
       death = "death",
       sight = "sight",
       ui = "ui",
+      log = "log",
       notify = "lvl",
       messages = "lvl",
       layout = "ui",
       no_such_cat = "privacy",
     }
     for _, cat in ipairs({
-      "privacy", "map", "lvl", "death", "sight", "ui",
+      "privacy", "map", "lvl", "death", "sight", "ui", "log",
       "notify", "messages", "layout", "no_such_cat",
     }) do
       ok, err = pcall(options.ShowCategory, options, cat)
@@ -158,6 +159,43 @@ do
       check("opt katwechsel ends edit", ok, err)
       check("opt layout edit off after kat", options:IsLayoutEdit() ~= true)
     end
+
+    -- Options → Log (Status | Debug)
+    ok, err = pcall(options.ShowCategory, options, "log")
+    check("opt category log open", ok, err)
+    check("opt log default status", options.GetLogSubview and options:GetLogSubview() == "status")
+    local log = bob.GR.ActivityLog
+    check("opt activity log present", log ~= nil)
+    if log then
+      log:Clear()
+      bob.GR.Util.Status("ui-smoke-status")
+      check("opt status stored", #log:Entries() == 1 and log:Entries()[1].msg == "ui-smoke-status")
+      log:Clear()
+      check("opt status clear", #log:Entries() == 0)
+    end
+    if options.SetLogSubview then
+      ok, err = pcall(options.SetLogSubview, options, "debug")
+      check("opt log switch debug", ok, err)
+      check("opt log subview debug", options:GetLogSubview() == "debug")
+      local diag = bob.GR.Diag
+      if diag then
+        local was = diag:Enabled()
+        diag:SetEnabled(true)
+        check("opt diag enable", diag:Enabled() == true)
+        diag:Log("smoke", "line")
+        check("opt diag has entry", #diag:Entries() >= 1)
+        diag:SetEnabled(false)
+        check("opt diag disable clears lines", #diag:Entries() == 0)
+        if was then diag:SetEnabled(true) end
+      end
+      ok, err = pcall(options.SetLogSubview, options, "status")
+      check("opt log switch status", ok, err)
+    end
+    -- reopen must not error (no duplicate handler explosion)
+    ok, err = pcall(options.ShowCategory, options, "log")
+    check("opt log reopen", ok, err)
+    ok, err = pcall(options.ShowCategory, options, "privacy")
+    check("opt leave log", ok, err)
   end
 end
 
@@ -195,6 +233,33 @@ check("general refresh after sync", ok, err)
 ok, err = pcall(bob.Wanted.SetClassFile, bob.Wanted, "Enemy-Realm", "WARRIOR")
 check("set classFile", ok, err)
 check("summary still lists entry", bob.Wanted:Summary().total == 1)
+
+-- Panel refresh routing: success → Status; error → chat (async DONE path)
+do
+  local prints, statuses = {}, {}
+  local realPrint, realStatus = bob.GR.Util.Print, bob.GR.Util.Status
+  bob.GR.Util.Print = function(msg) prints[#prints + 1] = msg end
+  bob.GR.Util.Status = function(msg)
+    statuses[#statuses + 1] = msg
+    if realStatus then return realStatus(msg) end
+  end
+  local me = bob.GR.Util.NormalizeName(bob.GR.Util.PlayerName())
+  ok, err = pcall(ui.OpenRecipeCatalog, ui, me, "alch")
+  check("panel open catalog for status routing", ok, err)
+  for k in pairs(prints) do prints[k] = nil end
+  for k in pairs(statuses) do statuses[k] = nil end
+  bob.GR:SendMessage("PROF_RECIPE_REFRESH_DONE", "alch", true, "ok")
+  check("panel async success → status", #statuses >= 1 and #prints == 0,
+    string.format("status=%d chat=%d", #statuses, #prints))
+  for k in pairs(prints) do prints[k] = nil end
+  for k in pairs(statuses) do statuses[k] = nil end
+  bob.GR:SendMessage("PROF_RECIPE_REFRESH_DONE", "alch", false, "empty_suspect")
+  check("panel async error → chat", #prints >= 1 and #statuses == 0,
+    string.format("status=%d chat=%d", #statuses, #prints))
+  if ui.CloseRecipeCatalog then pcall(ui.CloseRecipeCatalog, ui, false) end
+  bob.GR.Util.Print = realPrint
+  bob.GR.Util.Status = realStatus
+end
 
 -- Recipe modules load + search refresh path (cases 2–3 / R4)
 do

@@ -13,6 +13,14 @@ local activeOptCat = "privacy"
 local detailHost
 local layoutCallbacks = {}
 
+-- Options → Log (Status | Debug)
+local logSubview = "status" -- session-only
+local logStatusDirty = false
+local logDebugPollGen = 0
+local logRowPool = {}
+local logLastFingerprint = nil
+local logBuilt
+
 local CAT_ALIASES = {
   notify = "lvl",
   messages = "lvl",
@@ -210,8 +218,246 @@ local function ApplyContentWidths()
   end
 end
 
+local function StopLogDebugPoll()
+  logDebugPollGen = logDebugPollGen + 1
+end
+
+local function LogPageVisible()
+  if activeOptCat ~= "log" then return false end
+  local host = optCatHosts.log
+  if not host or not host.IsShown or not host:IsShown() then return false end
+  local ui = GR:GetModule("UI")
+  if ui and ui.IsTabShown and not ui:IsTabShown("opt") then return false end
+  return true
+end
+
+local function FormatLogRelTime(t)
+  return string.format(U.L("OPT_LOG_REL_TIME"), tonumber(t) or 0)
+end
+
+local function AcquireLogRow(parent, i)
+  local row = logRowPool[i]
+  if row then
+    row:SetParent(parent)
+    row:Show()
+    return row
+  end
+  row = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  row:SetJustifyH("LEFT")
+  if row.SetWordWrap then row:SetWordWrap(true) end
+  if row.SetNonSpaceWrap then row:SetNonSpaceWrap(true) end
+  logRowPool[i] = row
+  return row
+end
+
+local function HideLogRowsFrom(fromIdx)
+  for i = fromIdx, #logRowPool do
+    local row = logRowPool[i]
+    if row then row:Hide() end
+  end
+end
+
+local function CounterSummaryText()
+  local diag = GR.Diag
+  if not diag or not diag.counters then return "" end
+  local keys = {}
+  for k in pairs(diag.counters) do keys[#keys + 1] = k end
+  table.sort(keys)
+  if #keys == 0 then return "" end
+  local parts = {}
+  for i = 1, #keys do
+    parts[#parts + 1] = keys[i] .. "=" .. tostring(diag.counters[keys[i]])
+  end
+  return table.concat(parts, "  ")
+end
+
+local function DebugFingerprint()
+  local diag = GR.Diag
+  local parts = {
+    tostring(diag and diag:Enabled()),
+    CounterSummaryText(),
+  }
+  local entries = (diag and diag.Entries and diag:Entries()) or {}
+  for i = 1, #entries do
+    local e = entries[i]
+    parts[#parts + 1] = string.format("%s|%s|%s", tostring(e.t), tostring(e.kind), tostring(e.msg))
+  end
+  return table.concat(parts, "\n")
+end
+
+local function StatusFingerprint()
+  local log = GR.ActivityLog
+  local entries = (log and log.Entries and log:Entries()) or {}
+  local parts = {}
+  for i = 1, #entries do
+    local e = entries[i]
+    parts[#parts + 1] = string.format("%s|%s", tostring(e.seq), tostring(e.msg))
+  end
+  return table.concat(parts, "\n")
+end
+
+local function PaintLogList(force)
+  if not logBuilt then return end
+  local host = optCatHosts.log
+  if not host or not host._amLogBody then return end
+  local body = host._amLogBody
+  local scroll = host._amScroll
+  local innerW = ContentInnerWidth()
+  local atTop = true
+  local prevScroll = 0
+  if scroll and scroll.GetVerticalScroll then
+    prevScroll = scroll:GetVerticalScroll() or 0
+    atTop = prevScroll <= 2
+  end
+
+  local fp
+  if logSubview == "debug" then
+    fp = "d:" .. DebugFingerprint()
+  else
+    fp = "s:" .. StatusFingerprint()
+  end
+  if not force and fp == logLastFingerprint then
+    return
+  end
+  logLastFingerprint = fp
+
+  -- Header widgets visibility
+  if host._amLogEmpty then
+    host._amLogEmpty:Show()
+  end
+  if host._amLogClear then
+    if logSubview == "status" then host._amLogClear:Show() else host._amLogClear:Hide() end
+  end
+  if host._amLogDiagCheck then
+    if logSubview == "debug" then host._amLogDiagCheck:Show() else host._amLogDiagCheck:Hide() end
+  end
+  if host._amLogDiagNote then
+    if logSubview == "debug" then host._amLogDiagNote:Show() else host._amLogDiagNote:Hide() end
+  end
+  if host._amLogCounters then
+    if logSubview == "debug" then
+      host._amLogCounters:Show()
+      local summary = CounterSummaryText()
+      if summary == "" then
+        host._amLogCounters:SetText(U.L("OPT_LOG_COUNTERS_NONE"))
+      else
+        host._amLogCounters:SetText(U.L("OPT_LOG_COUNTERS") .. "\n" .. summary)
+      end
+    else
+      host._amLogCounters:Hide()
+    end
+  end
+
+  local lines = {}
+  local emptyKey = "OPT_LOG_STATUS_EMPTY"
+  if logSubview == "debug" then
+    emptyKey = "OPT_LOG_DEBUG_EMPTY"
+    local diag = GR.Diag
+    local entries = (diag and diag.Entries and diag:Entries()) or {}
+    for i = 1, #entries do
+      local e = entries[i]
+      lines[#lines + 1] = string.format("%s  %s: %s", FormatLogRelTime(e.t), tostring(e.kind or "?"), tostring(e.msg or ""))
+    end
+  else
+    local log = GR.ActivityLog
+    local entries = (log and log.Entries and log:Entries()) or {}
+    for i = 1, #entries do
+      local e = entries[i]
+      lines[#lines + 1] = string.format("%s  %s", FormatLogRelTime(e.t), tostring(e.msg or ""))
+    end
+  end
+
+  if host._amLogEmpty then
+    if #lines == 0 then
+      host._amLogEmpty:SetText(U.L(emptyKey))
+      host._amLogEmpty:Show()
+    else
+      host._amLogEmpty:Hide()
+    end
+  end
+
+  local y = -4
+  local rowW = math.max(80, innerW - 8)
+  local used = 0
+  if #lines == 0 and host._amLogEmpty and host._amLogEmpty:IsShown() then
+    -- empty label already in header area; nothing in body
+  end
+  for i = 1, #lines do
+    used = i
+    local row = AcquireLogRow(body, i)
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", 0, y)
+    row:SetWidth(rowW)
+    row:SetText(lines[i])
+    local h = row.GetStringHeight and row:GetStringHeight() or 14
+    if not h or h < 12 then h = 14 end
+    y = y - h - 4
+  end
+  HideLogRowsFrom(used + 1)
+
+  local height = math.max(40, math.abs(y) + 8)
+  body:SetWidth(innerW)
+  body:SetHeight(height)
+  -- Keep sticky scroll: at top follow new lines; otherwise preserve offset.
+  if scroll and scroll.SetVerticalScroll then
+    if atTop then
+      scroll:SetVerticalScroll(0)
+    else
+      local maxScroll = math.max(0, height - (host:GetHeight() or 200))
+      if prevScroll > maxScroll then prevScroll = maxScroll end
+      scroll:SetVerticalScroll(prevScroll)
+    end
+  end
+  host._amHeight = (host._amHeaderH or 120) + height
+end
+
+local function RefreshLogView(force)
+  if not LogPageVisible() then
+    logStatusDirty = true
+    return
+  end
+  logStatusDirty = false
+  if logBuilt and logBuilt.syncSubview then
+    logBuilt.syncSubview()
+  end
+  if logBuilt and logBuilt.syncDiagCheck then
+    logBuilt.syncDiagCheck()
+  end
+  PaintLogList(force)
+end
+
+local function ScheduleLogDebugPoll()
+  StopLogDebugPoll()
+  local gen = logDebugPollGen
+  local function tick()
+    if gen ~= logDebugPollGen then return end
+    if not LogPageVisible() or logSubview ~= "debug" then return end
+    PaintLogList(false)
+    if C_Timer and C_Timer.After then
+      C_Timer.After(0.25, tick)
+    end
+  end
+  if C_Timer and C_Timer.After then
+    C_Timer.After(0.25, tick)
+  end
+end
+
+local function OnLogShown()
+  RefreshLogView(true)
+  if logSubview == "debug" then
+    ScheduleLogDebugPoll()
+  else
+    StopLogDebugPoll()
+  end
+end
+
+local function OnLogHidden()
+  StopLogDebugPoll()
+end
+
 function Options:ShowCategory(id)
   id = ResolveCategoryId(id)
+  local leavingLog = activeOptCat == "log" and id ~= "log"
   HideSoundMenu()
   EndLayoutEditMode()
   activeOptCat = id
@@ -237,10 +483,29 @@ function Options:ShowCategory(id)
     end
   end
   ApplyContentWidths()
+  if leavingLog then
+    OnLogHidden()
+  end
+  if id == "log" then
+    OnLogShown()
+  end
 end
 
 function Options:GetActiveCategory()
   return activeOptCat
+end
+
+function Options:GetLogSubview()
+  return logSubview
+end
+
+function Options:SetLogSubview(which)
+  if which ~= "status" and which ~= "debug" then return end
+  logSubview = which
+  logLastFingerprint = nil
+  if LogPageVisible() then
+    OnLogShown()
+  end
 end
 
 -- Compat: message kinds are first-class sidebar sections.
@@ -339,7 +604,7 @@ function Options:AttachPanel(parent)
     ApplyContentWidths()
   end)
 
-  local sectionIds = { "privacy", "map", "lvl", "death", "sight", "ui" }
+  local sectionIds = { "privacy", "map", "lvl", "death", "sight", "ui", "log" }
   for i = 1, #sectionIds do
     local id = sectionIds[i]
     local host = CreateFrame("Frame", nil, detailHost)
@@ -397,6 +662,8 @@ function Options:AttachPanel(parent)
   NavButton("sight", "GENERAL_KIND_SIGHT", 10)
   navY = navY - 12
   NavButton("ui", "OPT_SEC_LAYOUT")
+  navY = navY - 12
+  NavButton("log", "OPT_SEC_LOG")
 
   local function BuildHelpers(content)
     local y = -4
@@ -1115,13 +1382,193 @@ function Options:AttachPanel(parent)
     host._amHeight = H.Finish()
   end
 
+  -- Log (Status | Debug)
+  do
+    local host = optCatHosts.log
+    local content = host._amContent
+    local scroll = host._amScroll
+    local innerW = ContentInnerWidth()
+    local y = -4
+
+    local title = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 0, y)
+    title:SetText(U.L("OPT_SEC_LOG"))
+    y = y - 26
+
+    local statusBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    statusBtn:SetSize(90, 20)
+    statusBtn:SetPoint("TOPLEFT", 0, y)
+    statusBtn:SetText(U.L("OPT_LOG_STATUS"))
+
+    local debugBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    debugBtn:SetSize(90, 20)
+    debugBtn:SetPoint("LEFT", statusBtn, "RIGHT", 6, 0)
+    debugBtn:SetText(U.L("OPT_LOG_DEBUG"))
+
+    local clearBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    clearBtn:SetSize(120, 20)
+    clearBtn:SetPoint("LEFT", debugBtn, "RIGHT", 12, 0)
+    clearBtn:SetText(U.L("OPT_LOG_CLEAR_STATUS"))
+    clearBtn:SetScript("OnClick", function()
+      local log = GR.ActivityLog
+      if log and log.Clear then log:Clear() end
+      logLastFingerprint = nil
+      PaintLogList(true)
+    end)
+    host._amLogClear = clearBtn
+    y = y - 26
+
+    local function StyleSubviewBtns()
+      if T and T.StyleTabButton then
+        T.StyleTabButton(statusBtn, logSubview == "status")
+        T.StyleTabButton(debugBtn, logSubview == "debug")
+      end
+    end
+
+    local diagCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+    diagCheck:SetPoint("TOPLEFT", 0, y)
+    diagCheck:SetSize(24, 24)
+    local diagLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    diagLabel:SetPoint("LEFT", diagCheck, "RIGHT", 4, 0)
+    diagLabel:SetText(U.L("OPT_LOG_DIAG_ENABLE"))
+    diagCheck:SetScript("OnClick", function(self)
+      local diag = GR.Diag
+      if diag and diag.SetEnabled then
+        diag:SetEnabled(self:GetChecked())
+      end
+    end)
+    host._amLogDiagCheck = diagCheck
+    y = y - 28
+
+    local diagNote = content:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    diagNote:SetPoint("TOPLEFT", 8, y)
+    diagNote:SetWidth(math.max(80, innerW - 16))
+    diagNote:SetJustifyH("LEFT")
+    if diagNote.SetWordWrap then diagNote:SetWordWrap(true) end
+    diagNote:SetText(U.L("OPT_LOG_DIAG_NOTE"))
+    host._amLogDiagNote = diagNote
+    local noteH = diagNote.GetStringHeight and diagNote:GetStringHeight() or 28
+    if not noteH or noteH < 16 then noteH = 28 end
+    y = y - noteH - 8
+
+    local counters = content:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    counters:SetPoint("TOPLEFT", 0, y)
+    counters:SetWidth(math.max(80, innerW - 8))
+    counters:SetJustifyH("LEFT")
+    if counters.SetWordWrap then counters:SetWordWrap(true) end
+    host._amLogCounters = counters
+    y = y - 36
+
+    local empty = content:CreateFontString(nil, "ARTWORK", "GameFontDisable")
+    empty:SetPoint("TOPLEFT", 0, y)
+    empty:SetWidth(math.max(80, innerW - 8))
+    empty:SetJustifyH("LEFT")
+    if empty.SetWordWrap then empty:SetWordWrap(true) end
+    empty:SetText(U.L("OPT_LOG_STATUS_EMPTY"))
+    host._amLogEmpty = empty
+    y = y - 22
+
+    local body = CreateFrame("Frame", nil, content)
+    body:SetPoint("TOPLEFT", 0, y)
+    body:SetSize(innerW, 40)
+    host._amLogBody = body
+    host._amHeaderH = math.abs(y) + 8
+
+    statusBtn:SetScript("OnClick", function()
+      Options:SetLogSubview("status")
+    end)
+    debugBtn:SetScript("OnClick", function()
+      Options:SetLogSubview("debug")
+    end)
+
+    local function syncSubview()
+      StyleSubviewBtns()
+      if logSubview == "status" then
+        clearBtn:Show()
+        diagCheck:Hide()
+        diagNote:Hide()
+        counters:Hide()
+      else
+        clearBtn:Hide()
+        diagCheck:Show()
+        diagNote:Show()
+        counters:Show()
+      end
+    end
+
+    local function syncDiagCheck()
+      local diag = GR.Diag
+      local on = diag and diag.Enabled and diag:Enabled()
+      diagCheck:SetChecked(on and true or false)
+    end
+
+    logBuilt = {
+      syncSubview = syncSubview,
+      syncDiagCheck = syncDiagCheck,
+    }
+    syncSubview()
+    syncDiagCheck()
+
+    host:HookScript("OnShow", function()
+      if activeOptCat == "log" then
+        OnLogShown()
+      end
+    end)
+    host:HookScript("OnHide", function()
+      OnLogHidden()
+    end)
+
+    -- Recompute list width when the options detail pane resizes.
+    layoutCallbacks[#layoutCallbacks + 1] = function(w)
+      if host._amLogBody then
+        host._amLogBody:SetWidth(w)
+      end
+      if diagNote then diagNote:SetWidth(math.max(80, w - 16)) end
+      if counters then counters:SetWidth(math.max(80, w - 8)) end
+      if empty then empty:SetWidth(math.max(80, w - 8)) end
+      if LogPageVisible() then
+        logLastFingerprint = nil
+        PaintLogList(true)
+      end
+    end
+
+    host._amHeight = host._amHeaderH + 40
+    content:SetHeight(host._amHeight)
+    -- Keep scroll child as content; list rows live in body under the header.
+    if scroll then
+      -- no-op: content already scroll child
+    end
+  end
+
   ApplyContentWidths()
   Options:ShowCategory("privacy")
+  Options:EnsureLogBindings()
+end
+
+function Options:EnsureLogBindings()
+  if self._logBound then return end
+  self._logBound = true
+  GR:BindMessage(Options, "ACTIVITY_LOG_CHANGED", function()
+    if activeOptCat == "log" and logSubview == "status" and LogPageVisible() then
+      logLastFingerprint = nil
+      PaintLogList(true)
+    else
+      logStatusDirty = true
+    end
+  end)
+  GR:BindMessage(Options, "DIAG_CHANGED", function()
+    if activeOptCat == "log" and logSubview == "debug" and LogPageVisible() then
+      if logBuilt and logBuilt.syncDiagCheck then logBuilt.syncDiagCheck() end
+      logLastFingerprint = nil
+      PaintLogList(true)
+    end
+  end)
 end
 
 function Options:OnEnable()
   if self.enabled then return end
   self.enabled = true
+  Options:EnsureLogBindings()
 
   local panel = CreateFrame("Frame")
   panel.name = "AngryMurlocs"
@@ -1157,5 +1604,8 @@ end
 function Options:OnDisable()
   if not self.enabled then return end
   self.enabled = false
+  StopLogDebugPoll()
+  GR:UnbindMessages(Options)
+  self._logBound = nil
   DismissOverlays()
 end
