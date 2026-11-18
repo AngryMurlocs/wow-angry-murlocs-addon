@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.21
 
 - Recipe capture and normal refresh messages now appear under Options → Log instead of in chat; local diagnostics are available there too
 
