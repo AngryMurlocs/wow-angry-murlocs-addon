@@ -1249,5 +1249,34 @@ do
   R.enabled = false
 end
 
+-- The game lists recipes in its own order (e.g. highest first), not sorted by
+-- ID. The same recipes in that order must not count as a change on every scan.
+do
+  local bodies, prints = {}, {}
+  local realCommSend = GR.Comm.Send
+  local realPrint = AngryMurlocs.Util.Print
+  GR.Comm.Send = function(_, body)
+    bodies[#bodies + 1] = body
+    return true
+  end
+  AngryMurlocs.Util.Print = function(msg) prints[#prints + 1] = msg end
+  R.enabled = true
+  wipe(R._lastSentFp)
+  local me = AngryMurlocs.Util.NormalizeName(AngryMurlocs.Util.PlayerName())
+  local scope = AngryMurlocs.Util.GetScopeDB()
+  scope.prof.cache[me] = { list = { { key = "aid", skill = 1, name = "First Aid" } }, recipes = {} }
+
+  for _ = 1, 5 do
+    Advance(3)
+    R:ApplyLocalScan("aid", { 3276, 3275 }, true, {})
+  end
+  check("unsorted game order prints once", #prints == 1, #prints)
+  check("unsorted game order sends once", #bodies == 1, #bodies)
+
+  GR.Comm.Send = realCommSend
+  AngryMurlocs.Util.Print = realPrint
+  R.enabled = false
+end
+
 print(string.format("%d failures", fails))
 if fails > 0 then os.exit(1) end
