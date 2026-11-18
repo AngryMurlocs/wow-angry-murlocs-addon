@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Death and level-up messages no longer cover the release spirit window and other game dialogs
+
 ## 0.11.17
 
 - Fixed duplicate death notifications for the same death

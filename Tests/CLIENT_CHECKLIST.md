@@ -51,6 +51,14 @@ Vorbereitung: zwei Gildenmitglieder A/B, gleicher bekannter Wanted-Eintrag, Kart
 - [ ] Berufe: Online zuerst; Offline gedimmt mit ·; bei >40 Einträgen Seiten `<` `>` und Kopfzeile „Top 40 von N“.
 - [ ] Mehrere Tode/Level-Ups schnell hintereinander: Toasts nacheinander (Tod vor Level), kein Überlappen, im Kampf Pause bis Kampfende.
 
+## Meldungen und Blizzard-Fenster (Unreleased)
+
+- [ ] Sterben, während eine Gilden-Todesmeldung läuft: Das Fenster „Geist freilassen“ liegt oben und ist klickbar. Überschneidet sich die Meldung, rutscht sie einmal direkt darunter und bleibt dort bis zum Ende der Anzeige.
+- [ ] Meldung in den Einstellungen nach links verschoben, sodass sie das Fenster nicht berührt: Sie bleibt beim Öffnen des Fensters an ihrer Stelle.
+- [ ] Nächste Meldung nach dem Ausweichen erscheint wieder an der gespeicherten Position.
+- [ ] Beim Verschieben in den Einstellungen weicht die Meldung nie aus.
+- [ ] Beide Stile (Murloc-Bild und klassische Leiste) und die Level-up-Meldung verhalten sich gleich, z. B. bei einer Gruppeneinladung.
+
 ## 11. Gilden-/Realmwechsel und gemischte Versionen
 
 - [ ] Charakter in Gilde B einloggen: Gilde-A-Wanted-Einträge und Berufe erscheinen **nicht**.
