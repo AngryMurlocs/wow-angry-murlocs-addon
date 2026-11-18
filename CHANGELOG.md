@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Leveling a profession no longer fills the chat with "recipes captured" messages
+
 ## 0.11.18
 
 - Death and level-up messages no longer cover the release spirit window and other game dialogs
