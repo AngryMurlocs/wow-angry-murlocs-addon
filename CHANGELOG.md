@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.18
 
 - Death and level-up messages no longer cover the release spirit window and other game dialogs
 
