@@ -82,7 +82,7 @@ local defaults = {
     wanted = { point = nil }, -- legacy unused
   },
   ui = {
-    nerglishYell = false, -- opt-in Murloc /y reactions
+    nerglishStyle = "off", -- "off" | "nerglish" | "schmaeh"
   },
   levelUp = {
     showToasts = true,
@@ -220,8 +220,15 @@ frame:SetScript("OnEvent", function(_, event, ...)
       end
     end
     AngryMurlocsDB = AngryMurlocsDB or {}
+    -- Before CopyDefaults: old nerglishYell must map before style default "off" lands.
+    if GR.Nerglish and GR.Nerglish.MigrateUi then
+      GR.Nerglish.MigrateUi(AngryMurlocsDB)
+    end
     CopyDefaults(defaults, AngryMurlocsDB)
     GR.db = AngryMurlocsDB
+    if GR.Nerglish and GR.Nerglish.MigrateUi then
+      GR.Nerglish.MigrateUi(GR.db)
+    end
     -- Leftover debug data from 0.11.x and older
     GR.db._agentDebug = nil
     GR.db.migrations = GR.db.migrations or {}

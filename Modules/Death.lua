@@ -381,8 +381,9 @@ local function DisplayDeathToast(item, done)
     local victimKey = U.CharKey(item.victim)
     local WantedMod = GR:GetModule("Wanted")
     local wanted = WantedMod and WantedMod.State and WantedMod:State().wanted
+    local player = item.victim and U.ShortName(item.victim) or nil
     if victimKey and wanted and wanted[victimKey] then
-      GR.Nerglish.TryReact("wanted_kill", now)
+      GR.Nerglish.TryReact("wanted_kill", now, { player = player })
     else
       local repeatDeath = false
       if victimKey then
@@ -396,7 +397,7 @@ local function DisplayDeathToast(item, done)
         kept[#kept + 1] = now
         recentDeaths[victimKey] = kept
       end
-      GR.Nerglish.TryReact("death", now, { repeatDeath = repeatDeath })
+      GR.Nerglish.TryReact("death", now, { player = player, repeatDeath = repeatDeath })
     end
   end
   -- Move below an open game dialog it would cover (not while positioning).

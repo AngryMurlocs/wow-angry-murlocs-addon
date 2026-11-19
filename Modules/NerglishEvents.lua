@@ -61,7 +61,7 @@ local function OnGuildRoster()
       seen[key] = true
       if not knownMembers[key] then
         knownMembers[key] = true
-        React("guild_join")
+        React("guild_join", { player = U.ShortName(name) })
         break
       end
     end
@@ -104,7 +104,8 @@ local function OnLoot(_, ...)
   local itemId = ItemIdFromMessage(msg)
   local q = ItemQuality(itemId)
   if q and q >= RARE_QUALITY then
-    React("loot")
+    local itemName = msg:match("%[(.-)%]")
+    React("loot", { item = itemName, player = selfName })
   end
 end
 
@@ -171,7 +172,9 @@ function Mod:OnEnable()
     elseif event == "CHAT_MSG_LOOT" then
       OnLoot(_, ...)
     elseif event == "CHAT_MSG_GUILD_ACHIEVEMENT" then
-      React("guild_goal")
+      local msg = ...
+      local goal = type(msg) == "string" and msg:match("%[(.-)%]") or nil
+      React("guild_goal", { goal = goal })
     elseif event == "ACHIEVEMENT_EARNED" then
       OnAchievement(_, ...)
     end

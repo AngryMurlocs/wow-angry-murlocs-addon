@@ -1,4 +1,4 @@
--- Rare Murloc yells (/y). No wire, no toast rewrite.
+-- Rare Murloc yells (/y). Styles: off | nerglish | schmaeh. No wire, no toast rewrite.
 local GR = AngryMurlocs or {}
 AngryMurlocs = GR
 
@@ -9,6 +9,7 @@ local CHANCE = 0.15
 local LEGEND_CHANCE = 0.08
 local GLOBAL_CD = 300
 local MAX_PER_HOUR = 3
+local TEST_CD = 2
 
 local POOL_SIZE = {
   lvl = 6,
@@ -30,7 +31,7 @@ local POOL_SIZE = {
   legend = 12,
 }
 
-local PREFIX = {
+local PREFIX_SCHMAEH = {
   lvl = "NERGLISH_LVL_",
   lvl_m = "NERGLISH_LVL_M_",
   lvl60 = "NERGLISH_LVL60_",
@@ -50,9 +51,27 @@ local PREFIX = {
   legend = "NERGLISH_LEGEND_",
 }
 
-local IDLE_KINDS = { "idle_hunger", "idle_schmaeh", "idle_dumb", "idle_lazy" }
+local PREFIX_PURE = {
+  lvl = "NERGLISH_PURE_LVL_",
+  lvl_m = "NERGLISH_PURE_LVL_M_",
+  lvl60 = "NERGLISH_PURE_LVL60_",
+  death = "NERGLISH_PURE_DEATH_",
+  death_repeat = "NERGLISH_PURE_DEATH_REPEAT_",
+  sight = "NERGLISH_PURE_SIGHT_",
+  wanted_kill = "NERGLISH_PURE_WANTED_KILL_",
+  pvp = "NERGLISH_PURE_PVP_",
+  guild_join = "NERGLISH_PURE_GUILD_JOIN_",
+  loot = "NERGLISH_PURE_LOOT_",
+  achievement = "NERGLISH_PURE_ACHIEVEMENT_",
+  guild_goal = "NERGLISH_PURE_GUILD_GOAL_",
+  idle_hunger = "NERGLISH_PURE_IDLE_HUNGER_",
+  idle_schmaeh = "NERGLISH_PURE_IDLE_SCHMAEH_",
+  idle_dumb = "NERGLISH_PURE_IDLE_DUMB_",
+  idle_lazy = "NERGLISH_PURE_IDLE_LAZY_",
+  legend = "NERGLISH_PURE_LEGEND_",
+}
 
-local TEST_CD = 2
+local IDLE_KINDS = { "idle_hunger", "idle_schmaeh", "idle_dumb", "idle_lazy" }
 
 local state = {
   lastReactAt = 0,
@@ -74,6 +93,42 @@ function N.ResetForTest()
   state.lastTestAt = 0
   ClearTable(state.hourStamps)
   ClearTable(state.lastVariant)
+end
+
+function N.Normalize(style)
+  if style == "off" or style == "nerglish" or style == "schmaeh" then
+    return style
+  end
+  return "off"
+end
+
+--- Migrate old ui.nerglishYell → nerglishStyle. Safe to call more than once.
+function N.MigrateUi(db)
+  if type(db) ~= "table" then return end
+  db.ui = type(db.ui) == "table" and db.ui or {}
+  local ui = db.ui
+  local cur = ui.nerglishStyle
+  if cur == "off" or cur == "nerglish" or cur == "schmaeh" then
+    -- keep chosen style
+  elseif cur ~= nil then
+    ui.nerglishStyle = "off"
+  elseif ui.nerglishYell == true then
+    ui.nerglishStyle = "schmaeh"
+  else
+    ui.nerglishStyle = "off"
+  end
+  ui.nerglishStyle = N.Normalize(ui.nerglishStyle)
+  ui.nerglishYell = nil
+end
+
+function N.GetStyle(db)
+  db = db or GR.db
+  local ui = db and db.ui
+  return N.Normalize(ui and ui.nerglishStyle)
+end
+
+function N.IsEnabled(db)
+  return N.GetStyle(db) ~= "off"
 end
 
 local function L(key)
@@ -114,8 +169,13 @@ local function Clamp01(r)
   return r
 end
 
-local function PickIndex(poolId, size)
-  local last = state.lastVariant[poolId]
+local function VariantKey(style, poolId)
+  return tostring(style) .. ":" .. tostring(poolId)
+end
+
+local function PickIndex(style, poolId, size)
+  local vk = VariantKey(style, poolId)
+  local last = state.lastVariant[vk]
   local choices = {}
   for i = 1, size do
     if i ~= last then choices[#choices + 1] = i end
@@ -127,10 +187,10 @@ local function PickIndex(poolId, size)
   return choices[math.floor(r * #choices) + 1]
 end
 
-local function BookReact(now, poolId, index)
+local function BookReact(now, style, poolId, index)
   state.lastReactAt = now
   state.hourStamps[#state.hourStamps + 1] = now
-  state.lastVariant[poolId] = index
+  state.lastVariant[VariantKey(style, poolId)] = index
 end
 
 function N.ResolveKind(kind, facts)
@@ -157,11 +217,18 @@ function N.Yell(text)
   return ok and true or false
 end
 
-local function PickLine(kind)
+local function PrefixMap(style)
+  if style == "nerglish" then return PREFIX_PURE end
+  if style == "schmaeh" then return PREFIX_SCHMAEH end
+  return nil
+end
+
+local function PickLine(kind, style)
   local size = POOL_SIZE[kind]
-  local prefix = PREFIX[kind]
+  local map = PrefixMap(style)
+  local prefix = map and map[kind]
   if not size or not prefix then return nil, nil, nil end
-  local index = PickIndex(kind, size)
+  local index = PickIndex(style, kind, size)
   local key = prefix .. tostring(index)
   local text = L(key)
   if type(text) ~= "string" or text == "" or text == key then
@@ -171,63 +238,62 @@ local function PickLine(kind)
   return text, kind, index
 end
 
-local function PickLegend()
-  return PickLine("legend")
+local function PickLegend(style)
+  return PickLine("legend", style)
 end
 
-local function AfterPick(now, poolId, index, text)
+local function AfterPick(now, style, poolId, index, text, bookLimits)
   N.Yell(text)
-  BookReact(now, poolId, index)
+  if bookLimits then
+    BookReact(now, style, poolId, index)
+  else
+    state.lastVariant[VariantKey(style, poolId)] = index
+  end
   return text
-end
-
-function N.IsEnabled(db)
-  db = db or GR.db
-  local ui = db and db.ui
-  return ui and ui.nerglishYell == true
 end
 
 --- kind + optional facts. Yells on success. Returns yelled text or nil.
 function N.TryReact(kind, now, facts)
   now = tonumber(now) or 0
-  if not N.IsEnabled() then return nil end
+  local style = N.GetStyle()
+  if style == "off" then return nil end
   kind = N.ResolveKind(kind, facts)
-  if not POOL_SIZE[kind] or not PREFIX[kind] then return nil end
+  if not POOL_SIZE[kind] then return nil end
   if not AntiSpamAllows(now) then return nil end
   if N._Random() >= CHANCE then return nil end
 
   local text, poolId, index
   if N._Random() < LEGEND_CHANCE then
-    text, poolId, index = PickLegend()
+    text, poolId, index = PickLegend(style)
   end
   if not text then
-    text, poolId, index = PickLine(kind)
+    text, poolId, index = PickLine(kind, style)
   end
   if not text then return nil end
-  return AfterPick(now, poolId, index, text)
+  return AfterPick(now, style, poolId, index, text, true)
 end
 
---- Idle chatter. Same anti-spam / legend rules.
 function N.TryIdle(now)
   now = tonumber(now) or 0
-  if not N.IsEnabled() then return nil end
+  local style = N.GetStyle()
+  if style == "off" then return nil end
   if not AntiSpamAllows(now) then return nil end
   if N._Random() >= CHANCE then return nil end
 
   local text, poolId, index
   if N._Random() < LEGEND_CHANCE then
-    text, poolId, index = PickLegend()
+    text, poolId, index = PickLegend(style)
   end
   if not text then
     local r = Clamp01(N._Random())
     local sub = IDLE_KINDS[math.floor(r * #IDLE_KINDS) + 1]
-    text, poolId, index = PickLine(sub)
+    text, poolId, index = PickLine(sub, style)
   end
   if not text then return nil end
-  return AfterPick(now, poolId, index, text)
+  return AfterPick(now, style, poolId, index, text, true)
 end
 
---- Forced test yell (Options). Bypasses chance/CD/hour; 2s click throttle only.
+--- Forced test yell. Bypasses auto limits; 2s click throttle. Off → preview nerglish.
 function N.TestYell(now)
   now = tonumber(now)
   if not now then
@@ -237,12 +303,14 @@ function N.TestYell(now)
   if state.lastTestAt > 0 and (now - state.lastTestAt) < TEST_CD then
     return nil
   end
-  local text, poolId, index = PickLegend()
+  local style = N.GetStyle()
+  if style == "off" then style = "nerglish" end
+  local text, poolId, index = PickLegend(style)
   if not text then return nil end
   N.Yell(text)
   state.lastTestAt = now
   if poolId and index then
-    state.lastVariant[poolId] = index
+    state.lastVariant[VariantKey(style, poolId)] = index
   end
   return text
 end
@@ -253,5 +321,7 @@ N.GLOBAL_CD = GLOBAL_CD
 N.MAX_PER_HOUR = MAX_PER_HOUR
 N.TEST_CD = TEST_CD
 N.POOL_SIZE = POOL_SIZE
-N.PREFIX = PREFIX
+N.PREFIX_SCHMAEH = PREFIX_SCHMAEH
+N.PREFIX_PURE = PREFIX_PURE
 N.IDLE_KINDS = IDLE_KINDS
+N.PREFIX = PREFIX_SCHMAEH

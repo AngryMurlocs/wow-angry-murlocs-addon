@@ -1307,25 +1307,63 @@ function Options:AttachPanel(parent)
     H.PageTitle("OPT_SEC_LAYOUT")
 
     H.GroupLabel("OPT_GRP_NERGLISH_TEST")
+    H.Hint("OPT_NERGLISH_STYLE_HINT")
+    do
+      local function NormalizeNerglish(style)
+        if GR.Nerglish and GR.Nerglish.Normalize then
+          return GR.Nerglish.Normalize(style)
+        end
+        if style == "nerglish" or style == "schmaeh" then return style end
+        return "off"
+      end
+      local function GetNerglishStyle()
+        GR.db.ui = GR.db.ui or {}
+        return NormalizeNerglish(GR.db.ui.nerglishStyle)
+      end
+      local nerglishBtns = {}
+      local function RefreshNerglishBtns()
+        local cur = GetNerglishStyle()
+        for id, b in pairs(nerglishBtns) do
+          if T and T.StyleTabButton then
+            T.StyleTabButton(b, id == cur)
+          end
+        end
+      end
+      local function SetNerglishStyle(style)
+        GR.db.ui = GR.db.ui or {}
+        GR.db.ui.nerglishStyle = NormalizeNerglish(style)
+        GR.db.ui.nerglishYell = nil
+        RefreshNerglishBtns()
+      end
+      local nerglishDefs = {
+        { id = "off", key = "OPT_NERGLISH_OFF" },
+        { id = "nerglish", key = "OPT_NERGLISH_PURE" },
+        { id = "schmaeh", key = "OPT_NERGLISH_SCHMAEH" },
+      }
+      local nergRowTop = H.Place(BTN_H, 4, 8)
+      local nergGap = 8
+      local nergInnerW = H.innerW()
+      local nergTileW = math.floor((nergInnerW - nergGap * (#nerglishDefs - 1)) / #nerglishDefs)
+      if nergTileW < 80 then nergTileW = 80 end
+      for i = 1, #nerglishDefs do
+        local def = nerglishDefs[i]
+        local btn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+        btn:SetSize(nergTileW, BTN_H)
+        btn:SetPoint("TOPLEFT", content, "TOPLEFT", (i - 1) * (nergTileW + nergGap), nergRowTop)
+        btn:SetText(U.L(def.key))
+        btn:SetScript("OnClick", function()
+          SetNerglishStyle(def.id)
+        end)
+        nerglishBtns[def.id] = btn
+      end
+      RefreshNerglishBtns()
+    end
     H.Hint("OPT_NERGLISH_TEST_HINT")
-    local nergCb, nergText = H.Check("OPT_NERGLISH_ENABLE", function()
-      GR.db.ui = GR.db.ui or {}
-      return GR.db.ui.nerglishYell == true
-    end, function(v)
-      GR.db.ui = GR.db.ui or {}
-      GR.db.ui.nerglishYell = v and true or false
-    end)
-    local nergTestBtnW = 120
-    nergText:SetWidth(math.max(80, H.innerW() - 8 - 36 - nergTestBtnW - 16))
-    local nergTestBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    nergTestBtn:SetSize(nergTestBtnW, BTN_H)
-    nergTestBtn:SetPoint("LEFT", nergText, "RIGHT", 12, 0)
-    nergTestBtn:SetText(U.L("OPT_NERGLISH_TEST"))
-    nergTestBtn:SetScript("OnClick", function()
+    H.Button("OPT_NERGLISH_TEST", function()
       if GR.Nerglish and GR.Nerglish.TestYell then
         GR.Nerglish.TestYell()
       end
-    end)
+    end, 200, HINT_GAP)
 
     H.GroupLabel("OPT_GRP_WINDOW")
     H.Hint("OPT_LAYOUT_HINT_WINDOW")
