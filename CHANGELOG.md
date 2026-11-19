@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## 0.11.24
+
+- Optional rare Murloc yells (/y) on guild moments and idle lines (off by default); Options → Layout has enable + test yell
+
 ## 0.11.23
 
 - Murloc chat style option and automatic murloc chat lines removed

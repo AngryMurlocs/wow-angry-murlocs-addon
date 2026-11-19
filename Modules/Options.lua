@@ -1306,6 +1306,27 @@ function Options:AttachPanel(parent)
     local H = BuildHelpers(content)
     H.PageTitle("OPT_SEC_LAYOUT")
 
+    H.GroupLabel("OPT_GRP_NERGLISH_TEST")
+    H.Hint("OPT_NERGLISH_TEST_HINT")
+    local nergCb, nergText = H.Check("OPT_NERGLISH_ENABLE", function()
+      GR.db.ui = GR.db.ui or {}
+      return GR.db.ui.nerglishYell == true
+    end, function(v)
+      GR.db.ui = GR.db.ui or {}
+      GR.db.ui.nerglishYell = v and true or false
+    end)
+    local nergTestBtnW = 120
+    nergText:SetWidth(math.max(80, H.innerW() - 8 - 36 - nergTestBtnW - 16))
+    local nergTestBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    nergTestBtn:SetSize(nergTestBtnW, BTN_H)
+    nergTestBtn:SetPoint("LEFT", nergText, "RIGHT", 12, 0)
+    nergTestBtn:SetText(U.L("OPT_NERGLISH_TEST"))
+    nergTestBtn:SetScript("OnClick", function()
+      if GR.Nerglish and GR.Nerglish.TestYell then
+        GR.Nerglish.TestYell()
+      end
+    end)
+
     H.GroupLabel("OPT_GRP_WINDOW")
     H.Hint("OPT_LAYOUT_HINT_WINDOW")
     H.Button("OPT_RESET_POS", function()

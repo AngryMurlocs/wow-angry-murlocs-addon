@@ -1,6 +1,6 @@
 # AngryMurlocs – Discord-Anleitung (Auszug)
 
-**Version 0.11.23.**
+**Version 0.11.24.**
 
 ## Todesmeldungen und Wanted
 
@@ -9,6 +9,14 @@
 **Grenze (0.11.22):** In **Schlachtfeldern und Arenen** gibt es **keine** Gilden-Todesmeldung (Toast/Feed). Wanted hat solche Tode schon vorher nie gezählt. Duell-Tode zählen weiter nicht für Wanted.
 
 **Wo steuern:** `/am` → Einstellungen → Freigaben → **Gilden-Tode teilen** (steuert auch Wanted-Meldungen).
+
+## Seltene Murloc-Schreie (Yell)
+
+**Nutzen:** Gelegentlich **schreit** dein Charakter Murloc-Sprüche per **Yell (/y)** — bei Gilden-Tod, Level-Up, Wanted, PvP, Beute, Erfolgen u. a., manchmal auch zwischendurch. Toasts und Addon-Sync bleiben unverändert.
+
+**Wo:** `/am` → Einstellungen → **Oberfläche** → **Murloc-Yells aktivieren** (Standard: aus). Daneben **Yell testen**.
+
+**Grenze:** Selten (Chance + Abklingzeit, max. wenige pro Stunde). Nur Yell in Hörweite, kein Gilden-Chat.
 
 ## Rezepte in Unterkategorien
 

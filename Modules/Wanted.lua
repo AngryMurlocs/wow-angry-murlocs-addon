@@ -248,6 +248,9 @@ local function MaybeAlert(targetKey, zone, reporter)
     U.ShortName(reporter or "?")
   )
   U.Print(alert)
+  if GR.Nerglish and GR.Nerglish.TryReact then
+    GR.Nerglish.TryReact("sight", now)
+  end
   if GR.Sounds and GR.Sounds.Play then
     GR.Sounds.Play("sight")
   end

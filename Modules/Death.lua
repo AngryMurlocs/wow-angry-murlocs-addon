@@ -25,6 +25,8 @@ local layoutEdit = false
 local displayDone
 local muteNextSound = false
 local previewGen = 0
+-- Session death stamps for Nerglish "repeat death" (15 min window).
+local recentDeaths = {}
 -- PollFalling is defined before Plain; assign bodies after cancel/clear helpers.
 local ReadPlayerDeadOrGhost, ResetConfirmedDeathCycle
 
@@ -374,6 +376,29 @@ local function DisplayDeathToast(item, done)
   end
   f:SetAlpha(1)
   f:Show()
+  if not layoutEdit and not item._preview and GR.Nerglish and GR.Nerglish.TryReact then
+    local now = U.Now()
+    local victimKey = U.CharKey(item.victim)
+    local WantedMod = GR:GetModule("Wanted")
+    local wanted = WantedMod and WantedMod.State and WantedMod:State().wanted
+    if victimKey and wanted and wanted[victimKey] then
+      GR.Nerglish.TryReact("wanted_kill", now)
+    else
+      local repeatDeath = false
+      if victimKey then
+        local list = recentDeaths[victimKey] or {}
+        local cut = now - 900
+        local kept = {}
+        for i = 1, #list do
+          if list[i] >= cut then kept[#kept + 1] = list[i] end
+        end
+        repeatDeath = #kept >= 1
+        kept[#kept + 1] = now
+        recentDeaths[victimKey] = kept
+      end
+      GR.Nerglish.TryReact("death", now, { repeatDeath = repeatDeath })
+    end
+  end
   -- Move below an open game dialog it would cover (not while positioning).
   if GR.ToastQueue and GR.ToastQueue.DodgeSoon then
     local skip = function() return layoutEdit end
