@@ -81,6 +81,9 @@ local defaults = {
     professions = { point = nil }, -- legacy; migrated into main
     wanted = { point = nil }, -- legacy unused
   },
+  ui = {
+    nerglishYell = false, -- opt-in Murloc /y reactions
+  },
   levelUp = {
     showToasts = true,
     point = nil,

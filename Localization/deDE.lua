@@ -394,3 +394,8 @@ L["WANTED_RANK_SCOURGE"] = "Gildenschreck"
 L["LVL_TOAST"] = "Hat Stufe |cffffffff%d|r erreicht!"
 L["LVL_DRAG_HINT"] = "Ziehen zum Verschieben"
 L["TOAST_DRAG_HINT"] = "Ziehen zum Verschieben"
+
+L["OPT_GRP_NERGLISH_TEST"] = "Murloc-Yell"
+L["OPT_NERGLISH_ENABLE"] = "Murloc-Yells aktivieren"
+L["OPT_NERGLISH_TEST"] = "Yell testen"
+L["OPT_NERGLISH_TEST_HINT"] = "Standard: aus. Wenn an, seltene echte Yells (/y). Test erzwingt immer einen Yell; Spieler in der Nähe hören ihn."

@@ -6,8 +6,11 @@
 ## SavedVariables: AngryMurlocsDB
 
 Localization\enUS.lua
+Localization\nerglish\enUS.lua
 Localization\deDE.lua
+Localization\nerglish\deDE.lua
 Core\Util.lua
+Core\Nerglish.lua
 Core\Theme.lua
 Core\Protocol.lua
 Core\Queue.lua
@@ -32,6 +35,7 @@ Modules\Wanted.lua
 Modules\WantedSync.lua
 Modules\WantedPanel.lua
 Modules\LevelUp.lua
+Modules\NerglishEvents.lua
 Modules\UI.lua
 Modules\ProfRecipePanel.lua
 Modules\MinimapButton.lua
