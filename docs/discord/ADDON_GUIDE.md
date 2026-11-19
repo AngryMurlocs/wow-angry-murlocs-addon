@@ -1,6 +1,6 @@
 # AngryMurlocs – Discord-Anleitung (Auszug)
 
-**Version 0.11.24** (+ Entwicklungsstand: Murloc-Rufe Aus/Nerglish/Schmäh – Veröffentlichung nicht bestätigt).
+**Version 0.11.25.**
 
 ## Todesmeldungen und Wanted
 

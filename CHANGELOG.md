@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.25
 
 - Murloc yells: choose Off, classic Nerglish, or Austrian Schmäh (Options → Layout); public /y test button
 
