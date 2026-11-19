@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## 0.11.22
+
+- Death notices no longer show for battleground or arena deaths (Wanted already never counted them)
+- Optional Murloc-style chat lines for guild level-ups, deaths, and Wanted sightings (Off / Subtle / Playful; default Off), with rare and legendary lines and safer text handling
+
 ## 0.11.21
 
 - Recipe capture and normal refresh messages now appear under Options → Log instead of in chat; local diagnostics are available there too

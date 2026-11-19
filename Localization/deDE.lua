@@ -394,3 +394,11 @@ L["WANTED_RANK_SCOURGE"] = "Gildenschreck"
 L["LVL_TOAST"] = "Hat Stufe |cffffffff%d|r erreicht!"
 L["LVL_DRAG_HINT"] = "Ziehen zum Verschieben"
 L["TOAST_DRAG_HINT"] = "Ziehen zum Verschieben"
+
+-- Optional Nerglish chat flavor (kreative Lautmalerei; keine kanonischen Übersetzungen)
+L["OPT_GRP_NERGLISH"] = "Murloc-Chatstil"
+L["OPT_NERGLISH_HINT"] = "Nur optionale lokale Chatzeilen. Toasts und Gildensync bleiben unverändert. Standard: Aus."
+L["OPT_NERGLISH_OFF"] = "Aus"
+L["OPT_NERGLISH_SUBTLE"] = "Dezent"
+L["OPT_NERGLISH_PLAYFUL"] = "Verspielt"
+-- Reaktionspools: Localization/nerglish/deDE.lua (danach geladen).

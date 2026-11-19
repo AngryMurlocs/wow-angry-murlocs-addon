@@ -374,6 +374,16 @@ local function DisplayDeathToast(item, done)
   end
   f:SetAlpha(1)
   f:Show()
+  if not layoutEdit and not item._preview and GR.Nerglish and GR.Nerglish.TryReact then
+    local react = GR.Nerglish.TryReact({
+      kind = "death",
+      victim = item.victim,
+      zone = item.zone,
+    }, U.Now())
+    if react and react.text then
+      U.Print(react.text)
+    end
+  end
   -- Move below an open game dialog it would cover (not while positioning).
   if GR.ToastQueue and GR.ToastQueue.DodgeSoon then
     local skip = function() return layoutEdit end
@@ -1183,21 +1193,6 @@ function Death:BroadcastLocalDeath(info, snapshot, recapContext)
   local faction = (info.faction == "A" or info.faction == "H") and info.faction or nil
   local pet = (type(info.pet) == "string" and info.pet ~= "") and info.pet or nil
 
-  -- No local toast. Guildmates still get DEATH_UPDATE and the guild message.
-  GR:SendMessage("DEATH_UPDATE", fullName, {
-    killer = killerWire,
-    isPlayer = cause == "player",
-    zone = zone,
-    mapId = mapId,
-    cause = cause,
-    spell = legacySpell,
-    spellKind = spellKind,
-    spellId = spellId,
-    eventId = eventId,
-    faction = faction,
-    pet = pet,
-  })
-
   local verdict = "no_player"
   if cause == "player" or cause == "unknown" then
     local ok, why = GR.WantedLogic.EvaluateDeath({
@@ -1219,6 +1214,24 @@ function Death:BroadcastLocalDeath(info, snapshot, recapContext)
     end
   end
   SnapshotDeath(info, ctx, zone, verdict, recapContext)
+
+  -- Battlegrounds/arenas: Wanted already rejects; do not toast or wire DEATH.
+  if ctx.instanceType == "pvp" or ctx.instanceType == "arena" then return end
+
+  -- No local toast. Guildmates still get DEATH_UPDATE and the guild message.
+  GR:SendMessage("DEATH_UPDATE", fullName, {
+    killer = killerWire,
+    isPlayer = cause == "player",
+    zone = zone,
+    mapId = mapId,
+    cause = cause,
+    spell = legacySpell,
+    spellKind = spellKind,
+    spellId = spellId,
+    eventId = eventId,
+    faction = faction,
+    pet = pet,
+  })
 
   if not IsInGuild() then return end
   -- DEATH|killer|isPlayer|zone|mapId|cause|spell|eventId|spellKind|spellId|faction|pet

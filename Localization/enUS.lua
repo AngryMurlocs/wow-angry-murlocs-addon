@@ -395,6 +395,14 @@ L["LVL_TOAST"] = "Reached level |cffffffff%d|r!"
 L["LVL_DRAG_HINT"] = "Drag to move"
 L["TOAST_DRAG_HINT"] = "Drag to move"
 
+-- Optional Nerglish chat flavor (creative onomatopoeia; not canon translations)
+L["OPT_GRP_NERGLISH"] = "Murloc chat style"
+L["OPT_NERGLISH_HINT"] = "Optional local chat lines only. Toasts and guild sync stay unchanged. Default: Off."
+L["OPT_NERGLISH_OFF"] = "Off"
+L["OPT_NERGLISH_SUBTLE"] = "Subtle"
+L["OPT_NERGLISH_PLAYFUL"] = "Playful"
+-- Reaction pools: Localization/nerglish/enUS.lua (loaded after this file).
+
 -- Frozen English copy for U.L fallback (deDE mutates AngryMurlocsLocale in place).
 AngryMurlocsLocaleEN = {}
 for k, v in pairs(L) do

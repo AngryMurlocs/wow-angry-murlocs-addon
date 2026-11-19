@@ -241,12 +241,25 @@ local function MaybeAlert(targetKey, zone, reporter)
   local last = alertCd[targetKey] or 0
   if (now - last) < ALERT_CD then return end
   alertCd[targetKey] = now
-  U.Print(string.format(
+  local alert = string.format(
     U.L("WANTED_SIGHT_ALERT"),
     U.ShortName(targetKey),
     zone or "?",
     U.ShortName(reporter or "?")
-  ))
+  )
+  local line = alert
+  if GR.Nerglish and GR.Nerglish.TryReact then
+    local react = GR.Nerglish.TryReact({
+      kind = "sight",
+      target = targetKey,
+      zone = zone,
+      reporter = reporter,
+    }, now)
+    if react and react.cry and react.cry ~= "" then
+      line = react.cry .. " " .. alert
+    end
+  end
+  U.Print(line)
   if GR.Sounds and GR.Sounds.Play then
     GR.Sounds.Play("sight")
   end
