@@ -395,10 +395,13 @@ L["LVL_TOAST"] = "Reached level |cffffffff%d|r!"
 L["LVL_DRAG_HINT"] = "Drag to move"
 L["TOAST_DRAG_HINT"] = "Drag to move"
 
-L["OPT_GRP_NERGLISH_TEST"] = "Murloc yell"
-L["OPT_NERGLISH_ENABLE"] = "Enable Murloc yells"
-L["OPT_NERGLISH_TEST"] = "Test yell"
-L["OPT_NERGLISH_TEST_HINT"] = "Off by default. When on, rare real Yells (/y). Test always forces one yell; nearby players can hear it."
+L["OPT_GRP_NERGLISH_TEST"] = "Murloc yells"
+L["OPT_NERGLISH_OFF"] = "Off"
+L["OPT_NERGLISH_PURE"] = "Nerglish"
+L["OPT_NERGLISH_SCHMAEH"] = "Schmäh"
+L["OPT_NERGLISH_STYLE_HINT"] = "Nerglish = classic murloc lines. Schmäh = cheeky Austrian mix."
+L["OPT_NERGLISH_TEST"] = "Public test (/y)"
+L["OPT_NERGLISH_TEST_HINT"] = "Nearby players hear the test yell. Off previews Nerglish."
 
 -- Frozen English copy for U.L fallback (deDE mutates AngryMurlocsLocale in place).
 AngryMurlocsLocaleEN = {}

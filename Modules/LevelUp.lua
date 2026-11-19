@@ -172,7 +172,7 @@ local function DisplayToast(item, done)
   f:SetAlpha(1)
   f:Show()
   if not layoutEdit and not item._preview and GR.Nerglish and GR.Nerglish.TryReact then
-    GR.Nerglish.TryReact("lvl", U.Now(), { level = lvl })
+    GR.Nerglish.TryReact("lvl", U.Now(), { level = lvl, player = name })
   end
   -- Move below an open game dialog it would cover (not while positioning).
   if GR.ToastQueue and GR.ToastQueue.DodgeSoon then
