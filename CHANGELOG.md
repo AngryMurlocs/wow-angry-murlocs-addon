@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Murloc chat style option and automatic murloc chat lines removed
+
 ## 0.11.22
 
 - Death notices no longer show for battleground or arena deaths (Wanted already never counted them)

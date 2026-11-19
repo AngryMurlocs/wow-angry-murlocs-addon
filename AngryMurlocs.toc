@@ -6,11 +6,8 @@
 ## SavedVariables: AngryMurlocsDB
 
 Localization\enUS.lua
-Localization\nerglish\enUS.lua
 Localization\deDE.lua
-Localization\nerglish\deDE.lua
 Core\Util.lua
-Core\Nerglish.lua
 Core\Theme.lua
 Core\Protocol.lua
 Core\Queue.lua

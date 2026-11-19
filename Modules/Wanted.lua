@@ -247,19 +247,7 @@ local function MaybeAlert(targetKey, zone, reporter)
     zone or "?",
     U.ShortName(reporter or "?")
   )
-  local line = alert
-  if GR.Nerglish and GR.Nerglish.TryReact then
-    local react = GR.Nerglish.TryReact({
-      kind = "sight",
-      target = targetKey,
-      zone = zone,
-      reporter = reporter,
-    }, now)
-    if react and react.cry and react.cry ~= "" then
-      line = react.cry .. " " .. alert
-    end
-  end
-  U.Print(line)
+  U.Print(alert)
   if GR.Sounds and GR.Sounds.Play then
     GR.Sounds.Play("sight")
   end

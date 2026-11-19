@@ -81,9 +81,6 @@ local defaults = {
     professions = { point = nil }, -- legacy; migrated into main
     wanted = { point = nil }, -- legacy unused
   },
-  ui = {
-    nerglishStyle = "off", -- "off" | "subtle" | "playful"
-  },
   levelUp = {
     showToasts = true,
     point = nil,

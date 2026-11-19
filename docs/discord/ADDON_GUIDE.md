@@ -1,6 +1,14 @@
-# AngryMurlocs – Discord-Anleitung (Auszug Rezepte / Protokoll)
+# AngryMurlocs – Discord-Anleitung (Auszug)
 
-**Version 0.11.21.**
+**Version 0.11.22.**
+
+## Todesmeldungen und Wanted
+
+**Nutzen:** Gilden-Todes-Toasts und Wanted kommen aus geteilten Toden außerhalb von strukturiertem PvP.
+
+**Grenze (0.11.22):** In **Schlachtfeldern und Arenen** gibt es **keine** Gilden-Todesmeldung (Toast/Feed). Wanted hat solche Tode schon vorher nie gezählt. Duell-Tode zählen weiter nicht für Wanted.
+
+**Wo steuern:** `/am` → Einstellungen → Freigaben → **Gilden-Tode teilen** (steuert auch Wanted-Meldungen).
 
 ## Rezepte in Unterkategorien
 
