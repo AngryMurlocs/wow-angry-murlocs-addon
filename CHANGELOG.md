@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.24
 
 - Optional rare Murloc yells (/y) on guild moments and idle lines (off by default); Options → Layout has enable + test yell
 
