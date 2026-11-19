@@ -183,6 +183,17 @@ local function DisplayToast(item, done)
   end
   muteNextSound = false
 
+  if not layoutEdit and not item._preview and GR.Nerglish and GR.Nerglish.TryReact then
+    local react = GR.Nerglish.TryReact({
+      kind = "lvl",
+      player = name,
+      level = lvl,
+    }, U.Now())
+    if react and react.text then
+      U.Print(react.text)
+    end
+  end
+
   if layoutEdit then
     return
   end

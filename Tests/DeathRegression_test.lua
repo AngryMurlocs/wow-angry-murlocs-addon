@@ -161,7 +161,7 @@ end
 do
   local sim, a, _, d = Pair()
   local ready = false
-  World(a, { dead = true, instance = "pvp" })
+  World(a, { dead = true })
   a.env.GetZoneText = function() return "DeathZone" end
   a.env.C_DeathRecap = { GetRecapEvents = function()
     if ready then return { Hit("ActualKiller", "Player-1-ABCDEF", sim:Wall(), 1) } end
@@ -175,7 +175,36 @@ do
   sim:Run(2)
   check("delayed recap publishes exactly once", #a.deaths == 1 and a.deaths[1].data.killer == "ActualKiller")
   check("delayed recap retains death location", a.deaths[1] and a.deaths[1].data.zone == "DeathZone")
-  check("delayed recap retains excluded BG context", Sim.Entries(a) == 0)
+end
+do
+  local sim, a, b, d = Pair()
+  local ready = false
+  World(a, { dead = true, instance = "pvp" })
+  a.env.GetZoneText = function() return "Warsong Gulch" end
+  a.env.C_DeathRecap = { GetRecapEvents = function()
+    if ready then return { Hit("BgKiller", "Player-1-ABCDEF", sim:Wall(), 1) } end
+    return {}
+  end }
+  Event(d, "PLAYER_DEAD")
+  check("empty BG recap is not broadcast prematurely", #a.deaths == 0)
+  ready = true
+  World(a, { dead = true, instance = "pvp" })
+  sim:Run(2)
+  check("delayed BG recap does not publish DEATH locally", #a.deaths == 0)
+  check("delayed BG recap sends no DEATH on wire", sim:Count("DEATH") == 0)
+  check("delayed BG recap leaves peer with no death toast", #b.deaths == 0)
+  check("delayed BG recap never receives Wanted", Sim.Entries(a) == 0 and sim:Count("WK") == 0)
+end
+do
+  local sim, a, b, d = Pair()
+  World(a, { instance = "arena" })
+  Recap(a, { Hit("ArenaKiller", "Player-1-ABCDEF", sim:Wall(), 1) })
+  d:BroadcastLocalDeath()
+  sim:Run(2)
+  check("arena death does not publish DEATH locally", #a.deaths == 0)
+  check("arena death sends no DEATH on wire", sim:Count("DEATH") == 0)
+  check("arena death leaves peer with no death toast", #b.deaths == 0)
+  check("arena death never receives Wanted", Sim.Entries(a) == 0 and sim:Count("WK") == 0)
 end
 do
   local sim, a, _, d = Pair()
