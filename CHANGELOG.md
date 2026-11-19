@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.23
 
 - Murloc chat style option and automatic murloc chat lines removed
 

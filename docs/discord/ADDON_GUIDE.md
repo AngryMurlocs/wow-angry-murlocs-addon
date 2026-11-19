@@ -1,6 +1,6 @@
 # AngryMurlocs – Discord-Anleitung (Auszug)
 
-**Version 0.11.22.**
+**Version 0.11.23.**
 
 ## Todesmeldungen und Wanted
 
