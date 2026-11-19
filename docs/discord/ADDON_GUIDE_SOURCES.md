@@ -3,10 +3,10 @@
 | Feld | Wert |
 | --- | --- |
 | Datum | 2026-11-19 |
-| Quelle | AngryMurlocs Release 0.11.21 |
-| Basis | `v0.11.21` / main nach release: 0.11.21 |
-| Status | Veröffentlichung über Tag geplant / CurseForge nach Tag-Push |
-| Codebeleg | `Core/ActivityLog.lua`, `Core/Util.lua` (`U.Status`), `Modules/Options.lua` (Log), `Modules/ProfRecipes.lua` / `ProfRecipePanel.lua` (Routing), `Core/Diag.lua` |
-| Tests | `luajit Tests/run_all.lua` |
-| Client | Forever Ingame teilweise (lokal installiert); Checklist-Punkte Options → Log offen |
-| Offene Punkte | Volle CLIENT_CHECKLIST Options → Log |
+| Quelle | AngryMurlocs Release 0.11.23 |
+| Basis | `v0.11.23` / main nach release: 0.11.23 |
+| Status | Tag `v0.11.23` gesetzt; Mirror → GitHub → CurseForge-Build |
+| Codebeleg | Nerglish entfernt: `Modules/Death.lua` / `LevelUp.lua` / `Wanted.lua` / `Options.lua`; BG/Arena-Tod: `Modules/Death.lua` `BroadcastLocalDeath`; Wanted: `Core/WantedLogic.lua` `EvaluateDeath`; Protokoll: `Core/ActivityLog.lua`, Options Log |
+| Tests | `luajit Tests/run_all.lua` (inkl. `DeathRegression_test`) |
+| Client | Forever Ingame für BG-Tod offen |
+| Offene Punkte | CLIENT_CHECKLIST: BG-Tod stumm |

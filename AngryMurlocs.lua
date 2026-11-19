@@ -1,7 +1,7 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.11.22"
+GR.VERSION = "0.11.23"
 GR.DISCORD_INVITE = "https://discord.murlocs.eu"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}
@@ -80,9 +80,6 @@ local defaults = {
     main = { point = nil },
     professions = { point = nil }, -- legacy; migrated into main
     wanted = { point = nil }, -- legacy unused
-  },
-  ui = {
-    nerglishStyle = "off", -- "off" | "subtle" | "playful"
   },
   levelUp = {
     showToasts = true,

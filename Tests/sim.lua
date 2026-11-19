@@ -11,9 +11,7 @@ local LATENCY = 0.05
 
 local FILES = {
   "Localization/enUS.lua",
-  "Localization/nerglish/enUS.lua",
   "Core/Util.lua",
-  "Core/Nerglish.lua",
   "Core/Theme.lua",
   "Core/Protocol.lua",
   "Core/Queue.lua",

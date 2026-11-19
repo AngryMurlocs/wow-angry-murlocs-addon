@@ -18,11 +18,7 @@ local function LoadLocale(path, locale, base)
 end
 
 local en = LoadLocale("Localization/enUS.lua", "enUS", nil)
-assert(loadfile("Localization/nerglish/enUS.lua"))()
-en = _G.AngryMurlocsLocale
 local de = LoadLocale("Localization/deDE.lua", "deDE", {})
-assert(loadfile("Localization/nerglish/deDE.lua"))()
-de = _G.AngryMurlocsLocale
 
 local failures = 0
 local function Fail(msg)
