@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.26
 
 - Wanted and professions no longer look empty when the realm name is missing at login
 - Turning off death sharing no longer leaves a “dead” mark on a position update that was still waiting to send
