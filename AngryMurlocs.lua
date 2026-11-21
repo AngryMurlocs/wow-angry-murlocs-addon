@@ -1,7 +1,7 @@
 local GR = AngryMurlocs
 local U = GR.Util
 
-GR.VERSION = "0.11.27"
+GR.VERSION = "0.11.28"
 GR.DISCORD_INVITE = "https://discord.murlocs.eu"
 GR._modules = GR._modules or {}
 GR._moduleOrder = GR._moduleOrder or {}

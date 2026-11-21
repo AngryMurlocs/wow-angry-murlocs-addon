@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.28
 
 - Death toasts keep full Forever names (first and last) and no longer cut letters in killer, pet, zone, or spell text
 - Known older Wanted and profession lists for this guild restore automatically on login (no confirm popup)
