@@ -40,3 +40,4 @@ Modules\UI.lua
 Modules\ProfRecipePanel.lua
 Modules\MinimapButton.lua
 Modules\Options.lua
+Bindings.xml

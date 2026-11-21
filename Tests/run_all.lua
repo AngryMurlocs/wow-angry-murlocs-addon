@@ -26,6 +26,7 @@ local tests = {
   "Tests/ToastQueue_test.lua",
   "Tests/Sounds_test.lua",
   "Tests/Nerglish_test.lua",
+  "Tests/NerglishEvents_test.lua",
   "Tests/ToastPreview_test.lua",
   "Tests/ToastControl_test.lua",
   "Tests/L10n_test.lua",

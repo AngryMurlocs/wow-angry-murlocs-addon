@@ -10,6 +10,8 @@ local LEGEND_CHANCE = 0.08
 local GLOBAL_CD = 300
 local MAX_PER_HOUR = 3
 local TEST_CD = 2
+-- Outdoor SAY/YELL needs a hardware event; auto yells wait at most this long.
+local PENDING_TTL = GLOBAL_CD
 
 local POOL_SIZE = {
   lvl = 6,
@@ -78,7 +80,11 @@ local state = {
   hourStamps = {},
   lastVariant = {},
   lastTestAt = 0,
+  -- Outdoor auto-yell waiting for next click/key: { text=, at= } or nil.
+  pending = nil,
 }
+
+local hwFrame = nil
 
 function N._Random()
   return math.random()
@@ -88,11 +94,30 @@ local function ClearTable(t)
   for k in pairs(t) do t[k] = nil end
 end
 
+local function DisarmHw()
+  if not hwFrame then return end
+  hwFrame:Hide()
+  hwFrame:EnableKeyboard(false)
+  hwFrame:EnableMouse(false)
+  if hwFrame.EnableMouseWheel then hwFrame:EnableMouseWheel(false) end
+  hwFrame:SetScript("OnKeyDown", nil)
+  hwFrame:SetScript("OnMouseDown", nil)
+  if hwFrame.SetScript then
+    hwFrame:SetScript("OnMouseWheel", nil)
+  end
+end
+
+function N.ClearPendingYell()
+  state.pending = nil
+  DisarmHw()
+end
+
 function N.ResetForTest()
   state.lastReactAt = 0
   state.lastTestAt = 0
   ClearTable(state.hourStamps)
   ClearTable(state.lastVariant)
+  N.ClearPendingYell()
 end
 
 function N.Normalize(style)
@@ -137,6 +162,47 @@ local function L(key)
   if AngryMurlocsLocale and AngryMurlocsLocale[key] ~= nil then return AngryMurlocsLocale[key] end
   if AngryMurlocsLocaleEN and AngryMurlocsLocaleEN[key] ~= nil then return AngryMurlocsLocaleEN[key] end
   return key
+end
+
+local STYLE_CYCLE = { "off", "nerglish", "schmaeh" }
+local STYLE_LABEL = {
+  off = "OPT_NERGLISH_OFF",
+  nerglish = "OPT_NERGLISH_PURE",
+  schmaeh = "OPT_NERGLISH_SCHMAEH",
+}
+
+--- Set style; clears any pending outdoor yell on change (incl. Off).
+function N.SetStyle(style)
+  if not GR.db then return nil end
+  GR.db.ui = GR.db.ui or {}
+  local nextStyle = N.Normalize(style)
+  local cur = N.GetStyle()
+  if nextStyle ~= cur or nextStyle == "off" then
+    N.ClearPendingYell()
+  end
+  GR.db.ui.nerglishStyle = nextStyle
+  GR.db.ui.nerglishYell = nil
+  return nextStyle
+end
+
+--- Cycle off → nerglish → schmaeh → off. Returns new style. Prints a short chat line.
+function N.CycleStyle()
+  if not GR.db then return nil end
+  local cur = N.GetStyle()
+  local nextStyle = "off"
+  for i = 1, #STYLE_CYCLE do
+    if STYLE_CYCLE[i] == cur then
+      nextStyle = STYLE_CYCLE[(i % #STYLE_CYCLE) + 1]
+      break
+    end
+  end
+  N.SetStyle(nextStyle)
+  local labelKey = STYLE_LABEL[nextStyle] or "OPT_NERGLISH_OFF"
+  local U = GR.Util
+  if U and U.Print then
+    U.Print(string.format(L("NERGLISH_STYLE_SET"), L(labelKey)))
+  end
+  return nextStyle
 end
 
 local function CountHour(now)
@@ -208,13 +274,107 @@ function N.ResolveKind(kind, facts)
   return kind
 end
 
-function N.Yell(text)
-  if type(text) ~= "string" or text == "" then return false end
+local function NowFallback()
+  local U = GR.Util
+  if U and U.Now then return U.Now() end
+  if GetTime then return GetTime() end
+  return 0
+end
+
+local function InInstance()
+  if type(IsInInstance) ~= "function" then return false end
+  local ok, inInst = pcall(IsInInstance)
+  if not ok then return false end
+  return inInst and true or false
+end
+
+local function SendYellNow(text)
   if not C_ChatInfo or type(C_ChatInfo.SendChatMessage) ~= "function" then
     return false
   end
   local ok = pcall(C_ChatInfo.SendChatMessage, text, "YELL")
   return ok and true or false
+end
+
+--- Flush one pending outdoor yell if still valid. Used by HW listener and tests.
+function N.FlushPendingYell(now)
+  now = tonumber(now) or NowFallback()
+  local p = state.pending
+  if not p or type(p.text) ~= "string" or p.text == "" then
+    N.ClearPendingYell()
+    return false
+  end
+  if N.GetStyle() == "off" then
+    N.ClearPendingYell()
+    return false
+  end
+  local at = tonumber(p.at) or 0
+  if at > 0 and (now - at) > PENDING_TTL then
+    N.ClearPendingYell()
+    return false
+  end
+  local text = p.text
+  N.ClearPendingYell()
+  return SendYellNow(text)
+end
+
+local function OnHardware()
+  N.FlushPendingYell()
+end
+
+local function EnsureHwFrame()
+  if hwFrame or type(CreateFrame) ~= "function" then return hwFrame end
+  local ok, frame = pcall(CreateFrame, "Frame", nil, UIParent)
+  if not ok or not frame then return nil end
+  hwFrame = frame
+  if hwFrame.SetFrameStrata then hwFrame:SetFrameStrata("TOOLTIP") end
+  if hwFrame.SetAllPoints and UIParent then hwFrame:SetAllPoints(UIParent) end
+  hwFrame:Hide()
+  return hwFrame
+end
+
+local function ArmHw()
+  local f = EnsureHwFrame()
+  if not f then return end
+  f:SetScript("OnKeyDown", function(self)
+    if self.SetPropagateKeyboardInput then
+      pcall(self.SetPropagateKeyboardInput, self, true)
+    end
+    OnHardware()
+  end)
+  f:SetScript("OnMouseDown", function()
+    OnHardware()
+  end)
+  if f.EnableMouseWheel then
+    f:EnableMouseWheel(true)
+    f:SetScript("OnMouseWheel", function()
+      OnHardware()
+    end)
+  end
+  f:EnableKeyboard(true)
+  f:EnableMouse(true)
+  f:Show()
+  if f.EnableKeyboard then f:EnableKeyboard(true) end
+end
+
+--- Yell text. fromInput=true: send now (button/keybind). Else outdoor queues one pending slot.
+--- Optional now stamps the pending TTL. Returns true if sent or queued.
+function N.Yell(text, fromInput, now)
+  if type(text) ~= "string" or text == "" then return false end
+  if not C_ChatInfo or type(C_ChatInfo.SendChatMessage) ~= "function" then
+    return false
+  end
+  if fromInput or InInstance() then
+    return SendYellNow(text)
+  end
+  now = tonumber(now) or NowFallback()
+  state.pending = { text = text, at = now }
+  ArmHw()
+  return true
+end
+
+function N.HasPendingYell()
+  return state.pending ~= nil
 end
 
 local function PrefixMap(style)
@@ -243,7 +403,7 @@ local function PickLegend(style)
 end
 
 local function AfterPick(now, style, poolId, index, text, bookLimits)
-  N.Yell(text)
+  N.Yell(text, false, now)
   if bookLimits then
     BookReact(now, style, poolId, index)
   else
@@ -294,11 +454,11 @@ function N.TryIdle(now)
 end
 
 --- Forced test yell. Bypasses auto limits; 2s click throttle. Off → preview nerglish.
-function N.TestYell(now)
+--- fromInput=true: send immediately (Options button / keybind hardware path).
+function N.TestYell(now, fromInput)
   now = tonumber(now)
   if not now then
-    local U = GR.Util
-    now = (U and U.Now and U.Now()) or 0
+    now = NowFallback()
   end
   if state.lastTestAt > 0 and (now - state.lastTestAt) < TEST_CD then
     return nil
@@ -307,7 +467,7 @@ function N.TestYell(now)
   if style == "off" then style = "nerglish" end
   local text, poolId, index = PickLegend(style)
   if not text then return nil end
-  N.Yell(text)
+  N.Yell(text, fromInput and true or false, now)
   state.lastTestAt = now
   if poolId and index then
     state.lastVariant[VariantKey(style, poolId)] = index
@@ -320,6 +480,7 @@ N.LEGEND_CHANCE = LEGEND_CHANCE
 N.GLOBAL_CD = GLOBAL_CD
 N.MAX_PER_HOUR = MAX_PER_HOUR
 N.TEST_CD = TEST_CD
+N.PENDING_TTL = PENDING_TTL
 N.POOL_SIZE = POOL_SIZE
 N.PREFIX_SCHMAEH = PREFIX_SCHMAEH
 N.PREFIX_PURE = PREFIX_PURE

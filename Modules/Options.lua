@@ -398,17 +398,20 @@ local function PaintLogList(force)
   local height = math.max(40, math.abs(y) + 8)
   body:SetWidth(innerW)
   body:SetHeight(height)
+  host._amHeight = (host._amHeaderH or 120) + height
+  if host._amContent and host._amContent.SetHeight then
+    host._amContent:SetHeight(host._amHeight)
+  end
   -- Keep sticky scroll: at top follow new lines; otherwise preserve offset.
   if scroll and scroll.SetVerticalScroll then
     if atTop then
       scroll:SetVerticalScroll(0)
     else
-      local maxScroll = math.max(0, height - (host:GetHeight() or 200))
+      local maxScroll = math.max(0, host._amHeight - (host:GetHeight() or 200))
       if prevScroll > maxScroll then prevScroll = maxScroll end
       scroll:SetVerticalScroll(prevScroll)
     end
   end
-  host._amHeight = (host._amHeaderH or 120) + height
 end
 
 local function RefreshLogView(force)
@@ -1330,9 +1333,13 @@ function Options:AttachPanel(parent)
         end
       end
       local function SetNerglishStyle(style)
-        GR.db.ui = GR.db.ui or {}
-        GR.db.ui.nerglishStyle = NormalizeNerglish(style)
-        GR.db.ui.nerglishYell = nil
+        if GR.Nerglish and GR.Nerglish.SetStyle then
+          GR.Nerglish.SetStyle(style)
+        else
+          GR.db.ui = GR.db.ui or {}
+          GR.db.ui.nerglishStyle = NormalizeNerglish(style)
+          GR.db.ui.nerglishYell = nil
+        end
         RefreshNerglishBtns()
       end
       local nerglishDefs = {
@@ -1361,7 +1368,8 @@ function Options:AttachPanel(parent)
     H.Hint("OPT_NERGLISH_TEST_HINT")
     H.Button("OPT_NERGLISH_TEST", function()
       if GR.Nerglish and GR.Nerglish.TestYell then
-        GR.Nerglish.TestYell()
+        -- Button click is a hardware event: send yell immediately.
+        GR.Nerglish.TestYell(nil, true)
       end
     end, 200, HINT_GAP)
 

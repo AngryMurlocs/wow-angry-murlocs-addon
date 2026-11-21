@@ -15,7 +15,6 @@ local GOLD_R, GOLD_G, GOLD_B = 1, 0.92, 0.12 -- brighter gold for contrast
 local DEFAULT_SIZE = 26
 local MIN_SIZE = 8
 local MAX_SIZE = 40
-local NEAR_SELF = 0.01
 -- Match Positions.STALE: full alpha until FADE_START, then fade to FADE_MIN by STALE_SEC.
 MapPins.STALE_SEC = 60
 MapPins.FADE_START_SEC = 45
@@ -755,12 +754,8 @@ function MapPins:Refresh()
     local name, data = order[i].name, order[i].data
     local px, py = ProjectToView(data.mapId, data.x, data.y, mapId)
     if px and py then
-      -- Fallback: hide pins sitting on the player (ghost self / name mismatch)
-      if not (playerX and playerY
-          and math.abs(px - playerX) < NEAR_SELF
-          and math.abs(py - playerY) < NEAR_SELF) then
-        visible[#visible + 1] = { name = name, data = data, x = px * cw, y = py * ch, order = i }
-      end
+      -- Own pins already excluded via IsSelfName above; do not hide nearby others.
+      visible[#visible + 1] = { name = name, data = data, x = px * cw, y = py * ch, order = i }
     end
   end
   local levels, bandTop = MapPins.LayerLevels(#visible, canvasLevel, SymbolBandStart())

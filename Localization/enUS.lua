@@ -401,7 +401,13 @@ L["OPT_NERGLISH_PURE"] = "Nerglish"
 L["OPT_NERGLISH_SCHMAEH"] = "Schmäh"
 L["OPT_NERGLISH_STYLE_HINT"] = "Nerglish = classic murloc lines. Schmäh = cheeky Austrian mix."
 L["OPT_NERGLISH_TEST"] = "Public test (/y)"
-L["OPT_NERGLISH_TEST_HINT"] = "Nearby players hear the test yell. Off previews Nerglish."
+L["OPT_NERGLISH_TEST_HINT"] = "Nearby players hear the test yell. Off previews Nerglish. You can also bind keys: Esc → Key Bindings → AddOns → AngryMurlocs."
+L["NERGLISH_STYLE_SET"] = "Murloc yells: %s"
+
+-- WoW keybind UI (globals, not U.L)
+BINDING_HEADER_ANGRYMURLOCS = "AngryMurlocs"
+BINDING_NAME_ANGRYMURLOCS_TEST_YELL = "Public test yell (/y)"
+BINDING_NAME_ANGRYMURLOCS_CYCLE_STYLE = "Cycle yell style (Off / Nerglish / Schmäh)"
 
 -- Frozen English copy for U.L fallback (deDE mutates AngryMurlocsLocale in place).
 AngryMurlocsLocaleEN = {}

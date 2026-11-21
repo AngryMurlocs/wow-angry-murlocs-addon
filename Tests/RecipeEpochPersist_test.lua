@@ -117,5 +117,52 @@ do
   check("legacy bag cleared", scope.prof.catalogEpoch == nil)
 end
 
+-- Relay under remembered floor is rejected even with empty cache row.
+do
+  local sim = Sim.New(32)
+  local bob = sim:AddClient("Bob", {
+    extraFiles = { "Modules/Professions.lua", "Modules/ProfRecipes.lua" },
+  })
+  local R = bob.GR:GetModule("ProfRecipes")
+  local U = bob.GR.Util
+  local scope = U.GetScopeDB()
+  local aliceKey = U.NormalizeName("Alice-Realm")
+  scope.prof.recipeSync.catalogVersions[aliceKey] = { alch = { epoch = 11, rev = 1 } }
+  scope.prof.cache[aliceKey] = { list = { { key = "alch", name = "Alchemy", skill = 1 } }, recipes = {}, time = 1 }
+  R:OnRecipeUpdate(aliceKey, {
+    profKey = "alch", rev = 1, scanAt = 1, complete = true, epoch = 10, ids = { 111 },
+  }, "relay")
+  local rec = scope.prof.cache[aliceKey].recipes.alch
+  check("floor rejects stale relay", rec == nil)
+  R:OnRecipeUpdate(aliceKey, {
+    profKey = "alch", rev = 1, scanAt = 2, complete = true, epoch = 11, ids = { 222 },
+  }, "direct")
+  rec = scope.prof.cache[aliceKey].recipes.alch
+  check("floor accepts owner at floor", rec and rec.ids and rec.ids[1] == 222, rec and rec.ids and rec.ids[1])
+end
+
+-- Empty-fallback cancel is owner-scoped (Bob must not abort Alice retry).
+do
+  local sim = Sim.New(33)
+  local viewer = sim:AddClient("Viewer", {
+    extraFiles = { "Modules/Professions.lua", "Modules/ProfRecipes.lua" },
+  })
+  local R = viewer.GR:GetModule("ProfRecipes")
+  local U = viewer.GR.Util
+  local aliceKey = U.NormalizeName("Alice-Realm")
+  local bobKey = U.NormalizeName("Bob-Realm")
+  R:NoteCatalogOpen(aliceKey, "alch")
+  R:_ScheduleEmptyFallbackForTest(aliceKey, "alch")
+  check("fallback armed", R:_HasEmptyFallbackForTest() == true)
+  R:OnRecipeUpdate(bobKey, {
+    profKey = "alch", rev = 1, scanAt = 1, complete = true, epoch = 1, ids = { 1 },
+  }, "direct")
+  check("bob does not cancel alice fallback", R:_HasEmptyFallbackForTest() == true)
+  R:OnRecipeUpdate(aliceKey, {
+    profKey = "alch", rev = 1, scanAt = 1, complete = true, epoch = 1, ids = { 2 },
+  }, "direct")
+  check("alice cancels own fallback", R:_HasEmptyFallbackForTest() == false)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then error(fails .. " test failures") end

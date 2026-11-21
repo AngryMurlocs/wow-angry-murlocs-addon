@@ -8,6 +8,8 @@ _G.C_ChatInfo = {
     return true
   end,
 }
+-- Default: instance so legacy TryReact cases keep immediate SendChatMessage.
+_G.IsInInstance = function() return true, "party" end
 
 assert(loadfile("Localization/enUS.lua"))()
 assert(loadfile("Localization/nerglish/enUS.lua"))()
@@ -61,14 +63,15 @@ check("IsEnabled off", N.IsEnabled() == false)
 
 yelled = {}
 N._Random = function() return 0 end
-local ty = N.TestYell(200)
+-- fromInput=true: same path as Options button / keybind (immediate even outdoors).
+local ty = N.TestYell(200, true)
 check("TestYell off text", type(ty) == "string" and ty ~= "")
 check("TestYell off YELL", yelled[1] and yelled[1].channel == "YELL")
 check("TestYell off pure", ty == AngryMurlocsLocale["NERGLISH_PURE_LEGEND_1"]
   or (type(ty) == "string" and not ty:find("Oida", 1, true)))
 check("style still off", N.GetStyle() == "off")
-check("TestYell throttle", N.TestYell(201) == nil)
-check("TestYell after CD", N.TestYell(200 + N.TEST_CD) ~= nil)
+check("TestYell throttle", N.TestYell(201, true) == nil)
+check("TestYell after CD", N.TestYell(200 + N.TEST_CD, true) ~= nil)
 
 AngryMurlocs.db.ui.nerglishStyle = "schmaeh"
 N.ResetForTest()
@@ -116,9 +119,51 @@ for i = 1, N.MAX_PER_HOUR do
 end
 AngryMurlocs.db.ui.nerglishStyle = "off"
 N._Random = function() return 0 end
-check("TestYell under hour cap", type(N.TestYell(60000)) == "string")
+check("TestYell under hour cap", type(N.TestYell(60000, true)) == "string")
 ForceHitRandom()
 check("auto still capped", N.TryReact("loot", 50000 + (N.MAX_PER_HOUR + 2) * N.GLOBAL_CD) == nil)
+
+-- Outdoor HW pending: A then B → no sends → flush once sends B → second flush nothing.
+_G.IsInInstance = function() return false, "none" end
+AngryMurlocs.db.ui.nerglishStyle = "nerglish"
+N.ResetForTest()
+yelled = {}
+N.Yell("A", false, 1000)
+N.Yell("B", false, 1001)
+check("outdoor A then B no send", #yelled == 0)
+check("outdoor pending set", N.HasPendingYell() == true)
+check("flush sends only B", N.FlushPendingYell(1002) == true and #yelled == 1 and yelled[1].text == "B")
+check("second flush nothing", N.FlushPendingYell(1003) == false and #yelled == 1)
+check("pending cleared", N.HasPendingYell() == false)
+
+-- Instance: immediate send, no pending.
+_G.IsInInstance = function() return true, "party" end
+N.ResetForTest()
+yelled = {}
+check("instance yell now", N.Yell("INST", false, 2000) == true and #yelled == 1 and yelled[1].text == "INST")
+check("instance no pending", N.HasPendingYell() == false)
+
+-- Outdoor pending dropped when style set to Off before input.
+_G.IsInInstance = function() return false, "none" end
+AngryMurlocs.db.ui.nerglishStyle = "schmaeh"
+N.ResetForTest()
+yelled = {}
+N.Yell("DROP", false, 3000)
+check("pending before off", N.HasPendingYell() == true)
+N.SetStyle("off")
+check("pending cleared by off", N.HasPendingYell() == false)
+check("flush after off silent", N.FlushPendingYell(3001) == false and #yelled == 0)
+
+-- TTL expiry before flush.
+AngryMurlocs.db.ui.nerglishStyle = "nerglish"
+N.ResetForTest()
+yelled = {}
+N.Yell("OLD", false, 4000)
+check("ttl expire", N.FlushPendingYell(4000 + N.PENDING_TTL + 1) == false and #yelled == 0)
+check("ttl cleared", N.HasPendingYell() == false)
+
+-- Restore instance default for remaining suite.
+_G.IsInInstance = function() return true, "party" end
 
 check("resolve lvl60", N.ResolveKind("lvl", { level = 60 }) == "lvl60")
 check("resolve milestone", N.ResolveKind("lvl", { level = 50 }) == "lvl_m")
@@ -155,6 +200,7 @@ for _, k in ipairs(kinds) do
 end
 
 _G.GetLocale = function() return "deDE" end
+assert(loadfile("Localization/deDE.lua"))()
 assert(loadfile("Localization/nerglish/deDE.lua"))()
 local pureMismatch = 0
 for key, enVal in pairs(pureEn) do
@@ -173,6 +219,26 @@ check("120 lines per style", total == 120, tostring(total))
 check("all pools ok", missing == 0, tostring(missing))
 check("pure en==de", pureMismatch == 0, tostring(pureMismatch))
 check("no AT catalog", AngryMurlocsNerglishATCatalog == nil)
+
+-- Keybind UI globals (set by locales; Bindings.xml wires the action in-game)
+check("BINDING_HEADER en", type(BINDING_HEADER_ANGRYMURLOCS) == "string" and BINDING_HEADER_ANGRYMURLOCS ~= "")
+check("BINDING_NAME de", BINDING_NAME_ANGRYMURLOCS_TEST_YELL == "Öffentlich testen (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_TEST_YELL))
+check("BINDING_CYCLE de", type(BINDING_NAME_ANGRYMURLOCS_CYCLE_STYLE) == "string" and BINDING_NAME_ANGRYMURLOCS_CYCLE_STYLE:find("Schmäh", 1, true), tostring(BINDING_NAME_ANGRYMURLOCS_CYCLE_STYLE))
+local bf = io.open("Bindings.xml", "rb")
+local bxml = bf and bf:read("*a") or ""
+if bf then bf:close() end
+check("Bindings.xml present", bxml:find("ANGRYMURLOCS_TEST_YELL", 1, true) and bxml:find("TestYell", 1, true))
+check("Bindings.xml fromInput", bxml:find("TestYell(nil, true)", 1, true) ~= nil)
+check("Bindings.xml cycle", bxml:find("ANGRYMURLOCS_CYCLE_STYLE", 1, true) and bxml:find("CycleStyle", 1, true))
+
+-- CycleStyle off → nerglish → schmaeh → off
+AngryMurlocs.db = { ui = { nerglishStyle = "off" } }
+local printed = {}
+AngryMurlocs.Util.Print = function(msg) printed[#printed + 1] = msg end
+check("cycle to nerglish", N.CycleStyle() == "nerglish")
+check("cycle to schmaeh", N.CycleStyle() == "schmaeh")
+check("cycle to off", N.CycleStyle() == "off")
+check("cycle chat feedback", #printed == 3 and type(printed[1]) == "string")
 
 print(tostring(failures) .. " failures")
 os.exit(failures == 0 and 0 or 1)

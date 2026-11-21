@@ -316,6 +316,8 @@ function LevelUp:ResetAppearance()
   c.duration = 8.0
   c.toastStyle = "art"
   -- locked intentionally preserved
+  -- FinishDisplay frees the shared toast queue; DiscardToast rebuilds the frame.
+  FinishDisplay()
   DiscardToast()
 end
 

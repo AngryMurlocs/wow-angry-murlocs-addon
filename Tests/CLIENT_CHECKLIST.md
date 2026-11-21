@@ -170,6 +170,26 @@ Voraussetzung: Beide online in derselben Gilde; A hat Beruf mit bestätigtem Sca
 - [ ] Filter „Nur Sichtungen der letzten 5 Minuten“; Sort Gefahrenstufe / Zuletzt gesehen.
 - [ ] Lange Namen/Zonen gekürzt + Tooltip; >40 Einträge Seitenwechsel; eigene Leerzustände.
 
+## Review 21.11.2026 — Client-Nachweise (Unreleased)
+
+Client-Build: `/dump GetBuildInfo()` → ________
+
+- [ ] Tod teilen aus, Position an: wartendes POS nach Abschalten zeigt bei anderen **kein** Tot-Symbol; Koordinaten kommen an.
+- [ ] Toast laufen lassen → Options „Aussehen zurücksetzen“ → neues Tod-/Level-Ereignis erscheint einmal (kein Hänger).
+- [ ] Karte: Alice bei ~0.50/0.50, Bob bei ~0.505/0.505 — Bobs Pin sichtbar; eigener Pin nicht.
+- [ ] Options → Protokoll: viele Statuszeilen → Scrollinhalt wächst; älteste Zeile erreichbar; nach Leeren kürzerer Scroll.
+- [ ] Gilde beitreten mit Positionsfreigabe: nach Beitritt gehen Positionsupdates (nicht erst nach Option-Toggle).
+
+## Murloc-Rufe / Nerglish Yell (Unreleased — HW outdoor)
+
+Client-Build notieren: `/dump GetBuildInfo()` → ________ · BugSack offen.
+
+- [ ] Stil Nerglish oder Schmäh; draußen Auto-Anlass (z. B. Gildenbeitritt): **kein** `ADDON_ACTION_BLOCKED` in BugSack. Nach dem nächsten Klick oder Tastendruck erscheint der Yell.
+- [ ] Options → Oberfläche → **Öffentlich testen (/y)**: ein Klick schreit sofort (auch draußen); Vorschau bei Stil **Aus** bleibt Nerglish; 2s-Cooldown.
+- [ ] Tastenbelegung „Öffentlich testen (/y)“: sofortiger Yell.
+- [ ] Pending Auto-Ruf: Stil auf **Aus** stellen → danach Klick/Taste schreit nicht den vorgemerkten Text.
+- [ ] In Instanz/Dungeon: Auto-Ruf kann ohne Extra-Klick gehen (HW-Regel gilt outdoor).
+
 ## Killer-Quelle + Death Recap (0.8.1)
 
 Ziel: CLEU bleibt gesperrt; Recap `Player-*` darf Wanted zählen. Ziel/Angreifer allein nie.
