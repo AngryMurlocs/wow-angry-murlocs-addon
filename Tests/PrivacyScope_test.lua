@@ -341,9 +341,10 @@ do
     and alice.GR.db.scopes[OTHER].wanted["OtherFoe-Realm"] ~= nil)
 end
 
--- Club id path: permanent empty realm + immediate club id.
+-- Verified auto-import: CAMWOW→215871062 only; ::Angry Murlocs stays out (no provenance).
 do
-  local CLUB = "club:71037"
+  local CLUB_ID = "215871062"
+  local CLUB = "club:" .. CLUB_ID
   local OLD = "CAMWOWEU4Realm6PvP::Angry Murlocs"
   local EMPTY = "::Angry Murlocs"
   local sim = Sim.New(11)
@@ -404,7 +405,7 @@ do
         return nil
       end,
       C_Club = {
-        GetGuildClubId = function() return 71037 end,
+        GetGuildClubId = function() return tonumber(CLUB_ID) end,
       },
     },
   })
@@ -412,42 +413,34 @@ do
   check("club-imm: RealmKey nil", U.RealmKey() == nil)
   check("club-imm: GuildScopeKey club", U.GuildScopeKey() == CLUB, tostring(U.GuildScopeKey()))
   check("club-imm: GetScopeDB", U.GetScopeDB() ~= nil)
-  check("club-imm: unconfirmed wanted empty", Sim.Level(alice, "FoeA-Realm") == 0)
-  local cands = U.ListImportCandidates()
-  check("club-imm: two candidates", #cands == 2, #cands)
-  local ok = U.ImportScopes(cands, CLUB)
-  check("club-imm: import ok", ok == true)
-  -- max origin n for Alice/Bob: legacy 5 + max(2,3)=3 → level 8? Level = legacy + sum origins
-  -- MergeEntryInto max per origin: alice n=2, bob n=3, legacy max 5 → Level = 5+2+3 = 10
-  check("club-imm: merged wanted level", Sim.Level(alice, "FoeA-Realm") == 10, Sim.Level(alice, "FoeA-Realm"))
-  check("club-imm: second killer kept", Sim.Level(alice, "FoeB-Realm") == 1)
+  check("club-imm: before import empty", Sim.Level(alice, "FoeA-Realm") == 0)
+  local verified = U.ListVerifiedImportSources(CLUB_ID)
+  check("club-imm: only CAMWOW verified", #verified == 1 and verified[1] == OLD, table.concat(verified, ","))
+  local ok = U.RunVerifiedScopeImport(CLUB)
+  check("club-imm: auto import ok", ok == true)
+  -- CAMWOW only: legacy 5 + alice n=2 → 7; EMPTY (::) not mapped
+  check("club-imm: merged wanted level", Sim.Level(alice, "FoeA-Realm") == 7, Sim.Level(alice, "FoeA-Realm"))
+  check("club-imm: empty-realm orphan skipped", Sim.Level(alice, "FoeB-Realm") == 0)
   local scope = U.GetScopeDB()
   local hide = scope.wantedHidden["FoeA-Realm"]
-  check("club-imm: hide level/t", hide and hide.level == 5 and hide.t == 20, hide and (hide.level .. "/" .. hide.t))
+  check("club-imm: hide from CAMWOW", hide and hide.level == 5 and hide.t == 10, hide and (hide.level .. "/" .. hide.t))
   check("club-imm: originals kept", db.scopes[OLD].wanted["FoeA-Realm"] ~= nil
     and db.scopes[EMPTY].wanted["FoeB-Realm"] ~= nil)
   check("club-imm: recipes kept", scope.prof.cache["Crafter-Realm"].recipes.alch.epoch == 4)
   check("club-imm: catalogVersions", scope.prof.recipeSync.catalogVersions["Crafter-Realm"].alch.rev == 2)
-  -- One-shot: clear dest hide, re-import must not restore it.
   scope.wantedHidden["FoeA-Realm"] = nil
   local ok2, err2 = U.ImportScope(OLD, CLUB)
   check("club-imm: second import skipped", ok2 == false and err2 == "already", tostring(err2))
   check("club-imm: hide stays cleared", scope.wantedHidden["FoeA-Realm"] == nil)
-  -- Next own kill increments.
   local r = alice.Wanted:RecordOwnDeath("FoeA-Realm", "Hillsbrad")
   check("club-imm: own kill ok", r and r.ok, r and tostring(r.ok))
-  check("club-imm: level after kill", Sim.Level(alice, "FoeA-Realm") == 11, Sim.Level(alice, "FoeA-Realm"))
-  -- Hide still applies at level 5 stamp; entry visible once level > hide.level.
-  check("club-imm: not hidden after level-up",
-    not alice.GR.WantedLogic.IsHidden({ hidden = { ["FoeA-Realm"] = { level = 5, t = 20 } }, wanted = scope.wanted },
-      "FoeA-Realm", scope.wanted["FoeA-Realm"]))
+  check("club-imm: level after kill", Sim.Level(alice, "FoeA-Realm") == 8, Sim.Level(alice, "FoeA-Realm"))
   check("club-imm: display name", scope.guildDisplayName == "Angry Murlocs")
-  -- Rename: same club key.
   alice.guild = "Angry Murlocs Renamed"
   U.RefreshGuildDisplayName(scope)
   check("club-rename: same key", U.GuildScopeKey() == CLUB)
   check("club-rename: display updated", scope.guildDisplayName == "Angry Murlocs Renamed")
-  check("club-rename: wanted still there", Sim.Level(alice, "FoeA-Realm") == 11)
+  check("club-rename: wanted still there", Sim.Level(alice, "FoeA-Realm") == 8)
 end
 
 -- Realm present, club id later: no Realm::Guild writes/sync key before club.
@@ -664,6 +657,143 @@ do
   check("atomic: pre entry kept", live.wanted["Pre-Realm"] ~= nil and Sim.Level(alice, "Pre-Realm") == 9)
   check("atomic: orphan not published", live.wanted["Z-Realm"] == nil)
   check("atomic: source untouched", db.scopes["Old::Angry Murlocs"].wanted["Z-Realm"] ~= nil)
+end
+
+-- Wrong club id / unmapped orphan: verified auto-import skips; originals stay.
+do
+  local sim = Sim.New(18)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    ["CAMWOWEU4Realm6PvP::Angry Murlocs"] = {
+      wanted = { ["Skip-Realm"] = { schema = 2, legacy = 4, origins = {} } },
+      wantedHidden = {}, wantedSelf = {}, prof = { cache = {} }, sync = {},
+    },
+    ["OtherRealm::Angry Murlocs"] = {
+      wanted = { ["Unmapped-Realm"] = { schema = 2, legacy = 6, origins = {} } },
+      wantedHidden = {}, wantedSelf = {}, prof = { cache = {} }, sync = {},
+    },
+  }
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      C_Club = { GetGuildClubId = function() return 999 end },
+    },
+  })
+  local U = alice.GR.Util
+  check("wrong-id: no verified sources", #U.ListVerifiedImportSources("999") == 0)
+  check("wrong-id: RunVerified false", U.RunVerifiedScopeImport("club:999") == false)
+  check("wrong-id: CAMWOW untouched level", Sim.Level(alice, "Skip-Realm") == 0)
+  check("unmapped: still in SV", db.scopes["OtherRealm::Angry Murlocs"].wanted["Unmapped-Realm"] ~= nil)
+end
+
+-- No club dest: even if GetGuildClubId still returns a stale id, no import.
+do
+  local sim = Sim.New(19)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    ["CAMWOWEU4Realm6PvP::Angry Murlocs"] = {
+      wanted = { ["Stale-Realm"] = { schema = 2, legacy = 3, origins = {} } },
+      wantedHidden = {}, wantedSelf = {}, prof = { cache = {} }, sync = {},
+    },
+  }
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    guild = false,
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      IsInGuild = function() return false end,
+      C_Club = { GetGuildClubId = function() return 215871062 end },
+    },
+  })
+  local U = alice.GR.Util
+  check("stale-api: GuildId still set", U.GuildId() == "215871062")
+  check("stale-api: GuildScopeKey nil", U.GuildScopeKey() == nil)
+  check("stale-api: RunVerified nil dest false", U.RunVerifiedScopeImport(nil) == false)
+  check("stale-api: RunVerified realm dest false",
+    U.RunVerifiedScopeImport("CAMWOWEU4Realm6PvP::Angry Murlocs") == false)
+  check("stale-api: orphan not imported", db.scopes["club:215871062"] == nil
+    or db.scopes["club:215871062"].wanted == nil
+    or db.scopes["club:215871062"].wanted["Stale-Realm"] == nil)
+  check("stale-api: source kept", db.scopes["CAMWOWEU4Realm6PvP::Angry Murlocs"].wanted["Stale-Realm"] ~= nil)
+end
+
+-- Boot path: load AngryMurlocs.lua, fire INITIAL_CLUBS_LOADED; import before sync runs.
+do
+  local CLUB_ID = 215871062
+  local OLD = "CAMWOWEU4Realm6PvP::Angry Murlocs"
+  local sim = Sim.New(20)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    [OLD] = {
+      wanted = { ["Boot-Realm"] = { schema = 2, legacy = 2, origins = { a = { n = 1, seq = 1, t = 1 } } } },
+      wantedHidden = {}, wantedSelf = {}, prof = { cache = {} }, sync = {},
+    },
+    ["::Angry Murlocs"] = {
+      wanted = { ["EmptyOnly-Realm"] = { schema = 2, legacy = 9, origins = {} } },
+      wantedHidden = {}, wantedSelf = {}, prof = { cache = {} }, sync = {},
+    },
+  }
+  local frames = {}
+  local popups = {}
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    extraFiles = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/Professions.lua" },
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      GetRealmID = function() return 0 end,
+      SlashCmdList = {},
+      AngryMurlocsDB = db,
+      StaticPopupDialogs = {},
+      StaticPopup_Show = function(name, ...)
+        popups[#popups + 1] = { name, ... }
+      end,
+      C_Club = { GetGuildClubId = function() return CLUB_ID end },
+      CreateFrame = function()
+        local f = Sim.Stub()
+        f._scripts, f._events = {}, {}
+        f.RegisterEvent = function(self, ev) self._events[ev] = true end
+        f.UnregisterEvent = function(self, ev) self._events[ev] = nil end
+        f.SetScript = function(self, name, fn) self._scripts[name] = fn end
+        f.GetScript = function(self, name) return self._scripts[name] end
+        frames[#frames + 1] = f
+        return f
+      end,
+    },
+  })
+  alice.env.AngryMurlocs = alice.GR
+  alice.env.AngryMurlocsDB = db
+  local chunk = assert(loadfile("AngryMurlocs.lua"))
+  setfenv(chunk, alice.env)
+  chunk()
+  check("boot: OnGuildScopeReady exposed", type(alice.GR.OnGuildScopeReady) == "function")
+  check("boot: before ready empty", Sim.Level(alice, "Boot-Realm") == 0)
+
+  local function Fire(ev, ...)
+    for i = 1, #frames do
+      local f = frames[i]
+      if f._events[ev] and f._scripts.OnEvent then
+        f._scripts.OnEvent(f, ev, ...)
+      end
+    end
+  end
+  Fire("INITIAL_CLUBS_LOADED")
+  check("boot: imported before sync tick", Sim.Level(alice, "Boot-Realm") == 3, Sim.Level(alice, "Boot-Realm"))
+  check("boot: ::Angry Murlocs not auto-imported", Sim.Level(alice, "EmptyOnly-Realm") == 0)
+  check("boot: no import popup", #popups == 0, #popups)
+  check("boot: marked imported", db.scopeImported and db.scopeImported[OLD] == "club:215871062")
+
+  local levelBefore = Sim.Level(alice, "Boot-Realm")
+  alice.GR.OnGuildScopeReady("club:215871062", "club:215871062")
+  check("boot: second ready no level bump", Sim.Level(alice, "Boot-Realm") == levelBefore)
+
+  popups = {}
+  alice.env.C_Club.GetGuildClubId = function() return 777 end
+  Fire("PLAYER_GUILD_UPDATE")
+  check("boot: guild switch no popup", #popups == 0, #popups)
 end
 
 print(string.format("\n%d failures", fails))

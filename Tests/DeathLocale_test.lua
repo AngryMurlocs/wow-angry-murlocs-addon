@@ -269,5 +269,77 @@ do
   check("other death and level stay in the feed", #UI(b).ActivityForTest() == 2, #UI(b).ActivityForTest())
 end
 
+-- UTF-8 death fields + DisplayCharName (Forever surnames)
+do
+  local sim, a, b = Pair(912)
+  local U = a.GR.Util
+  -- Cyrillic И (2 bytes), euro (3), musical G-clef (4)
+  local cyr = string.char(0xD0, 0x98)
+  local euro = string.char(0xE2, 0x82, 0xAC)
+  local four = string.char(0xF0, 0x9D, 0x84, 0x9E)
+  local shortCyr = cyr .. cyr .. cyr .. cyr -- 8 bytes
+  check("utf8 short cyrillic kept", U.SanitizeDeathField(shortCyr, 48) == shortCyr)
+
+  local over2 = string.rep(cyr, 25) -- 50 bytes
+  local t2 = U.SanitizeDeathField(over2, 48)
+  check("utf8 2-byte boundary", #t2 == 48 and #t2 % 2 == 0 and t2 == string.rep(cyr, 24))
+
+  local over3 = string.rep(euro, 17) -- 51 bytes
+  local t3 = U.SanitizeDeathField(over3, 48)
+  check("utf8 3-byte boundary", #t3 == 48 and #t3 % 3 == 0 and t3 == string.rep(euro, 16))
+
+  local over4 = string.rep(four, 13) -- 52 bytes
+  local t4 = U.SanitizeDeathField(over4, 48)
+  check("utf8 4-byte boundary", #t4 == 48 and #t4 % 4 == 0 and t4 == string.rep(four, 12))
+
+  -- Forever first+last at 12 Cyrillic chars each = 49 bytes; needs 64 on new peers.
+  local longName = string.rep(cyr, 12) .. "-" .. string.rep(cyr, 12)
+  check("forever cyrillic name 49 bytes", #longName == 49, #longName)
+  check("new death field 64 keeps full name", U.SanitizeDeathField(longName, 64) == longName)
+  local oldClip = U.SanitizeText(longName, 48)
+  local safe48 = U.Utf8Truncate(longName, 48)
+  check("old client SanitizeText still 48 bytes", #oldClip == 48, #oldClip)
+  check("utf8-safe 48 stops before partial char", #safe48 == 47, #safe48)
+  check("old byte clip differs from utf8-safe", oldClip ~= safe48)
+
+  a.env.C_DeathRecap = {
+    GetRecapEvents = function()
+      return { { event = "SWING_DAMAGE", sourceName = shortCyr, sourceGUID = "Creature-0-1-0-0-1-0",
+        amount = 10, overkill = 1 } }
+    end,
+  }
+  a.env.IsInInstance = function() return false, "none" end
+  Death(a):BroadcastLocalDeath()
+  sim:Run(3)
+  local d = b.deaths[1] and b.deaths[1].data
+  check("cyrillic killer send→recv", d and d.killer == shortCyr, d and d.killer)
+
+  -- DisplayCharName: strip only when suffix matches live realm
+  a.env.GetNormalizedRealmName = function() return "Realm" end
+  a.env.GetRealmName = function() return "Realm" end
+  check("display forever First-Last kept", U.DisplayCharName("Ingoo-Endstation") == "Ingoo-Endstation")
+  check("display strip known realm", U.DisplayCharName("Ingoo Endstation-Realm") == "Ingoo Endstation")
+  check("display strip Name-Realm", U.DisplayCharName("Alice-Realm") == "Alice")
+  check("display space-hyphen alone no strip",
+    U.DisplayCharName("Ingoo Endstation-OtherRealm") == "Ingoo Endstation-OtherRealm")
+  a.env.GetNormalizedRealmName = function() return "" end
+  a.env.GetRealmName = function() return "" end
+  check("display empty realm no strip",
+    U.DisplayCharName("Ingoo Endstation-Realm") == "Ingoo Endstation-Realm")
+  check("display empty realm keeps First-Last",
+    U.DisplayCharName("Ingoo-Endstation") == "Ingoo-Endstation")
+
+  -- Toast stores raw victim for dedupe (not ShortName)
+  b.toasts = {}
+  Death(b).ResetSeenForTest()
+  b.GR:SendMessage("DEATH_UPDATE", "Ingoo-Endstation", {
+    eventId = "utf8-dedupe-1", cause = "mob", killer = "Wolf", zone = "Z",
+  })
+  check("toast victim raw forever name", b.toasts[1] and b.toasts[1].victim == "Ingoo-Endstation",
+    b.toasts[1] and b.toasts[1].victim)
+  check("dedupe raw forever name blocks repeat",
+    Death(b).TryClaimToast("Ingoo-Endstation", "utf8-dedupe-1") == false)
+end
+
 print(string.format("DeathLocale: %d failures", fails))
 if fails > 0 then os.exit(1) end

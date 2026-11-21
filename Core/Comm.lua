@@ -703,21 +703,24 @@ local function DispatchParsed(tag, rest, sender)
     if cause ~= "player" and cause ~= "mob" and cause ~= "env" and cause ~= "unknown" then
       cause = (tonumber(parts[2]) == 1) and "player" or "mob"
     end
-    local spellKind = U.SanitizeText(parts[8] or "", 32)
+    -- UTF-8-safe field clip (SanitizeText is byte-based and used elsewhere).
+    -- Killer/pet 64 on this client; older peers still clipped those at 48.
+    local deathField = U.SanitizeDeathField or U.SanitizeText
+    local spellKind = deathField(parts[8] or "", 32)
     if spellKind == "" then spellKind = nil end
-    local eventId = U.SanitizeText(parts[7] or "", 48)
+    local eventId = deathField(parts[7] or "", 48)
     if eventId == "" then eventId = nil end
-    local faction = U.SanitizeText(parts[10] or "", 1)
+    local faction = deathField(parts[10] or "", 1)
     if faction ~= "A" and faction ~= "H" then faction = nil end
-    local pet = U.SanitizeText(parts[11] or "", 48)
+    local pet = deathField(parts[11] or "", 64)
     if pet == "" then pet = nil end
     GR:SendMessage("DEATH_UPDATE", sender, {
-      killer = U.SanitizeText(parts[1] or "?", 48),
+      killer = deathField(parts[1] or "?", 64),
       isPlayer = cause == "player",
-      zone = U.SanitizeText(parts[3] or "", 48),
+      zone = deathField(parts[3] or "", 48),
       mapId = tonumber(parts[4]),
       cause = cause,
-      spell = U.SanitizeText(parts[6] or "", 48),
+      spell = deathField(parts[6] or "", 48),
       eventId = eventId,
       spellKind = spellKind,
       spellId = tonumber(parts[9]),

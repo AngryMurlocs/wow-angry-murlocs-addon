@@ -63,7 +63,7 @@ Vorbereitung: zwei Gildenmitglieder A/B, gleicher bekannter Wanted-Eintrag, Kart
 
 - [ ] Forever-Login / Reload: Realm-APIs dauerhaft leer — Wanted/Berufe erscheinen nach Club-ID (`GetGuildClubId` / `INITIAL_CLUBS_LOADED`); kein Zwischen-Bucket `Realm::Gilde`; Listen nach `/reload` weiter da. Ingame-Befund: Club-ID nach Login und nach `/reload` für dieselbe Gilde stabil?
 - [ ] Gildenumbenennung: gleicher Club-Scope, Listen bleiben; Anzeigename aktualisiert.
-- [ ] Alte Scopes (`Realm::Gilde` / `::Gilde`): Popup oder `/am import` erst nach Bestätigung; andere Club-ID nie übernehmen.
+- [ ] Belegter Altbereich `CAMWOWEU4Realm6PvP::Angry Murlocs`: nach Login/Reload ohne Popup in `club:<id>` übernommen; kein zweiter Import. `::Angry Murlocs` ohne Herkunftsbeleg bleibt liegen. Login/Gildenwechsel: kein Import-Popup. Andere Club-ID nie übernehmen.
 - [ ] Zwei Gildenmitglieder tauschen Wanted/Berufe; Charakter ohne Gilde und gleichnamige andere Club-ID erhalten nichts. Gildenwechsel bei laufender Übertragung: alte Queue/Fragmente nicht in neuem Bereich.
 - [ ] Charakter in Gilde B einloggen: Gilde-A-Wanted-Einträge und Berufe erscheinen **nicht**.
 - [ ] Zurück zu Gilde A: alte Einträge sind wieder da, nichts aus Gilde B ist hineingemischt.
@@ -193,6 +193,13 @@ Client-Build notieren: `/dump GetBuildInfo()` → ________ · BugSack offen.
 - [ ] Tastenbelegung „Öffentlich testen (/y)“: sofortiger Yell.
 - [ ] Pending Auto-Ruf: Stil auf **Aus** stellen → danach Klick/Taste schreit nicht den vorgemerkten Text.
 - [ ] In Instanz/Dungeon: Auto-Ruf kann ohne Extra-Klick gehen (HW-Regel gilt outdoor).
+
+## Death toast: Forever names + UTF-8 (Unreleased)
+
+Client-Build notieren: `/dump GetBuildInfo()` → ________ · beide Toast-Stile (Art + klassisch).
+
+- [ ] Opfer mit Vor- und Nachname (`First-Last`): Toast zeigt beides, nicht nur den Vornamen.
+- [ ] Kyrillischer kurzer Killer-/Opfername: Zeichen korrekt (kein Mid-Schnitt). Spielschrift unverändert; erscheinen trotz korrekter Bytes Kästchen → separat als Schriftbefund notieren, kein Addon-Kürzungsfehler.
 
 ## Killer-Quelle + Death Recap (0.8.1)
 

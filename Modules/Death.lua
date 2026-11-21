@@ -365,7 +365,8 @@ local function DisplayDeathToast(item, done)
   end
   displayDone = done
   local attack = ResolveAttackLine(item.cause, item.spellKind, item.spellId, item.spell)
-  local body = FormatDeathLine(item.victim, item.cause, item.killer, attack, item.zone, item.faction, item.pet)
+  local body = FormatDeathLine(
+    U.DisplayCharName(item.victim), item.cause, item.killer, attack, item.zone, item.faction, item.pet)
   if f._amToastStyle == "classic" then
     body = body:gsub("\n", " · ")
     f.text:SetText("|cffff3333" .. U.L("DEATH_BADGE") .. "|r  " .. body)
@@ -439,7 +440,7 @@ function Death:RebuildToast()
   if wasEdit then
     muteNextSound = true
     DisplayDeathToast({
-      victim = U.ShortName(U.PlayerName()),
+      victim = U.PlayerName(),
       cause = "mob",
       killer = "Preview",
       spell = U.L("DEATH_MELEE"),
@@ -449,7 +450,8 @@ function Death:RebuildToast()
   end
 end
 
--- item: victim, cause, killer, spellKind, spellId, spell (legacy prose), zone, eventId
+-- item: victim (raw wire/sender name for dedupe; display uses DisplayCharName),
+-- cause, killer, spellKind, spellId, spell (legacy prose), zone, eventId
 local function ShowDeathToast(item)
   item = item or {}
   if not Cfg().showToasts then return end
@@ -1016,8 +1018,13 @@ local function ResolveDeath(deathWall, snapshot, deferNpcRecovery)
   return info, context
 end
 
-local function Sanitize(s)
-  return U.SanitizeText(s, 48)
+-- Killer/pet: 64 so a full Forever first+last (incl. Cyrillic) fits.
+-- Older receivers still clip those fields at 48 bytes.
+local DEATH_NAME_MAX = 64
+local DEATH_FIELD_MAX = 48
+
+local function Sanitize(s, maxLen)
+  return U.SanitizeDeathField(s, maxLen or DEATH_FIELD_MAX)
 end
 
 -- Missing IsInInstance means unknown context, which never counts as open world.
@@ -1205,7 +1212,8 @@ function Death:BroadcastLocalDeath(info, snapshot, recapContext)
   snapshot.eventId = eventId
   pendingEventId = nil
   local fullName = U.NormalizeName(U.PlayerName())
-  local killerWire = (cause == "unknown" or not info.killer or info.killer == "") and "?" or Sanitize(info.killer)
+  local killerWire = (cause == "unknown" or not info.killer or info.killer == "") and "?"
+    or Sanitize(info.killer, DEATH_NAME_MAX)
   local faction = (info.faction == "A" or info.faction == "H") and info.faction or nil
   local pet = (type(info.pet) == "string" and info.pet ~= "") and info.pet or nil
 
@@ -1255,15 +1263,15 @@ function Death:BroadcastLocalDeath(info, snapshot, recapContext)
     "DEATH|%s|%d|%s|%d|%s|%s|%s|%s|%s|%s|%s",
     killerWire,
     cause == "player" and 1 or 0,
-    Sanitize(zone),
+    Sanitize(zone, DEATH_FIELD_MAX),
     mapId or 0,
-    Sanitize(cause),
-    Sanitize(legacySpell),
-    Sanitize(eventId),
-    Sanitize(spellKind or ""),
+    Sanitize(cause, DEATH_FIELD_MAX),
+    Sanitize(legacySpell, DEATH_FIELD_MAX),
+    Sanitize(eventId, DEATH_FIELD_MAX),
+    Sanitize(spellKind or "", 32),
     spellId and tostring(math.floor(tonumber(spellId) or 0)) or "",
     faction or "",
-    Sanitize(pet or "")
+    Sanitize(pet or "", DEATH_NAME_MAX)
   ), "kill", "death")
 end
 
@@ -1383,7 +1391,7 @@ function Death:Preview()
   if layoutEdit then
     muteNextSound = true
     DisplayDeathToast({
-      victim = U.ShortName(U.PlayerName()),
+      victim = U.PlayerName(),
       cause = "mob",
       killer = "Preview",
       spell = U.L("DEATH_MELEE"),
@@ -1403,7 +1411,7 @@ function Death:Preview()
   local token = previewGen
   muteNextSound = true
   DisplayDeathToast({
-    victim = U.ShortName(U.PlayerName()),
+    victim = U.PlayerName(),
     cause = "mob",
     killer = "Preview",
     spell = U.L("DEATH_MELEE"),
@@ -1433,7 +1441,7 @@ function Death:BeginLayoutEdit()
   displayDone = nil
   muteNextSound = true
   DisplayDeathToast({
-    victim = U.ShortName(U.PlayerName()),
+    victim = U.PlayerName(),
     cause = "mob",
     killer = "Preview",
     spell = U.L("DEATH_MELEE"),
@@ -1493,8 +1501,9 @@ function Death:OnEnable()
     if U.IsSelfName(victim) then return end
     data = data or {}
     local cause = data.cause or (data.isPlayer and "player" or "mob")
+    -- Keep raw victim for TryClaimToast/DedupeKey; DisplayDeathToast formats via DisplayCharName.
     ShowDeathToast({
-      victim = U.ShortName(victim),
+      victim = victim,
       cause = cause,
       killer = data.killer,
       spell = data.spell,
