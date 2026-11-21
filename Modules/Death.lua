@@ -1467,6 +1467,8 @@ function Death:ResetAppearance()
   c.scale = 1
   c.duration = 10.0
   c.toastStyle = "art"
+  -- FinishDisplay frees the shared toast queue; DiscardToast rebuilds the frame.
+  FinishDisplay()
   DiscardToast()
 end
 

@@ -86,5 +86,32 @@ lvl:ResetAppearance()
 check("appearance keeps locked", bob.GR.db.levelUp.locked == true)
 check("appearance resets scale", bob.GR.db.levelUp.scale == 1)
 
+-- Reset while a toast is showing must free the shared queue for the next item.
+do
+  bob.GR.db.death.showToasts = true
+  bob.GR.db.levelUp.showToasts = true
+  local TQ = bob.GR.ToastQueue
+  TQ._ResetForTest()
+  -- Re-bind handlers after queue reset (OnEnable already ran once).
+  death:OnDisable()
+  lvl:OnDisable()
+  death:OnEnable()
+  lvl:OnEnable()
+  local clock = 1000
+  bob.env.GetTime = function() return clock end
+  _G.GetTime = function() return clock end
+  TQ.Enqueue({ kind = "death", victim = "Alice", cause = "unknown", eventId = "e1" })
+  check("reset-queue: death showing", TQ.IsShowing())
+  death:ResetAppearance()
+  check("reset-queue: not showing after reset", not TQ.IsShowing())
+  clock = 2000
+  TQ.Enqueue({ kind = "lvl", level = 12, eventId = "e2" })
+  check("reset-queue: lvl drains after reset", TQ.IsShowing() or TQ.Size() == 0)
+  if TQ.IsShowing() then
+    lvl:ResetAppearance()
+  end
+  check("reset-queue: free after lvl reset", not TQ.IsShowing())
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then error(fails .. " test failures") end
