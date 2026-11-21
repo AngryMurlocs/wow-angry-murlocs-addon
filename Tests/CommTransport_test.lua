@@ -175,6 +175,105 @@ do
   check("purge by scope", n >= 1 and alice.GR.Comm:QueueSize() == 0)
 end
 
+-- No confirmed GuildScopeKey: Send refused; receive ignored.
+do
+  local sim = Sim.New(16)
+  local alice = sim:AddClient("Alice", {
+    guildClubId = 1,
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+    },
+  })
+  -- Hold club id unavailable while still "guilded".
+  alice.env.C_Club.GetGuildClubId = function() return nil end
+  alice.guildClubId = nil
+  check("noscope: key nil", alice.GR.Util.GuildScopeKey() == nil)
+  check("noscope: send refused", alice.GR.Comm:Send("X|1", "data", "misc") == false)
+  check("noscope: queue empty", alice.GR.Comm:QueueSize() == 0)
+  alice.GR.Comm:OnAddonMessage("GildenRadar", "LVL|10", "GUILD", "Bob-Realm")
+  check("noscope: still in guild", alice.env.IsInGuild() == true)
+  check("noscope: key still nil", alice.GR.Util.GuildScopeKey() == nil)
+end
+
+-- Drain: mismatch enqueue refused; matching scope sends.
+do
+  local sim = Sim.New(17)
+  local alice = sim:AddClient("Alice", { guildClubId = 10 })
+  alice.env.Enum = { SendAddonMessageResult = RESULT }
+  alice.env.C_ChatInfo.SendAddonMessage = function() return RESULT.AddonMessageThrottle end
+  local scope = alice.GR.Util.GuildScopeKey()
+  check("drain: have scope", scope == "club:10", tostring(scope))
+  alice.GR.Comm:Send("KEEP|1", "data", "misc", { scopeKey = scope, operationId = "keep1" })
+  check("drain: keep queued", alice.GR.Comm:QueueSize() >= 1)
+  alice.GR.Comm:OnGuildLeft()
+  check("drain: wiped on leave", alice.GR.Comm:QueueSize() == 0)
+  alice.guild = "Angry Murlocs"
+  alice.guildClubId = 11
+  alice.env.C_Club.GetGuildClubId = function() return 11 end
+  alice.env.C_ChatInfo.SendAddonMessage = function() return RESULT.AddonMessageThrottle end
+  alice.GR.Comm:Send("OLDCLUB|1", "data", "misc", { scopeKey = "club:10", operationId = "oldclub" })
+  check("drain: mismatch enqueue refused", alice.GR.Comm:QueueSize() == 0)
+  local okNew = alice.GR.Comm:Send("NEW|1", "data", "misc", { scopeKey = "club:11", operationId = "new1" })
+  check("drain: matching scope enqueues", okNew == true and alice.GR.Comm:QueueSize() >= 1)
+  local sent = {}
+  alice.env.C_ChatInfo.SendAddonMessage = function(prefix, msg, channel)
+    sent[#sent + 1] = msg
+    return RESULT.Success
+  end
+  sim:Run(5)
+  local sawOld, sawNew = false, false
+  for i = 1, #sent do
+    if sent[i]:find("^OLDCLUB|") then sawOld = true end
+    if sent[i]:find("^NEW|") then sawNew = true end
+  end
+  check("drain: no old club send", not sawOld)
+  check("drain: new club sent", sawNew)
+end
+
+-- Positive same-club delivery + negative other club / no guild.
+do
+  local sim = Sim.New(19)
+  local seen = { Bob = 0, Carol = 0, Dan = 0 }
+  local function wrap(c)
+    local orig = c.GR.Comm.OnAddonMessage
+    c.GR.Comm.OnAddonMessage = function(self, prefix, message, channel, sender)
+      seen[c.name] = (seen[c.name] or 0) + 1
+      return orig(self, prefix, message, channel, sender)
+    end
+  end
+  local alice = sim:AddClient("Alice", { guild = "Angry Murlocs", guildClubId = 7 })
+  local bob = sim:AddClient("Bob", { guild = "Angry Murlocs", guildClubId = 7 })
+  local carol = sim:AddClient("Carol", { guild = "Angry Murlocs", guildClubId = 8 })
+  local dan = sim:AddClient("Dan", { guild = false })
+  wrap(bob)
+  wrap(carol)
+  wrap(dan)
+  alice.GR.Comm:Send("LVL|7", "ctrl", "lvl")
+  sim:Run(5)
+  check("recv: same club got it", seen.Bob >= 1, seen.Bob)
+  check("recv: other club skipped", seen.Carol == 0, seen.Carol)
+  check("recv: no guild skipped", seen.Dan == 0, seen.Dan)
+end
+
+-- Guild switch mid-queue: OnGuildLeft clears fragments; new guild clean.
+do
+  local sim = Sim.New(20)
+  local alice = sim:AddClient("Alice", { guildClubId = 50 })
+  alice.env.Enum = { SendAddonMessageResult = RESULT }
+  alice.env.C_ChatInfo.SendAddonMessage = function() return RESULT.AddonMessageThrottle end
+  local body = "BIG|" .. string.rep("z", 600)
+  local queued = alice.GR.Comm:Send(body, "data", "misc", { operationId = "fragswitch" })
+  check("switch: multi frag queued", queued == true and alice.GR.Comm:QueueSize() > 1)
+  alice.GR.Comm:OnGuildLeft()
+  check("switch: queue wiped", alice.GR.Comm:QueueSize() == 0)
+  alice.guildClubId = 51
+  alice.env.C_Club.GetGuildClubId = function() return 51 end
+  check("switch: new key", alice.GR.Util.GuildScopeKey() == "club:51")
+  local ok = alice.GR.Comm:Send("AFTER|1", "data", "misc")
+  check("switch: new send ok", ok == true)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")
