@@ -324,7 +324,11 @@ local function ProfessionKeysFromList(list)
 end
 
 local function CurrentScopeKey()
-  return U.GuildScopeKey() or ((U.RealmKey and U.RealmKey() or "Unknown") .. "::__none__")
+  local guild = U.GuildScopeKey and U.GuildScopeKey()
+  if guild then return guild end
+  local realm = U.RealmKey and U.RealmKey()
+  if realm then return realm .. "::__none__" end
+  return nil
 end
 
 -- epoch optional; defaults to EnsureOwnerEpoch().

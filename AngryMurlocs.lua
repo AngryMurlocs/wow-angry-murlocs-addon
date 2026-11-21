@@ -12,11 +12,14 @@ local SCHEMA = 2
 -- not on every loading screen. Random delay spreads simultaneous logins.
 local initialSyncDone = false
 local guildSyncPending = false
+local realmWaitPending = false
 local lastGuildKey
 
 local function RunGuildSync()
   if not IsInGuild or not IsInGuild() then return end
-  lastGuildKey = U.GuildScopeKey()
+  local key = U.GuildScopeKey and U.GuildScopeKey()
+  if not key then return end
+  lastGuildKey = key
   if U.RecoverWantedScopes then U.RecoverWantedScopes() end
   local prof = GR:GetModule("Professions")
   if prof then
@@ -37,12 +40,14 @@ local function RunGuildSync()
 end
 
 local function ScheduleGuildSync(minDelay)
-  if guildSyncPending then return end
+  if not U.GuildScopeKey or not U.GuildScopeKey() then return false end
+  if guildSyncPending then return true end
   guildSyncPending = true
   C_Timer.After((minDelay or 4) + math.random() * 6, function()
     guildSyncPending = false
     RunGuildSync()
   end)
+  return true
 end
 
 local defaults = {
@@ -159,6 +164,57 @@ local function MigrateLegacyToScope()
     wipe(db.wanted)
     db._migratedWantedToScope = true
   end
+end
+
+-- Realm can be "" at Forever login; wait until GuildScopeKey is real before sync/SV use.
+local function OnGuildScopeReady(oldKey, key)
+  if GR.db then GR.db._recoveredWantedScopes = nil end
+  MigrateLegacyToScope()
+  if U.RecoverWantedScopes then U.RecoverWantedScopes() end
+  if oldKey ~= key then
+    GR:SendMessage("GUILD_UPDATE")
+  end
+  if not initialSyncDone then
+    initialSyncDone = true
+    ScheduleGuildSync(4)
+  elseif key and key ~= oldKey then
+    ScheduleGuildSync(2)
+  end
+  C_Timer.After(2, function()
+    if GR.Comm and GR.Comm.AnnounceVersion and U.GuildScopeKey and U.GuildScopeKey() then
+      GR.Comm:AnnounceVersion()
+    end
+  end)
+end
+
+local function TryWakeGuildScope()
+  local key = U.GuildScopeKey and U.GuildScopeKey()
+  if not key then return false end
+  if key == lastGuildKey and initialSyncDone then return true end
+  local oldKey = lastGuildKey
+  lastGuildKey = key
+  OnGuildScopeReady(oldKey, key)
+  return true
+end
+
+local function ArmRealmWait()
+  if realmWaitPending then return end
+  if TryWakeGuildScope() then return end
+  realmWaitPending = true
+  local tries = 0
+  local function tick()
+    tries = tries + 1
+    if TryWakeGuildScope() then
+      realmWaitPending = false
+      return
+    end
+    if tries >= 30 then
+      realmWaitPending = false
+      return
+    end
+    C_Timer.After(2, tick)
+  end
+  C_Timer.After(2, tick)
 end
 
 -- Versioned, repeatable: entries already on schema 2 are left as they are.
@@ -281,38 +337,42 @@ frame:SetScript("OnEvent", function(_, event, ...)
     U.Print(string.format(U.L("LOADED"), GR.VERSION))
   elseif event == "PLAYER_ENTERING_WORLD" then
     if not initialSyncDone then
-      initialSyncDone = true
-      ScheduleGuildSync(4)
-      C_Timer.After(2, function()
-        if GR.Comm and GR.Comm.AnnounceVersion then
-          GR.Comm:AnnounceVersion()
-        end
-      end)
+      if U.GuildScopeKey and U.GuildScopeKey() then
+        initialSyncDone = true
+        lastGuildKey = U.GuildScopeKey()
+        ScheduleGuildSync(4)
+        C_Timer.After(2, function()
+          if GR.Comm and GR.Comm.AnnounceVersion then
+            GR.Comm:AnnounceVersion()
+          end
+        end)
+      else
+        ArmRealmWait()
+      end
+    else
+      TryWakeGuildScope()
     end
   elseif event == "CHAT_MSG_ADDON" then
     GR.Comm:OnAddonMessage(...)
   elseif event == "PLAYER_GUILD_UPDATE" then
     local key = U.GuildScopeKey()
-    if key == lastGuildKey then return end
+    if key == lastGuildKey then
+      if not key then ArmRealmWait() end
+      return
+    end
     local oldKey = lastGuildKey
     lastGuildKey = key
     if not key and GR.Comm and GR.Comm.OnGuildLeft then
       GR.Comm:OnGuildLeft()
+      ArmRealmWait()
     elseif oldKey and GR.Comm and GR.Comm.PurgeByScope then
       -- Drop queued ops stamped with the previous guild scope (foundation §3).
       GR.Comm:PurgeByScope(oldKey)
     end
-    MigrateLegacyToScope()
-    if GR.db then GR.db._recoveredWantedScopes = nil end
-    if U.RecoverWantedScopes then U.RecoverWantedScopes() end
-    GR:SendMessage("GUILD_UPDATE")
-    if initialSyncDone and key then
-      ScheduleGuildSync(2)
-      C_Timer.After(2, function()
-        if GR.Comm and GR.Comm.AnnounceVersion then
-          GR.Comm:AnnounceVersion()
-        end
-      end)
+    if key then
+      OnGuildScopeReady(oldKey, key)
+    else
+      GR:SendMessage("GUILD_UPDATE")
     end
   end
 end)

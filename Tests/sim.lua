@@ -277,13 +277,16 @@ end
 
 function Sim.Level(c, killer)
   local scope = c.GR.Util.GetScopeDB()
+  if not scope or not scope.wanted then return 0 end
   local e = scope.wanted[killer]
   return e and c.GR.WantedLogic.Level(e) or 0
 end
 
 function Sim.Entries(c)
   local n = 0
-  for _ in pairs(c.GR.Util.GetScopeDB().wanted) do n = n + 1 end
+  local scope = c.GR.Util.GetScopeDB()
+  if not scope or not scope.wanted then return 0 end
+  for _ in pairs(scope.wanted) do n = n + 1 end
   return n
 end
 

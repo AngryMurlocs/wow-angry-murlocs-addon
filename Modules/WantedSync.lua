@@ -27,7 +27,8 @@ local answering = {} -- "requester|reqId" -> true while our response is queued
 local pendingHeaders = {} -- "reqId|killer" -> hdr table
 
 local function SyncStore()
-  return Wanted:Scope().sync
+  local scope = Wanted:Scope()
+  return scope and scope.sync
 end
 
 local function ClearPendingHeaders()
@@ -95,7 +96,8 @@ OnSyncTimeout = function()
       return
     end
     if (sync.pages or 0) > 1 then
-      SyncStore().cursor = { t = sync.cursorT, k = sync.cursorKey }
+      local store = SyncStore()
+      if store then store.cursor = { t = sync.cursorT, k = sync.cursorKey } end
       SetSyncState("partial")
     else
       SetSyncState("noreply")
@@ -114,6 +116,10 @@ function Wanted:RequestSync(mode)
   end
   if Wanted:IsSyncBusy() then return false end
   local store = SyncStore()
+  if not store then
+    SetSyncState("noguild")
+    return false
+  end
   local cT, cK = 0, ""
   if mode == "full" then
     if store.cursor then
@@ -187,12 +193,14 @@ local function OnEnd(sender, data)
       SendSyncRequest(data.cursorT, data.cursorKey, sender)
       return
     end
-    store.cursor = { t = data.cursorT, k = data.cursorKey }
+    if store then store.cursor = { t = data.cursorT, k = data.cursorKey } end
     SetSyncState("partial", { responder = sender })
     return
   end
-  store.cursor = nil
-  store.lastOkAt = Wanted:Now()
+  if store then
+    store.cursor = nil
+    store.lastOkAt = Wanted:Now()
+  end
   SetSyncState("done", { responder = sender })
 end
 
@@ -380,7 +388,8 @@ function Wanted:SyncStatusText()
   else
     text = U.L("SYNC_STATE_" .. string.upper(state))
   end
-  local last = SyncStore().lastOkAt
+  local store = SyncStore()
+  local last = store and store.lastOkAt
   if last and last > 0 then
     text = text .. " · " .. string.format(U.L("SYNC_LAST_OK"), Wanted.FormatAge(last))
   end
@@ -388,7 +397,8 @@ function Wanted:SyncStatusText()
 end
 
 function Wanted:GetLastSyncOkAt()
-  return SyncStore().lastOkAt
+  local store = SyncStore()
+  return store and store.lastOkAt
 end
 
 function Wanted:_EnableSync()

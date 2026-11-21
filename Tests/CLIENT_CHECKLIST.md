@@ -61,6 +61,7 @@ Vorbereitung: zwei Gildenmitglieder A/B, gleicher bekannter Wanted-Eintrag, Kart
 
 ## 11. Gilden-/Realmwechsel und gemischte Versionen
 
+- [ ] Forever-Login / Reload: Wanted und Berufe erscheinen auch wenn der Realmname kurz leer war; kein neuer leerer Scope; nach kurzer Wartezeit Listen wie zuvor.
 - [ ] Charakter in Gilde B einloggen: Gilde-A-Wanted-Einträge und Berufe erscheinen **nicht**.
 - [ ] Zurück zu Gilde A: alte Einträge sind wieder da, nichts aus Gilde B ist hineingemischt.
 - [ ] 0.6.1-Client meldet einen Tod/Clear: 0.7+-Clients ändern nichts. `/am diag show` zählt `legacy_ignored`.

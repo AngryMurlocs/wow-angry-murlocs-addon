@@ -42,6 +42,9 @@ end
 
 function Wanted:State()
   local scope = self:Scope()
+  if not scope then
+    return { wanted = {}, hidden = {} }
+  end
   return { wanted = scope.wanted, hidden = scope.wantedHidden }
 end
 
@@ -51,6 +54,9 @@ end
 
 function Wanted:SelfState()
   local scope = self:Scope()
+  if not scope then
+    return { seq = 0, kills = {} }
+  end
   local key = self:SelfKey() or "?"
   scope.wantedSelf[key] = scope.wantedSelf[key] or { seq = 0, kills = {} }
   return scope.wantedSelf[key]
