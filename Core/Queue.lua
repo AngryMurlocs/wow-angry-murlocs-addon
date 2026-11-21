@@ -35,20 +35,30 @@ end
 function Q:PushAll(prio, items, now)
   local lane = self.lanes[prio]
   if not lane or #items == 0 then return false, "bad_prio" end
+  -- Pos lane: keep newest payload but preserve the oldest wait clock so POS_MAX_WAIT works.
+  local keepEnq
   if prio == "pos" then
+    if lane[1] and lane[1].enq ~= nil then
+      keepEnq = lane[1].enq
+    end
     for i = #lane, 1, -1 do lane[i] = nil end
   end
   if #items > self.caps[prio] - #lane then
     self.dropped = self.dropped + #items
     return false, "full"
   end
+  local enqNow = now or 0
   for i = 1, #items do
     local it = items[i]
+    local enq = enqNow
+    if prio == "pos" and keepEnq ~= nil then
+      enq = keepEnq
+    end
     lane[#lane + 1] = {
       payload = it.payload,
       category = it.category,
       prio = prio,
-      enq = now or 0,
+      enq = enq,
       scopeKey = it.scopeKey,
       operationId = it.operationId,
     }

@@ -170,6 +170,16 @@ Voraussetzung: Beide online in derselben Gilde; A hat Beruf mit bestätigtem Sca
 - [ ] Filter „Nur Sichtungen der letzten 5 Minuten“; Sort Gefahrenstufe / Zuletzt gesehen.
 - [ ] Lange Namen/Zonen gekürzt + Tooltip; >40 Einträge Seitenwechsel; eigene Leerzustände.
 
+## Review 21.11.2026 — Client-Nachweise (Unreleased)
+
+Client-Build: `/dump GetBuildInfo()` → ________
+
+- [ ] Tod teilen aus, Position an: wartendes POS nach Abschalten zeigt bei anderen **kein** Tot-Symbol; Koordinaten kommen an.
+- [ ] Toast laufen lassen → Options „Aussehen zurücksetzen“ → neues Tod-/Level-Ereignis erscheint einmal (kein Hänger).
+- [ ] Karte: Alice bei ~0.50/0.50, Bob bei ~0.505/0.505 — Bobs Pin sichtbar; eigener Pin nicht.
+- [ ] Options → Protokoll: viele Statuszeilen → Scrollinhalt wächst; älteste Zeile erreichbar; nach Leeren kürzerer Scroll.
+- [ ] Gilde beitreten mit Positionsfreigabe: nach Beitritt gehen Positionsupdates (nicht erst nach Option-Toggle).
+
 ## Murloc-Rufe / Nerglish Yell (Unreleased — HW outdoor)
 
 Client-Build notieren: `/dump GetBuildInfo()` → ________ · BugSack offen.

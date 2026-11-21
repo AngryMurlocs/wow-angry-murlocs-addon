@@ -72,6 +72,20 @@ do
   check("data resumes", q:Pop(Queue.POS_MAX_WAIT + 1).payload == "D2")
 end
 
+-- Replacing pos keeps original enq so fairness still ages under movement refreshes.
+do
+  local q = Queue.New()
+  for i = 1, 200 do q:Push("data", "D" .. i, "misc", 0) end
+  q:Push("pos", "POS|A", "pos", 0)
+  q:Push("pos", "POS|B", "pos", 2.5)
+  q:Push("pos", "POS|C", "pos", 5.0)
+  check("pos replace keeps newest payload", q:Size("pos") == 1)
+  local early = q:Pop(4.9)
+  check("pos still waits before max age", early and early.payload:sub(1, 1) == "D", early and early.payload)
+  local jumped = q:Pop(5.0)
+  check("pos jumps with preserved enq", jumped and jumped.payload == "POS|C", jumped and jumped.payload)
+end
+
 -- Kill reports are never overtaken by an aged position update
 do
   local q = Queue.New()

@@ -54,6 +54,7 @@ local function OnGuildRoster()
   end
   local n = GetNumGuildMembers() or 0
   local seen = {}
+  local joined = {}
   for i = 1, n do
     local name = GetGuildRosterInfo(i)
     local key = name and U.CharKey(name)
@@ -61,13 +62,16 @@ local function OnGuildRoster()
       seen[key] = true
       if not knownMembers[key] then
         knownMembers[key] = true
-        React("guild_join", { player = U.ShortName(name) })
-        break
+        joined[#joined + 1] = U.ShortName(name)
       end
     end
   end
   for key in pairs(knownMembers) do
     if not seen[key] then knownMembers[key] = nil end
+  end
+  -- At most one public yell per roster pass, after the full sync.
+  if joined[1] then
+    React("guild_join", { player = joined[1] })
   end
 end
 
@@ -195,4 +199,9 @@ function Mod:OnDisable()
     self._eventFrame:SetScript("OnEvent", nil)
     self._eventFrame = nil
   end
+end
+
+-- Test hook: run roster sync without a live GUILD_ROSTER_UPDATE.
+function Mod:_OnGuildRosterForTest()
+  OnGuildRoster()
 end

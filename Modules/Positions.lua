@@ -252,7 +252,12 @@ function Positions:OnEnable()
   GR:BindMessage(self, "GUILD_UPDATE", function()
     wipe(cache)
     StopMovingTicker()
-    if not SharingPosition() then StopHeartbeat() end
+    if SharingPosition() then
+      EnsureHeartbeat()
+      Positions:Broadcast(true)
+    else
+      StopHeartbeat()
+    end
     GR:SendMessage("POS_CACHE_CLEARED")
   end)
 
@@ -278,7 +283,9 @@ function Positions:OnEnable()
   U.SafeRegisterEvent(f, "PLAYER_REGEN_ENABLED")
   f:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_REGEN_DISABLED" then
-      StopMovingTicker()
+      if ShouldSuppressPos() then
+        StopMovingTicker()
+      end
       return
     end
 

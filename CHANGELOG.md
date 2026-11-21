@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Turning off death sharing no longer leaves a “dead” mark on a position update that was still waiting to send
+- Wanted sync no longer reports success when records are missing; first-time sightings keep zone and time after sync
+- Resetting toast look no longer stalls later death or level-up messages
+- Stale relayed recipe lists after unlearn/relearn are ignored; recipe retries stay tied to the member you opened
+- Map positions keep up while moving with busy guild traffic; joining a guild starts sharing again; nearby guildmates stay visible on the map
 - Outdoor Murloc yells wait for a click or key (no more addon-blocked errors); the public test button still yells immediately
 - You can bind keys for the public Murloc test yell and to cycle Off / Nerglish / Schmäh (Esc → Key Bindings → AddOns)
 

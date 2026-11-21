@@ -398,17 +398,20 @@ local function PaintLogList(force)
   local height = math.max(40, math.abs(y) + 8)
   body:SetWidth(innerW)
   body:SetHeight(height)
+  host._amHeight = (host._amHeaderH or 120) + height
+  if host._amContent and host._amContent.SetHeight then
+    host._amContent:SetHeight(host._amHeight)
+  end
   -- Keep sticky scroll: at top follow new lines; otherwise preserve offset.
   if scroll and scroll.SetVerticalScroll then
     if atTop then
       scroll:SetVerticalScroll(0)
     else
-      local maxScroll = math.max(0, height - (host:GetHeight() or 200))
+      local maxScroll = math.max(0, host._amHeight - (host:GetHeight() or 200))
       if prevScroll > maxScroll then prevScroll = maxScroll end
       scroll:SetVerticalScroll(prevScroll)
     end
   end
-  host._amHeight = (host._amHeaderH or 120) + height
 end
 
 local function RefreshLogView(force)
