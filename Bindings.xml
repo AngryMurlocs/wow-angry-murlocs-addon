@@ -1,0 +1,14 @@
+<Bindings>
+  <!-- Public Murloc test yell (/y); same as Options → Layout test button. No default key. -->
+  <Binding name="ANGRYMURLOCS_TEST_YELL" header="ANGRYMURLOCS" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.TestYell then
+      AngryMurlocs.Nerglish.TestYell(nil, true)
+    end
+  </Binding>
+  <!-- Cycle Murloc yell style: Off → Nerglish → Schmäh → Off. -->
+  <Binding name="ANGRYMURLOCS_CYCLE_STYLE" header="ANGRYMURLOCS" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.CycleStyle then
+      AngryMurlocs.Nerglish.CycleStyle()
+    end
+  </Binding>
+</Bindings>

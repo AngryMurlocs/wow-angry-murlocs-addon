@@ -1330,9 +1330,13 @@ function Options:AttachPanel(parent)
         end
       end
       local function SetNerglishStyle(style)
-        GR.db.ui = GR.db.ui or {}
-        GR.db.ui.nerglishStyle = NormalizeNerglish(style)
-        GR.db.ui.nerglishYell = nil
+        if GR.Nerglish and GR.Nerglish.SetStyle then
+          GR.Nerglish.SetStyle(style)
+        else
+          GR.db.ui = GR.db.ui or {}
+          GR.db.ui.nerglishStyle = NormalizeNerglish(style)
+          GR.db.ui.nerglishYell = nil
+        end
         RefreshNerglishBtns()
       end
       local nerglishDefs = {
@@ -1361,7 +1365,8 @@ function Options:AttachPanel(parent)
     H.Hint("OPT_NERGLISH_TEST_HINT")
     H.Button("OPT_NERGLISH_TEST", function()
       if GR.Nerglish and GR.Nerglish.TestYell then
-        GR.Nerglish.TestYell()
+        -- Button click is a hardware event: send yell immediately.
+        GR.Nerglish.TestYell(nil, true)
       end
     end, 200, HINT_GAP)
 

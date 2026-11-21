@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Outdoor Murloc yells wait for a click or key (no more addon-blocked errors); the public test button still yells immediately
+- You can bind keys for the public Murloc test yell and to cycle Off / Nerglish / Schmäh (Esc → Key Bindings → AddOns)
+
 ## 0.11.25
 
 - Murloc yells: choose Off, classic Nerglish, or Austrian Schmäh (Options → Layout); public /y test button
