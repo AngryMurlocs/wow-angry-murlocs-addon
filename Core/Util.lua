@@ -59,6 +59,20 @@ function U.ShortName(full)
   return full:match("^([^-]+)") or full
 end
 
+-- Toast/UI display only. Keeps Forever first-last (First-Last). Strips a trailing
+-- -Realm only when that suffix matches the live realm key — never by shape alone.
+function U.DisplayCharName(full)
+  if not full or full == "" then return "?" end
+  local name, suffix = full:match("^(.-)%-([^%-]+)$")
+  if not name or name == "" or not suffix then return full end
+  local known = U.RealmKey()
+  if not known then return full end
+  if CleanRealm(suffix) == known then
+    return name
+  end
+  return full
+end
+
 local function FoldNameKey(name)
   if not name then return nil end
   local s = U.ShortName(name)
@@ -259,6 +273,37 @@ function U.SanitizeText(s, maxLen)
     s = s:sub(1, maxLen)
   end
   return s
+end
+
+-- Truncate to maxBytes on a UTF-8 character boundary (never mid-codepoint).
+function U.Utf8Truncate(s, maxBytes)
+  s = tostring(s or "")
+  if not maxBytes or #s <= maxBytes then return s end
+  local i, last = 1, 0
+  while i <= #s do
+    local c = s:byte(i)
+    if not c then break end
+    local len = 1
+    if c >= 0xF0 then
+      len = 4
+    elseif c >= 0xE0 then
+      len = 3
+    elseif c >= 0xC0 then
+      len = 2
+    end
+    if i + len - 1 > #s then break end
+    if last + len > maxBytes then break end
+    last = last + len
+    i = i + len
+  end
+  return s:sub(1, last)
+end
+
+-- Death wire fields only: same strip as SanitizeText, UTF-8-safe length.
+-- Killer/pet may use 64; older peers still clip those at 48 bytes.
+function U.SanitizeDeathField(s, maxLen)
+  s = tostring(s or ""):gsub("|", ""):gsub("[%c]", "")
+  return U.Utf8Truncate(s, maxLen)
 end
 
 -- Escape pipe as literal \124 so item links survive TAG|field protocol.
@@ -515,8 +560,17 @@ function U.GetScopeDB()
   return U.EnsureScopeTable(scope)
 end
 
+--- Exact legacy scope key -> expected club id (string, no "club:" prefix).
+--- Client-confirmed: Forever WTF clubNames["215871062"] = "Angry Murlocs"
+--- (and scopes["club:215871062"].guildDisplayName). "::Angry Murlocs" omitted until
+--- provenance of that empty-realm bucket is separately proven.
+U.VERIFIED_SCOPE_IMPORTS = {
+  ["CAMWOWEU4Realm6PvP::Angry Murlocs"] = "215871062",
+}
+
 --- Name-matched realm/`::` orphans for the current guild. Club keys excluded.
 --- Already-imported sources are omitted. Name is display-only, not proof.
+--- Prefer ListVerifiedImportSources for auto-import (verified keys only).
 function U.ListImportCandidates()
   local dest = U.GuildScopeKey()
   if not dest or not GR.db then return {} end
@@ -535,6 +589,40 @@ function U.ListImportCandidates()
   end
   table.sort(out)
   return out
+end
+
+--- Sources whose VERIFIED_SCOPE_IMPORTS entry equals expectedClubId.
+--- No name matching. Skips missing, already-imported, and club:* keys.
+function U.ListVerifiedImportSources(expectedClubId)
+  if type(expectedClubId) ~= "string" or expectedClubId == "" or not GR.db then
+    return {}
+  end
+  local map = U.VERIFIED_SCOPE_IMPORTS or {}
+  local imported = GR.db.scopeImported or {}
+  local scopes = GR.db.scopes or {}
+  local out = {}
+  for srcKey, wantId in pairs(map) do
+    if wantId == expectedClubId
+      and type(srcKey) == "string"
+      and not U.IsClubScopeKey(srcKey)
+      and not imported[srcKey]
+      and type(scopes[srcKey]) == "table" then
+      out[#out + 1] = srcKey
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+--- Import verified orphans into dest. dest must be club:<id>; id comes only from
+--- ClubIdFromScopeKey(dest) — never from live GuildId() (stale API / nil dest).
+--- Returns true when at least one source imported successfully.
+function U.RunVerifiedScopeImport(dest)
+  local id = U.ClubIdFromScopeKey(dest)
+  if not id then return false end
+  local sources = U.ListVerifiedImportSources(id)
+  if #sources == 0 then return false end
+  return U.ImportScopes(sources, dest) == true
 end
 
 function U.CountScopeWanted(scope)

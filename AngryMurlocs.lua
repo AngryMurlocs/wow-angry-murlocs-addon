@@ -14,7 +14,6 @@ local initialSyncDone = false
 local guildSyncPending = false
 local guildScopeWaitPending = false
 local lastGuildKey
-local pendingScopeImport -- { dest = key, sources = { ... } }
 
 local function RunGuildSync()
   if not IsInGuild or not IsInGuild() then return end
@@ -167,78 +166,37 @@ local function MigrateLegacyToScope()
   end
 end
 
-local function EnsureScopeImportPopup()
-  if not StaticPopupDialogs then return end
-  if StaticPopupDialogs["ANGRYMURLOCS_SCOPE_IMPORT"] then return end
-  StaticPopupDialogs["ANGRYMURLOCS_SCOPE_IMPORT"] = {
-    text = "%s",
-    button1 = ACCEPT or "Accept",
-    button2 = CANCEL or "Cancel",
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,
-    OnAccept = function()
-      local pending = pendingScopeImport
-      pendingScopeImport = nil
-      if not pending or not U.ImportScopes then return end
-      local live = U.GuildScopeKey and U.GuildScopeKey()
-      if not live or live ~= pending.dest then
-        U.Print(U.L("SCOPE_IMPORT_ABORT"))
-        if GR.OfferScopeImport then GR.OfferScopeImport() end
-        return
-      end
-      local ok, err = U.ImportScopes(pending.sources, pending.dest)
-      if err == "dest_changed" then
-        U.Print(U.L("SCOPE_IMPORT_ABORT"))
-        if GR.OfferScopeImport then GR.OfferScopeImport() end
-        return
-      end
-      if ok then
-        U.Print(U.L("SCOPE_IMPORT_DONE"))
-        GR:SendMessage("GUILD_UPDATE")
-      end
-    end,
-    OnCancel = function()
-      pendingScopeImport = nil
-    end,
-  }
+-- Auto-import only VERIFIED_SCOPE_IMPORTS keys whose expected club id matches dest.
+-- dest must be the ready club:<id> key (from OnGuildScopeReady `key` or GuildScopeKey).
+-- Never use live GuildId() as fallback — stale API can lie when dest is nil/realm.
+local function ImportVerifiedForDest(dest)
+  if not U.RunVerifiedScopeImport then return false end
+  local ok = U.RunVerifiedScopeImport(dest)
+  if ok then
+    U.Print(U.L("SCOPE_IMPORT_DONE"))
+  end
+  return ok
 end
 
--- Offer confirmed import of name-matched realm orphans into the active club/realm scope.
+-- /am import: same verified auto path (no popup).
 function GR.OfferScopeImport()
-  if not U.ListImportCandidates or not U.GuildScopeKey then return end
-  local dest = U.GuildScopeKey()
+  local dest = U.GuildScopeKey and U.GuildScopeKey()
   if not dest then return end
-  local candidates = U.ListImportCandidates()
-  if #candidates == 0 then return end
-  local lines = { U.L("SCOPE_IMPORT_PROMPT") }
-  for i = 1, #candidates do
-    local key = candidates[i]
-    local scope = GR.db and GR.db.scopes and GR.db.scopes[key]
-    local nw = U.CountScopeWanted and U.CountScopeWanted(scope) or 0
-    local np = U.CountScopeProf and U.CountScopeProf(scope) or 0
-    lines[#lines + 1] = string.format("%s (%d / %d)", key, nw, np)
-  end
-  pendingScopeImport = { dest = dest, sources = candidates }
-  EnsureScopeImportPopup()
-  if StaticPopup_Show then
-    StaticPopup_Show("ANGRYMURLOCS_SCOPE_IMPORT", table.concat(lines, "\n"))
+  if ImportVerifiedForDest(dest) then
+    GR:SendMessage("GUILD_UPDATE")
   end
 end
 
 -- Club id / realm can be missing at Forever login; wait until GuildScopeKey is
--- final before sync/SV use. Activate scope, keep already-imported data, offer
--- new candidates, then first sync. Cancelled import does not block sync.
+-- final before sync/SV use. Activate scope, auto-import verified orphans, then sync.
 local function OnGuildScopeReady(oldKey, key)
   if GR.db then GR.db._recoveredWantedScopes = nil end
   MigrateLegacyToScope()
   if U.RecoverWantedScopes then U.RecoverWantedScopes() end
-  -- Activate current guild bucket (already-confirmed imports live here).
   if U.GetScopeDB then U.GetScopeDB() end
-  -- New orphans need Accept; rejection/close leaves sync running.
-  GR.OfferScopeImport()
-  if oldKey ~= key then
+  -- dest = ready key only (ClubIdFromScopeKey inside RunVerifiedScopeImport).
+  local imported = ImportVerifiedForDest(key)
+  if oldKey ~= key or imported then
     GR:SendMessage("GUILD_UPDATE")
   end
   if not initialSyncDone then
@@ -253,6 +211,9 @@ local function OnGuildScopeReady(oldKey, key)
     end
   end)
 end
+
+-- Tests fire PLAYER_ENTERING_WORLD / INITIAL_CLUBS_LOADED on this frame.
+GR.OnGuildScopeReady = OnGuildScopeReady
 
 local function TryWakeGuildScope()
   local key = U.GuildScopeKey and U.GuildScopeKey()
@@ -428,7 +389,6 @@ frame:SetScript("OnEvent", function(_, event, ...)
       if GR.Comm and GR.Comm.OnGuildLeft then
         GR.Comm:OnGuildLeft()
       end
-      pendingScopeImport = nil
       ArmGuildScopeWait()
       GR:SendMessage("GUILD_UPDATE")
     else
@@ -440,6 +400,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
     end
   end
 end)
+
+GR._bootFrame = frame
 
 SLASH_ANGRYMURLOCS1 = "/am"
 SLASH_ANGRYMURLOCS2 = "/angrymurlocs"
