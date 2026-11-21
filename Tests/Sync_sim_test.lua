@@ -295,6 +295,80 @@ do
   check("rate: <=21 per 10s (receiver limit 24)", maxIn10 <= 21, maxIn10)
 end
 
+local function WaitReqId(sim, client)
+  client.Wanted:RequestSync("full")
+  -- RequestSync coalesces 1.5s before sending SR.
+  sim:Run(3)
+  local P = client.GR.Protocol
+  for _, m in ipairs(sim.bus) do
+    if m.from == client.name and m.msg:sub(1, 3) == "SR|" then
+      local d = P.DecodeSR(m.msg:sub(4))
+      if d and d.reqId then return d.reqId, P end
+    end
+  end
+  return nil, P
+end
+
+-- Short sync page must not mark success / lastOkAt.
+do
+  local sim = Sim.New(61)
+  local carol = sim:AddClient("Carol")
+  local reqId, P = WaitReqId(sim, carol)
+  check("short-page: have reqId", reqId ~= nil, tostring(reqId))
+  local wall = sim:Wall()
+  local beforeOk = carol.Wanted:GetLastSyncOkAt() or 0
+  carol.GR.Comm:OnAddonMessage("GildenRadar", P.EncodeWSH("Carol", reqId, 2), "GUILD", "Alice-Realm")
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSOrigin(reqId, "Foe-Realm", "Alice", 1, 1, wall, "Elwynn"), "GUILD", "Alice-Realm")
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSE("Carol", reqId, 2, false, 0, ""), "GUILD", "Alice-Realm")
+  sim:Run(2)
+  check("short-page: level still 1", Sim.Level(carol, "Foe-Realm") == 1)
+  check("short-page: incomplete", SyncState(carol):find("incomplete") ~= nil, SyncState(carol))
+  check("short-page: lastOk untouched", (carol.Wanted:GetLastSyncOkAt() or 0) == beforeOk)
+end
+
+-- Full page still completes.
+do
+  local sim = Sim.New(62)
+  local carol = sim:AddClient("Carol")
+  local reqId, P = WaitReqId(sim, carol)
+  local wall = sim:Wall()
+  carol.GR.Comm:OnAddonMessage("GildenRadar", P.EncodeWSH("Carol", reqId, 2), "GUILD", "Alice-Realm")
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSOrigin(reqId, "Foe-Realm", "Alice", 1, 1, wall, "Elwynn"), "GUILD", "Alice-Realm")
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSOrigin(reqId, "Other-Realm", "Bob", 1, 1, wall, "Westfall"), "GUILD", "Alice-Realm")
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSE("Carol", reqId, 2, false, 0, ""), "GUILD", "Alice-Realm")
+  sim:Run(2)
+  check("full-page: complete", SyncState(carol):find("complete") ~= nil, SyncState(carol))
+  check("full-page: lastOk set", (carol.Wanted:GetLastSyncOkAt() or 0) > 0)
+end
+
+-- Legacy-0 entry header sight applies after first origin (not before).
+do
+  local sim = Sim.New(63)
+  local carol = sim:AddClient("Carol")
+  local reqId, P = WaitReqId(sim, carol)
+  local wall = sim:Wall()
+  local seenT = wall - 10
+  carol.GR.Comm:OnAddonMessage("GildenRadar", P.EncodeWSH("Carol", reqId, 2), "GUILD", "Alice-Realm")
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSEntry(reqId, "SightFoe-Realm", 0, seenT, "Elwynn", "Alice-Realm"), "GUILD", "Alice-Realm")
+  check("sight-header: no entry yet", Sim.Level(carol, "SightFoe-Realm") == 0)
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSOrigin(reqId, "SightFoe-Realm", "Alice", 1, 1, wall, "Elwynn"), "GUILD", "Alice-Realm")
+  carol.GR.Comm:OnAddonMessage("GildenRadar",
+    P.EncodeWSE("Carol", reqId, 2, false, 0, ""), "GUILD", "Alice-Realm")
+  sim:Run(2)
+  local e = carol.Wanted:State().wanted["SightFoe-Realm"]
+  check("sight-header: level 1", Sim.Level(carol, "SightFoe-Realm") == 1)
+  check("sight-header: lastSeenTime", e and e.lastSeenTime == seenT, e and e.lastSeenTime)
+  check("sight-header: zone", e and e.lastSeenZone == "Elwynn", e and e.lastSeenZone)
+  check("sight-header: complete", SyncState(carol):find("complete") ~= nil, SyncState(carol))
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")

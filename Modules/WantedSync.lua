@@ -23,15 +23,25 @@ local responder = P.NewResponder()
 local responderTicker
 local sync = { state = "idle" }
 local answering = {} -- "requester|reqId" -> true while our response is queued
+-- Entry headers (legacy 0 + sight) that arrived before any origin created the foe.
+local pendingHeaders = {} -- "reqId|killer" -> hdr table
 
 local function SyncStore()
   return Wanted:Scope().sync
+end
+
+local function ClearPendingHeaders()
+  for k in pairs(pendingHeaders) do pendingHeaders[k] = nil end
 end
 
 local function SetSyncState(state, extra)
   sync.state = state
   if extra then
     for k, v in pairs(extra) do sync[k] = v end
+  end
+  -- Pending sight headers belong to the active receiving page only.
+  if state ~= "receiving" then
+    ClearPendingHeaders()
   end
   if Wanted:Diag() then
     Wanted:Diag():Log("sync", "%s req=%s from=%s recv=%s", state, tostring(sync.reqId),
@@ -165,6 +175,13 @@ local function OnEnd(sender, data)
   if sync.responder and sender ~= sync.responder then return end
   sync.timerToken = nil
   local store = SyncStore()
+  local expected = tonumber(sync.expected) or tonumber(data.count) or 0
+  local received = tonumber(sync.received) or 0
+  if expected > 0 and received < expected then
+    -- Short page: do not advance cursor or mark last successful sync.
+    SetSyncState("incomplete", { responder = sender })
+    return
+  end
   if data.more then
     if (sync.pages or 0) < SYNC_AUTO_PAGES then
       SendSyncRequest(data.cursorT, data.cursorKey, sender)
@@ -179,6 +196,10 @@ local function OnEnd(sender, data)
   SetSyncState("done", { responder = sender })
 end
 
+local function HeaderKey(reqId, killer)
+  return tostring(reqId) .. "|" .. tostring(killer)
+end
+
 local function OnRecord(sender, data)
   if data.reqId == sync.reqId and (sync.state == "receiving" or sync.state == "waiting")
       and (not sync.responder or sync.responder == sender) then
@@ -187,13 +208,19 @@ local function OnRecord(sender, data)
   end
   local now = Wanted:Now()
   if data.kind == "E" then
-    local changed = Logic.MergeEntryHeader(Wanted:State(), cfg, data.killer, {
+    local hdr = {
       legacy = data.legacy,
       seenT = U.ClampTs(data.seenT, now) or 0,
       seenZone = data.seenZone,
       seenBy = U.NormalizeName(data.seenBy),
-    }, now)
-    if changed then Wanted:ScheduleRefresh() end
+    }
+    local changed = Logic.MergeEntryHeader(Wanted:State(), cfg, data.killer, hdr, now)
+    if changed then
+      Wanted:ScheduleRefresh()
+    elseif not Wanted:State().wanted[data.killer] then
+      -- Legacy 0 header before any origin: keep sight until MergeOrigin creates the entry.
+      pendingHeaders[HeaderKey(data.reqId, data.killer)] = hdr
+    end
     return
   end
   local r = Logic.MergeOrigin(Wanted:State(), cfg, data.killer, data.origin, data, now, {
@@ -203,6 +230,14 @@ local function OnRecord(sender, data)
     selfState = Wanted:SelfState(),
   })
   if r.ok then
+    local pk = HeaderKey(data.reqId, data.killer)
+    local pending = pendingHeaders[pk]
+    if pending then
+      pendingHeaders[pk] = nil
+      if Logic.MergeEntryHeader(Wanted:State(), cfg, data.killer, pending, now) then
+        -- sight applied onto the new entry
+      end
+    end
     Wanted:ScheduleRefresh()
   elseif r.reason ~= "dup" then
     Wanted:Reject(r.reason, "WS " .. tostring(data.killer))
