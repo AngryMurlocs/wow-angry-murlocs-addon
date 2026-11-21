@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Wanted and professions no longer look empty when the realm name is missing at login
 - Turning off death sharing no longer leaves a “dead” mark on a position update that was still waiting to send
 - Wanted sync no longer reports success when records are missing; first-time sightings keep zone and time after sync
 - Resetting toast look no longer stalls later death or level-up messages

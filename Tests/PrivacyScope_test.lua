@@ -221,6 +221,126 @@ do
   end
 end
 
+-- Empty GetNormalizedRealmName must fall back to GetRealmName (no ::Guild scope).
+do
+  local GOOD = "GoodRealm::Angry Murlocs"
+  local sim = Sim.New(9)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    [GOOD] = {
+      wanted = {
+        ["Enemy-Realm"] = { count = 3, legacy = 3, origins = {}, schema = 2 },
+      },
+      wantedHidden = {},
+      wantedSelf = {},
+      prof = {
+        cache = {
+          ["Mate-Realm"] = {
+            list = { { key = "alch", name = "Alchemy", skill = 100 } },
+            recipes = { alch = { ids = { 1 }, complete = true, epoch = 1, rev = 1 } },
+            time = 1,
+          },
+        },
+      },
+      sync = {},
+    },
+  }
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    extraFiles = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/Professions.lua" },
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "Good Realm" end,
+      UnitFullName = function(u)
+        if u == "player" then return "Alice", "GoodRealm" end
+        return nil
+      end,
+    },
+  })
+  local U = alice.GR.Util
+  check("empty-norm: RealmKey from GetRealmName", U.RealmKey() == "GoodRealm", tostring(U.RealmKey()))
+  check("empty-norm: GuildScopeKey", U.GuildScopeKey() == GOOD, tostring(U.GuildScopeKey()))
+  check("empty-norm: no ::Angry Murlocs key", alice.GR.db.scopes["::Angry Murlocs"] == nil)
+  check("empty-norm: wanted count", Sim.Level(alice, "Enemy-Realm") == 3, Sim.Level(alice, "Enemy-Realm"))
+  local prof = alice.GR:GetModule("Professions")
+  check("empty-norm: professions visible", prof:GetAll()["Mate-Realm"] ~= nil)
+end
+
+-- Both realm APIs empty: no new scope; lists appear once realm arrives.
+do
+  local GOOD = "LateRealm::Angry Murlocs"
+  local OTHER = "OtherRealm::Angry Murlocs"
+  local sim = Sim.New(10)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    [GOOD] = {
+      wanted = {
+        ["Foe-Realm"] = { count = 2, legacy = 2, origins = {}, schema = 2 },
+      },
+      wantedHidden = {},
+      wantedSelf = {},
+      prof = {
+        cache = {
+          ["Crafter-Realm"] = {
+            list = { { key = "tail", name = "Tailoring", skill = 50 } },
+            time = 1,
+          },
+        },
+      },
+      sync = {},
+    },
+    [OTHER] = {
+      wanted = {
+        ["OtherFoe-Realm"] = { count = 9, legacy = 9, origins = {}, schema = 2 },
+      },
+      wantedHidden = {},
+      wantedSelf = {},
+      prof = { cache = {} },
+      sync = {},
+    },
+  }
+  local norm, plain = "", ""
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    extraFiles = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/Professions.lua" },
+    env = {
+      GetNormalizedRealmName = function() return norm end,
+      GetRealmName = function() return plain end,
+      UnitFullName = function(u)
+        if u == "player" then return "Alice", (plain ~= "" and plain:gsub("%s", "") or nil) end
+        return nil
+      end,
+    },
+  })
+  local U = alice.GR.Util
+  local beforeKeys = {}
+  for k in pairs(alice.GR.db.scopes) do beforeKeys[k] = true end
+  check("boot-empty: RealmKey nil", U.RealmKey() == nil)
+  check("boot-empty: GuildScopeKey nil", U.GuildScopeKey() == nil)
+  check("boot-empty: GetScopeDB nil", U.GetScopeDB() == nil)
+  check("boot-empty: wanted empty view", Sim.Level(alice, "Foe-Realm") == 0)
+  local nKeys = 0
+  for k in pairs(alice.GR.db.scopes) do
+    nKeys = nKeys + 1
+    if not beforeKeys[k] then
+      fails = fails + 1
+      print("FAIL boot-empty: new scope " .. tostring(k))
+    end
+  end
+  check("boot-empty: no new scope keys", nKeys == 2, nKeys)
+
+  norm, plain = "LateRealm", "Late Realm"
+  check("boot-ready: RealmKey", U.RealmKey() == "LateRealm")
+  check("boot-ready: GuildScopeKey", U.GuildScopeKey() == GOOD)
+  check("boot-ready: wanted restored", Sim.Level(alice, "Foe-Realm") == 2, Sim.Level(alice, "Foe-Realm"))
+  local prof = alice.GR:GetModule("Professions")
+  check("boot-ready: professions restored", prof:GetAll()["Crafter-Realm"] ~= nil)
+  check("boot-ready: other realm untouched", Sim.Level(alice, "OtherFoe-Realm") == 0)
+  check("boot-ready: still no :: key", alice.GR.db.scopes["::Angry Murlocs"] == nil)
+  check("boot-ready: other guild scope kept", alice.GR.db.scopes[OTHER] ~= nil
+    and alice.GR.db.scopes[OTHER].wanted["OtherFoe-Realm"] ~= nil)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")

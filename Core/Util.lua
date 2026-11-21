@@ -34,12 +34,21 @@ function U.PlayerName()
   return name or UnitName("player") or "?"
 end
 
+-- Strip spaces; reject nil / empty / whitespace-only (Forever can return "").
+local function CleanRealm(raw)
+  if type(raw) ~= "string" then return nil end
+  local s = raw:gsub("%s", "")
+  if s == "" then return nil end
+  return s
+end
+
 function U.NormalizeName(name)
   if not name or name == "" then return name end
   if not name:find("-", 1, true) then
-    local realm = GetNormalizedRealmName and GetNormalizedRealmName() or (GetRealmName and GetRealmName())
+    local realm = CleanRealm(GetNormalizedRealmName and GetNormalizedRealmName())
+      or CleanRealm(GetRealmName and GetRealmName())
     if realm then
-      return name .. "-" .. tostring(realm):gsub("%s", "")
+      return name .. "-" .. realm
     end
   end
   return name
@@ -266,17 +275,21 @@ function U.UnescapeField(s)
   return tostring(s or ""):gsub("\\124", "|")
 end
 
+--- Normalized realm without spaces, or nil if both client APIs are empty/missing.
 function U.RealmKey()
-  local realm = GetNormalizedRealmName and GetNormalizedRealmName() or (GetRealmName and GetRealmName()) or "Unknown"
-  return tostring(realm):gsub("%s", "")
+  local realm = CleanRealm(GetNormalizedRealmName and GetNormalizedRealmName())
+  if realm then return realm end
+  return CleanRealm(GetRealmName and GetRealmName())
 end
 
 function U.GuildScopeKey()
+  local realm = U.RealmKey()
+  if not realm then return nil end
   local guild = GetGuildInfo and GetGuildInfo("player")
   if not guild or guild == "" then
     return nil
   end
-  return U.RealmKey() .. "::" .. tostring(guild)
+  return realm .. "::" .. tostring(guild)
 end
 
 -- Guild lead / officer for UI gates (UX). Positive hits only (OR):
@@ -384,11 +397,14 @@ end
 
 function U.GetScopeDB()
   if not GR.db then return nil end
+  local realm = U.RealmKey()
+  -- No inventing ::Guild / Unknown:: / empty-realm keys while the client is still booting.
+  if not realm then return nil end
   GR.db.scopes = GR.db.scopes or {}
   local key = U.GuildScopeKey()
   if not key then
-    -- Offline / no guild: ephemeral bucket (not persisted across guild joins meaningfully)
-    key = U.RealmKey() .. "::__none__"
+    -- Offline / no guild: ephemeral bucket on this realm only.
+    key = realm .. "::__none__"
   else
     U.RecoverWantedScopes()
   end

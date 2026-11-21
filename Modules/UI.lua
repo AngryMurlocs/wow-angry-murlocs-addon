@@ -667,8 +667,9 @@ local function CurrentWantedScopeKey()
     local k = U.GuildScopeKey()
     if k then return k end
   end
-  local realm = U.RealmKey and U.RealmKey() or "Realm"
-  return realm .. "::__none__"
+  local realm = U.RealmKey and U.RealmKey()
+  if realm then return realm .. "::__none__" end
+  return nil
 end
 
 local function CountWantedEntries(wanted)
