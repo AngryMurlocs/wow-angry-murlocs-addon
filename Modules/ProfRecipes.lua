@@ -1932,6 +1932,15 @@ local function ScheduleEmptyFallback(playerName, canonKey)
   end)
 end
 
+-- Test hooks (CLI only).
+function ProfRecipes:_ScheduleEmptyFallbackForTest(playerName, canonKey)
+  ScheduleEmptyFallback(playerName, CanonProfKey(canonKey))
+end
+
+function ProfRecipes:_HasEmptyFallbackForTest()
+  return emptyFallback ~= nil
+end
+
 function ProfRecipes:RequestAll(profKey, force, opts)
   opts = opts or {}
   if not IsInGuild or not IsInGuild() then return false, "no_guild" end
@@ -2063,6 +2072,19 @@ function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
   local prev = entry.recipes[data.profKey]
   local incomingEpoch = tonumber(data.epoch) or 0
   if incomingEpoch < 0 then incomingEpoch = 0 end
+  local incomingRev = tonumber(data.rev) or 0
+  -- Floor from unlearn/relearn (or prior accept) even when the cache row was cleared.
+  do
+    local bag = CatalogEpochBag()
+    local ownerKey = U.NormalizeName(sender)
+    local floor = bag and ownerKey and bag[ownerKey] and bag[ownerKey][data.profKey]
+    local Logic = GR.RecipeSyncLogic
+    if floor and Logic and Logic.CompareVersion then
+      if Logic.CompareVersion(floor, { epoch = incomingEpoch, rev = incomingRev }) > 0 then
+        return -- older than remembered minimum generation
+      end
+    end
+  end
   local prevEpoch = prev and tonumber(prev.epoch) or 0
   if prev and prev.complete and incomingEpoch < prevEpoch then
     return -- older owner generation
@@ -2111,9 +2133,13 @@ function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
     complete = true,
     epoch = incomingEpoch,
   }
+  ProfRecipes.RememberCatalogEpoch(sender, data.profKey, incomingEpoch, incomingRev)
   if emptyFallback and emptyFallback.canonKey == data.profKey then
     local open = catalogOpen
-    if open and open.profKey == data.profKey then
+    local senderKey = U.NormalizeName(sender)
+    if open and open.profKey == data.profKey
+        and senderKey and emptyFallback.playerName == senderKey
+        and open.playerName == emptyFallback.playerName then
       ProfRecipes:CancelEmptyFallback()
     end
   end
