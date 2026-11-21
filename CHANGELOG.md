@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.27
 
 - Wanted and profession lists show again when the realm name stays empty (Forever); confirm to restore older lists for this guild
 
