@@ -1,6 +1,6 @@
 # AngryMurlocs – Discord-Anleitung (Auszug)
 
-**Version 0.11.25.**
+**Version 0.11.26.**
 
 ## Todesmeldungen und Wanted
 
@@ -10,15 +10,18 @@
 
 **Wo steuern:** `/am` → Einstellungen → Freigaben → **Gilden-Tode teilen** (steuert auch Wanted-Meldungen).
 
+**Login (0.11.26):** Wanted und Berufe bleiben nach dem Einloggen sichtbar, auch wenn der Realmname kurz fehlt. Kurz warten, falls die Listen erst nach ein paar Sekunden nachziehen.
+
 ## Seltene Murloc-Rufe (Yell)
 
 **Nutzen:** Gelegentlich **schreit** dein Charakter per **Yell (/y)** — bei Gilden-Tod, Level-Up, Wanted, PvP, Beute, Erfolgen u. a., manchmal auch zwischendurch. Toasts und Addon-Sync bleiben unverändert.
 
 **Wo:** `/am` → Einstellungen → **Oberfläche** → **Murloc-Rufe**
 - **Aus** (Standard) / **Nerglish** (klassische Laute) / **Schmäh** (österreichische Mischung)
-- **Öffentlich testen (/y)** — Spieler in der Nähe hören mit; bei Aus testest du Nerglish
+- **Öffentlich testen (/y)** — Spieler in der Nähe hören mit; bei Aus testest du Nerglish; Test schreit sofort
+- Tasten: Esc → **Tastaturbelegung** → AddOns → **AngryMurlocs** → Öffentlich testen (/y) bzw. Rufstil wechseln (Aus / Nerglish / Schmäh)
 
-**Grenze:** Selten (Chance + Abklingzeit, max. wenige pro Stunde). Nur Yell in Hörweite, kein Gilden-Chat.
+**Grenze:** Selten (Chance + Abklingzeit, max. wenige pro Stunde). Nur Yell in Hörweite, kein Gilden-Chat. Draußen wartet der automatische Ruf auf Klick oder Taste (kein Addon-Block); der öffentliche Test bleibt sofort.
 
 ## Rezepte in Unterkategorien
 
