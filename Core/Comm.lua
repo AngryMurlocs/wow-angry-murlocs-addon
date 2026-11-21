@@ -107,6 +107,18 @@ local function StripSightCoords(payload)
   return string.format("SIGHT|%s|%s|%s", parts[1] or "", parts[2] or "", parts[3] or "")
 end
 
+--- Clear dead bit on queued POS when death sharing was turned off after enqueue.
+--- Wire: POS|mapId|x|y|zone|dead|class|level
+local function StripPosDeadFlag(payload)
+  if type(payload) ~= "string" then return payload end
+  if payload:sub(1, 4) ~= "POS|" then return payload end
+  local parts = U.SplitKeepEmpty(payload:sub(5), "|")
+  if #parts < 5 then return payload end
+  if parts[5] ~= "1" then return payload end
+  parts[5] = "0"
+  return "POS|" .. table.concat(parts, "|")
+end
+
 local function Sweep(now)
   if (now - lastSweep) < SWEEP_EVERY then return end
   lastSweep = now
@@ -224,6 +236,9 @@ local function Drain()
     if item then
       if item.category == "sight" and not Comm:CanShareSightCoords() then
         item.payload = StripSightCoords(item.payload)
+      end
+      if item.category == "pos" and not Comm:Allowed("death") then
+        item.payload = StripPosDeadFlag(item.payload)
       end
       lastSendAt = now
       local status = RawSend(item.payload)

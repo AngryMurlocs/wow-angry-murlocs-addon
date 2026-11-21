@@ -145,6 +145,82 @@ do
   check("leave: receive ignored", select(1, Comm:Peers(600)) == 0)
 end
 
+-- Queued POS keeps coords after shareDeath off, but dead bit must clear at drain.
+do
+  local RESULT = {
+    Success = 0,
+    AddonMessageThrottle = 3,
+  }
+  local function LastPos(sim)
+    for i = #sim.bus, 1, -1 do
+      local m = sim.bus[i]
+      if m.msg:match("^POS|") then return m.msg end
+    end
+  end
+  local function DeadField(msg)
+    if type(msg) ~= "string" then return nil end
+    local parts = {}
+    for p in (msg:sub(5) .. "|"):gmatch("([^|]*)|") do
+      parts[#parts + 1] = p
+    end
+    return parts[5]
+  end
+
+  do
+    local sim = Sim.New(7)
+    local alice
+    local block = true
+    alice = sim:AddClient("Alice", {
+      env = {
+        Enum = { SendAddonMessageResult = RESULT },
+        C_ChatInfo = {
+          RegisterAddonMessagePrefix = function() return true end,
+          SendAddonMessage = function(prefix, msg, channel)
+            if block then return RESULT.AddonMessageThrottle end
+            sim:Deliver(alice, prefix, msg, channel)
+            return RESULT.Success
+          end,
+        },
+      },
+    })
+    check("dead-strip: enqueue", alice.GR.Comm:Send(
+      "POS|1415|0.5000|0.5000|Elwynn|1|MAGE|60", "pos", "pos") == true)
+    check("dead-strip: queued while blocked", alice.GR.Comm:QueueSize() >= 1)
+    alice.GR.db.privacy.shareDeath = false
+    alice.GR:SendMessage("PRIVACY_CHANGED")
+    block = false
+    sim:Run(5)
+    local msg = LastPos(sim)
+    check("dead-strip: POS still sent", msg ~= nil, msg)
+    check("dead-strip: dead bit cleared", DeadField(msg) == "0", msg)
+  end
+
+  do
+    local sim = Sim.New(8)
+    local alice
+    local block = true
+    alice = sim:AddClient("Alice", {
+      env = {
+        Enum = { SendAddonMessageResult = RESULT },
+        C_ChatInfo = {
+          RegisterAddonMessagePrefix = function() return true end,
+          SendAddonMessage = function(prefix, msg, channel)
+            if block then return RESULT.AddonMessageThrottle end
+            sim:Deliver(alice, prefix, msg, channel)
+            return RESULT.Success
+          end,
+        },
+      },
+    })
+    alice.GR.Comm:Send("POS|1415|0.5000|0.5000|Elwynn|1|MAGE|60", "pos", "pos")
+    check("dead-keep: shareDeath still on", alice.GR.db.privacy.shareDeath == true)
+    block = false
+    sim:Run(5)
+    local msg = LastPos(sim)
+    check("dead-keep: dead bit preserved", DeadField(msg) == "1", msg)
+  end
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")
