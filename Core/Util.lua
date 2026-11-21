@@ -282,14 +282,71 @@ function U.RealmKey()
   return CleanRealm(GetRealmName and GetRealmName())
 end
 
-function U.GuildScopeKey()
-  local realm = U.RealmKey()
-  if not realm then return nil end
+function U.ClubApiPresent()
+  return C_Club ~= nil and type(C_Club.GetGuildClubId) == "function"
+end
+
+--- Stable guild club id as string, or nil if missing / not ready.
+function U.GuildId()
+  if not U.ClubApiPresent() then return nil end
+  local id = C_Club.GetGuildClubId()
+  if id == nil or id == false then return nil end
+  if id == 0 or id == "0" then return nil end
+  local s = tostring(id)
+  if s == "" then return nil end
+  return s
+end
+
+function U.PlayerGuildName()
   local guild = GetGuildInfo and GetGuildInfo("player")
-  if not guild or guild == "" then
+  if not guild or guild == "" then return nil end
+  return tostring(guild)
+end
+
+function U.IsClubScopeKey(key)
+  return type(key) == "string" and string.sub(key, 1, 5) == "club:"
+end
+
+function U.ClubIdFromScopeKey(key)
+  if not U.IsClubScopeKey(key) then return nil end
+  return string.sub(key, 6)
+end
+
+--- Active guild SV key: club:<id> when club API yields an id; else realm::guild
+--- when no club API. Requires live membership — stale GetGuildClubId after leave
+--- does not keep a key. While club API exists but id is not ready, returns nil
+--- (do not open Realm::Guild as a temporary bucket).
+function U.GuildScopeKey()
+  if IsInGuild and not IsInGuild() then
     return nil
   end
-  return realm .. "::" .. tostring(guild)
+  local guild = U.PlayerGuildName()
+  if not guild then return nil end
+  local id = U.GuildId()
+  if id then
+    return "club:" .. id
+  end
+  if U.ClubApiPresent() then
+    return nil
+  end
+  local realm = U.RealmKey()
+  if not realm then return nil end
+  return realm .. "::" .. guild
+end
+
+function U.RefreshGuildDisplayName(scope)
+  if type(scope) ~= "table" then return end
+  local name = U.PlayerGuildName()
+  if name then
+    scope.guildDisplayName = name
+  end
+  local id = U.GuildId()
+  if id and GR.db then
+    GR.db.clubNames = GR.db.clubNames or {}
+    if name then
+      GR.db.clubNames[id] = name
+    end
+  end
 end
 
 -- Guild lead / officer for UI gates (UX). Positive hits only (OR):
@@ -317,6 +374,34 @@ function U.IsGuildOfficer()
   return false
 end
 
+local function DeepCopyValue(src)
+  if type(src) ~= "table" then return src end
+  local dst = {}
+  for k, v in pairs(src) do
+    dst[k] = DeepCopyValue(v)
+  end
+  return dst
+end
+
+local function FoldCatalogVer(dstBag, srcBag)
+  if type(srcBag) ~= "table" then return end
+  for owner, bag in pairs(srcBag) do
+    if type(owner) == "string" and type(bag) == "table" then
+      dstBag[owner] = dstBag[owner] or {}
+      for pk, ver in pairs(bag) do
+        if type(pk) == "string" and type(ver) == "table" then
+          local cur = dstBag[owner][pk]
+          local ce, cr = tonumber(cur and cur.epoch) or 0, tonumber(cur and cur.rev) or 0
+          local ve, vr = tonumber(ver.epoch) or 0, tonumber(ver.rev) or 0
+          if ve > ce or (ve == ce and vr > cr) then
+            dstBag[owner][pk] = { epoch = ve, rev = vr }
+          end
+        end
+      end
+    end
+  end
+end
+
 function U.EnsureScopeTable(scope)
   scope.wanted = scope.wanted or {}
   scope.wantedHidden = scope.wantedHidden or {}
@@ -338,21 +423,7 @@ function U.EnsureScopeTable(scope)
   -- Fold any earlier catalogEpoch bag into recipeSync.catalogVersions (never lower).
   local legacy = scope.prof.catalogEpoch
   if type(legacy) == "table" then
-    for owner, bag in pairs(legacy) do
-      if type(owner) == "string" and type(bag) == "table" then
-        rs.catalogVersions[owner] = rs.catalogVersions[owner] or {}
-        for pk, ver in pairs(bag) do
-          if type(pk) == "string" and type(ver) == "table" then
-            local cur = rs.catalogVersions[owner][pk]
-            local ce, cr = tonumber(cur and cur.epoch) or 0, tonumber(cur and cur.rev) or 0
-            local ve, vr = tonumber(ver.epoch) or 0, tonumber(ver.rev) or 0
-            if ve > ce or (ve == ce and vr > cr) then
-              rs.catalogVersions[owner][pk] = { epoch = ve, rev = vr }
-            end
-          end
-        end
-      end
-    end
+    FoldCatalogVer(rs.catalogVersions, legacy)
     scope.prof.catalogEpoch = nil
   end
   scope.sync = scope.sync or {}
@@ -364,8 +435,18 @@ local function ScopeKeyFold(key)
   return string.lower(tostring(key or "")):gsub("%s", "")
 end
 
+local function FoldGuildName(name)
+  return string.lower(tostring(name or "")):gsub("%s", "")
+end
+
+local function GuildNameFromRealmScopeKey(key)
+  if type(key) ~= "string" or U.IsClubScopeKey(key) then return nil end
+  return key:match("::(.+)$")
+end
+
 -- Fold __none__ (no-guild period on this realm) and same realm+guild key variants
 -- into the current guild scope. Other guilds and other realms are never touched.
+-- Club scopes do not auto-fold realm orphans (those need explicit import).
 function U.RecoverWantedScopes()
   if not GR.db then return end
   if GR.db._recoveredWantedScopes then return end
@@ -378,8 +459,15 @@ function U.RecoverWantedScopes()
     GR.db.scopes[guildKey] = scope
   end
   U.EnsureScopeTable(scope)
+  U.RefreshGuildDisplayName(scope)
+  if U.IsClubScopeKey(guildKey) then
+    GR.db._recoveredWantedScopes = true
+    return
+  end
+  local realm = U.RealmKey()
+  if not realm then return end
   local logic = GR.WantedLogic
-  local noneKey = U.RealmKey() .. "::__none__"
+  local noneKey = realm .. "::__none__"
   local guildFold = ScopeKeyFold(guildKey)
   for key, other in pairs(GR.db.scopes) do
     local merge = key ~= guildKey and type(other) == "table"
@@ -397,23 +485,273 @@ end
 
 function U.GetScopeDB()
   if not GR.db then return nil end
-  local realm = U.RealmKey()
-  -- No inventing ::Guild / Unknown:: / empty-realm keys while the client is still booting.
-  if not realm then return nil end
   GR.db.scopes = GR.db.scopes or {}
   local key = U.GuildScopeKey()
-  if not key then
-    -- Offline / no guild: ephemeral bucket on this realm only.
-    key = realm .. "::__none__"
-  else
+  if key then
     U.RecoverWantedScopes()
+    local scope = GR.db.scopes[key]
+    if not scope then
+      scope = {}
+      GR.db.scopes[key] = scope
+    end
+    U.EnsureScopeTable(scope)
+    U.RefreshGuildDisplayName(scope)
+    return scope
   end
+  -- In guild but waiting for club id: no Realm::Guild / empty invent.
+  if U.PlayerGuildName() and U.ClubApiPresent() then
+    return nil
+  end
+  local realm = U.RealmKey()
+  -- No inventing ::Guild / Unknown:: / empty-realm keys while booting.
+  if not realm then return nil end
+  -- Offline / no guild: ephemeral bucket on this realm only.
+  key = realm .. "::__none__"
   local scope = GR.db.scopes[key]
   if not scope then
     scope = {}
     GR.db.scopes[key] = scope
   end
   return U.EnsureScopeTable(scope)
+end
+
+--- Name-matched realm/`::` orphans for the current guild. Club keys excluded.
+--- Already-imported sources are omitted. Name is display-only, not proof.
+function U.ListImportCandidates()
+  local dest = U.GuildScopeKey()
+  if not dest or not GR.db then return {} end
+  local guild = U.PlayerGuildName()
+  if not guild then return {} end
+  local fold = FoldGuildName(guild)
+  local imported = GR.db.scopeImported or {}
+  local out = {}
+  for key, scope in pairs(GR.db.scopes or {}) do
+    if key ~= dest and type(scope) == "table" and not imported[key] and not U.IsClubScopeKey(key) then
+      local srcGuild = GuildNameFromRealmScopeKey(key)
+      if srcGuild and FoldGuildName(srcGuild) == fold then
+        out[#out + 1] = key
+      end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+function U.CountScopeWanted(scope)
+  local n = 0
+  if type(scope) == "table" and type(scope.wanted) == "table" then
+    for _ in pairs(scope.wanted) do n = n + 1 end
+  end
+  return n
+end
+
+function U.CountScopeProf(scope)
+  local n = 0
+  local cache = scope and scope.prof and scope.prof.cache
+  if type(cache) == "table" then
+    for _ in pairs(cache) do n = n + 1 end
+  end
+  return n
+end
+
+-- wantedHidden values are { level, t }. Never store bare true (IsHidden reads h.level).
+local function MergeHiddenBag(dst, src)
+  if type(src) ~= "table" then return end
+  for k, h in pairs(src) do
+    if type(h) == "table" then
+      local level = tonumber(h.level)
+      if level then
+        local t = tonumber(h.t) or 0
+        local cur = dst[k]
+        if type(cur) ~= "table" then
+          dst[k] = { level = level, t = t }
+        else
+          local cl = tonumber(cur.level) or 0
+          local ct = tonumber(cur.t) or 0
+          if level > cl or (level == cl and t > ct) then
+            dst[k] = { level = level, t = t }
+          end
+        end
+      end
+    end
+  end
+end
+
+local function MergeWantedSelfBag(dst, src)
+  if type(src) ~= "table" then return end
+  for charKey, bag in pairs(src) do
+    if type(charKey) == "string" and type(bag) == "table" then
+      local cur = dst[charKey]
+      if type(cur) ~= "table" then
+        cur = { seq = 0, kills = {} }
+        dst[charKey] = cur
+      end
+      cur.kills = type(cur.kills) == "table" and cur.kills or {}
+      local sseq = tonumber(bag.seq) or 0
+      if sseq > (tonumber(cur.seq) or 0) then
+        cur.seq = sseq
+      end
+      if type(bag.kills) == "table" then
+        for kk, rec in pairs(bag.kills) do
+          if type(rec) == "table" then
+            local sn = tonumber(rec.n) or 0
+            local st = tonumber(rec.t) or 0
+            local mine = cur.kills[kk]
+            if type(mine) ~= "table" then
+              cur.kills[kk] = { n = sn, t = st }
+            else
+              local mn = tonumber(mine.n) or 0
+              local mt = tonumber(mine.t) or 0
+              cur.kills[kk] = { n = math.max(mn, sn), t = math.max(mt, st) }
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+local function MergeRecipeMap(dstRecipes, srcRecipes)
+  if type(srcRecipes) ~= "table" then return end
+  dstRecipes = dstRecipes or {}
+  for pk, bag in pairs(srcRecipes) do
+    if type(pk) == "string" and type(bag) == "table" then
+      local cur = dstRecipes[pk]
+      local ce, cr = tonumber(cur and cur.epoch) or 0, tonumber(cur and cur.rev) or 0
+      local ve, vr = tonumber(bag.epoch) or 0, tonumber(bag.rev) or 0
+      if not cur or ve > ce or (ve == ce and vr > cr) then
+        dstRecipes[pk] = DeepCopyValue(bag)
+      end
+    end
+  end
+  return dstRecipes
+end
+
+local function MergeProfCacheBag(dstCache, srcCache)
+  if type(srcCache) ~= "table" then return end
+  for owner, entry in pairs(srcCache) do
+    if type(owner) == "string" and type(entry) == "table" then
+      local cur = dstCache[owner]
+      if type(cur) ~= "table" then
+        dstCache[owner] = DeepCopyValue(entry)
+      else
+        local st = tonumber(entry.time) or 0
+        local ct = tonumber(cur.time) or 0
+        if st > ct then
+          if entry.list ~= nil then
+            cur.list = DeepCopyValue(entry.list)
+          end
+          cur.time = entry.time
+        end
+        -- Recipe catalogs: epoch/rev only; never dropped by a newer list timestamp.
+        if type(entry.recipes) == "table" then
+          cur.recipes = MergeRecipeMap(cur.recipes or {}, entry.recipes)
+        end
+      end
+    end
+  end
+end
+
+local function MergeRecipeSyncBag(dstScope, srcScope)
+  U.EnsureScopeTable(dstScope)
+  local srs = srcScope and srcScope.prof and srcScope.prof.recipeSync
+  if type(srs) ~= "table" then
+    local legacy = srcScope and srcScope.prof and srcScope.prof.catalogEpoch
+    if type(legacy) == "table" then
+      FoldCatalogVer(dstScope.prof.recipeSync.catalogVersions, legacy)
+    end
+    return
+  end
+  local drs = dstScope.prof.recipeSync
+  FoldCatalogVer(drs.catalogVersions, srs.catalogVersions)
+  if type(srs.profiles) == "table" then
+    for k, v in pairs(srs.profiles) do
+      if drs.profiles[k] == nil then
+        drs.profiles[k] = DeepCopyValue(v)
+      end
+    end
+  end
+end
+
+local function MergeScopeInto(dest, src)
+  local logic = GR.WantedLogic
+  if type(src.wanted) == "table" and logic and logic.MergeEntryInto then
+    for k, v in pairs(src.wanted) do
+      local copy = DeepCopyValue(v)
+      if logic.MigrateEntryV2 then logic.MigrateEntryV2(copy) end
+      dest.wanted[k] = logic.MergeEntryInto(dest.wanted[k], copy)
+    end
+  end
+  if type(src.wantedHidden) == "table" then
+    MergeHiddenBag(dest.wantedHidden, src.wantedHidden)
+  end
+  if type(src.wantedSelf) == "table" then
+    MergeWantedSelfBag(dest.wantedSelf, src.wantedSelf)
+  end
+  if type(src.prof) == "table" and type(src.prof.cache) == "table" then
+    MergeProfCacheBag(dest.prof.cache, src.prof.cache)
+  end
+  MergeRecipeSyncBag(dest, src)
+end
+
+--- Copy-merge one orphan scope into the current guild scope. Originals untouched.
+--- Merges into a deep copy of dest and publishes only after full success.
+--- expectedDestKey: if set, abort when live GuildScopeKey differs (guild switched).
+--- Returns ok, errCode.
+function U.ImportScope(srcKey, expectedDestKey)
+  if not GR.db then return false, "no_db" end
+  local destKey = U.GuildScopeKey()
+  if not destKey then return false, "no_dest" end
+  if expectedDestKey and expectedDestKey ~= destKey then
+    return false, "dest_changed"
+  end
+  if type(srcKey) ~= "string" or srcKey == "" or srcKey == destKey then
+    return false, "bad_src"
+  end
+  if U.IsClubScopeKey(srcKey) then
+    return false, "other_club"
+  end
+  GR.db.scopeImported = GR.db.scopeImported or {}
+  if GR.db.scopeImported[srcKey] then
+    return false, "already"
+  end
+  local src = GR.db.scopes and GR.db.scopes[srcKey]
+  if type(src) ~= "table" then return false, "missing" end
+
+  GR.db.scopes = GR.db.scopes or {}
+  local live = GR.db.scopes[destKey]
+  local draft = DeepCopyValue(type(live) == "table" and live or {})
+  U.EnsureScopeTable(draft)
+
+  if not pcall(MergeScopeInto, draft, src) then
+    return false, "merge_failed"
+  end
+  -- Re-check membership/dest before publish (guild may have changed mid-merge).
+  local liveKey = U.GuildScopeKey()
+  if not liveKey or liveKey ~= destKey then
+    return false, "dest_changed"
+  end
+  if expectedDestKey and expectedDestKey ~= liveKey then
+    return false, "dest_changed"
+  end
+
+  GR.db.scopes[destKey] = draft
+  GR.db.scopeImported[srcKey] = destKey
+  U.RefreshGuildDisplayName(draft)
+  return true
+end
+
+function U.ImportScopes(srcKeys, expectedDestKey)
+  if type(srcKeys) ~= "table" then return false, "bad_src" end
+  local any = false
+  for i = 1, #srcKeys do
+    local ok, err = U.ImportScope(srcKeys[i], expectedDestKey)
+    if err == "dest_changed" or err == "merge_failed" then
+      return false, err
+    end
+    if ok then any = true end
+  end
+  return any, any and nil or "none"
 end
 
 -- Pixel column helpers (proportional fonts break %-Ns padding)
