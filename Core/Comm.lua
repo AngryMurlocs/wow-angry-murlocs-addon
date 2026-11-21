@@ -213,9 +213,9 @@ local function Drain()
     local item = queue:Pop(now)
     local curScope = U.GuildScopeKey and U.GuildScopeKey()
     while item do
-      -- Scoped ops send only while the current guild key matches exactly
-      -- (nil current or different guild → drop, including queued fragments).
-      if item.scopeKey ~= nil and item.scopeKey ~= curScope then
+      -- Guild ops require a stamped scope that still matches the live key exactly.
+      -- Nil stamp or nil/mismatched current key → drop (incl. queued fragments).
+      if item.scopeKey == nil or item.scopeKey ~= curScope then
         FailOp(item.operationId, "scope_mismatch")
         if not item.operationId then
           Reject("scope_mismatch", item.prio)
@@ -323,20 +323,24 @@ function Comm:Send(payload, prio, category, opts)
   opts = type(opts) == "table" and opts or nil
   if type(payload) ~= "string" or payload == "" then return false end
   if not IsInGuild or not IsInGuild() then return false end
+  local curScope = U.GuildScopeKey and U.GuildScopeKey() or nil
+  if not curScope then
+    Reject("no_scope", prio)
+    return false
+  end
   if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then return false end
   if not Comm:Allowed(category) then
     Reject("privacy", category)
     return false
   end
   local scopeKey = opts and opts.scopeKey
-  local curScope = U.GuildScopeKey and U.GuildScopeKey() or nil
   if scopeKey ~= nil then
-    -- Explicit scope: require an exact match (nil current fails).
+    -- Explicit scope: require an exact match with the live guild key.
     if scopeKey ~= curScope then
       Reject("scope_mismatch", prio)
       return false
     end
-  elseif U.GuildScopeKey then
+  else
     scopeKey = curScope
   end
   local msgs = Fragment(payload)
@@ -820,6 +824,8 @@ function Comm:OnAddonMessage(prefix, message, channel, sender)
   if prefix ~= GR.PREFIX and prefix ~= GR.PREFIX_NEW then return end
   if channel ~= "GUILD" then return end
   if not IsInGuild or not IsInGuild() then return end
+  -- No active guild scope (club pending / left): ignore all guild wire traffic.
+  if not U.GuildScopeKey or not U.GuildScopeKey() then return end
   if type(message) ~= "string" or message == "" or #message > MAX_RECV then return end
 
   sender = U.NormalizeName(sender)

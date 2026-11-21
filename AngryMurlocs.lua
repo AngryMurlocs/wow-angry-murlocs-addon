@@ -12,8 +12,9 @@ local SCHEMA = 2
 -- not on every loading screen. Random delay spreads simultaneous logins.
 local initialSyncDone = false
 local guildSyncPending = false
-local realmWaitPending = false
+local guildScopeWaitPending = false
 local lastGuildKey
+local pendingScopeImport -- { dest = key, sources = { ... } }
 
 local function RunGuildSync()
   if not IsInGuild or not IsInGuild() then return end
@@ -166,11 +167,77 @@ local function MigrateLegacyToScope()
   end
 end
 
--- Realm can be "" at Forever login; wait until GuildScopeKey is real before sync/SV use.
+local function EnsureScopeImportPopup()
+  if not StaticPopupDialogs then return end
+  if StaticPopupDialogs["ANGRYMURLOCS_SCOPE_IMPORT"] then return end
+  StaticPopupDialogs["ANGRYMURLOCS_SCOPE_IMPORT"] = {
+    text = "%s",
+    button1 = ACCEPT or "Accept",
+    button2 = CANCEL or "Cancel",
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    OnAccept = function()
+      local pending = pendingScopeImport
+      pendingScopeImport = nil
+      if not pending or not U.ImportScopes then return end
+      local live = U.GuildScopeKey and U.GuildScopeKey()
+      if not live or live ~= pending.dest then
+        U.Print(U.L("SCOPE_IMPORT_ABORT"))
+        if GR.OfferScopeImport then GR.OfferScopeImport() end
+        return
+      end
+      local ok, err = U.ImportScopes(pending.sources, pending.dest)
+      if err == "dest_changed" then
+        U.Print(U.L("SCOPE_IMPORT_ABORT"))
+        if GR.OfferScopeImport then GR.OfferScopeImport() end
+        return
+      end
+      if ok then
+        U.Print(U.L("SCOPE_IMPORT_DONE"))
+        GR:SendMessage("GUILD_UPDATE")
+      end
+    end,
+    OnCancel = function()
+      pendingScopeImport = nil
+    end,
+  }
+end
+
+-- Offer confirmed import of name-matched realm orphans into the active club/realm scope.
+function GR.OfferScopeImport()
+  if not U.ListImportCandidates or not U.GuildScopeKey then return end
+  local dest = U.GuildScopeKey()
+  if not dest then return end
+  local candidates = U.ListImportCandidates()
+  if #candidates == 0 then return end
+  local lines = { U.L("SCOPE_IMPORT_PROMPT") }
+  for i = 1, #candidates do
+    local key = candidates[i]
+    local scope = GR.db and GR.db.scopes and GR.db.scopes[key]
+    local nw = U.CountScopeWanted and U.CountScopeWanted(scope) or 0
+    local np = U.CountScopeProf and U.CountScopeProf(scope) or 0
+    lines[#lines + 1] = string.format("%s (%d / %d)", key, nw, np)
+  end
+  pendingScopeImport = { dest = dest, sources = candidates }
+  EnsureScopeImportPopup()
+  if StaticPopup_Show then
+    StaticPopup_Show("ANGRYMURLOCS_SCOPE_IMPORT", table.concat(lines, "\n"))
+  end
+end
+
+-- Club id / realm can be missing at Forever login; wait until GuildScopeKey is
+-- final before sync/SV use. Activate scope, keep already-imported data, offer
+-- new candidates, then first sync. Cancelled import does not block sync.
 local function OnGuildScopeReady(oldKey, key)
   if GR.db then GR.db._recoveredWantedScopes = nil end
   MigrateLegacyToScope()
   if U.RecoverWantedScopes then U.RecoverWantedScopes() end
+  -- Activate current guild bucket (already-confirmed imports live here).
+  if U.GetScopeDB then U.GetScopeDB() end
+  -- New orphans need Accept; rejection/close leaves sync running.
+  GR.OfferScopeImport()
   if oldKey ~= key then
     GR:SendMessage("GUILD_UPDATE")
   end
@@ -197,19 +264,19 @@ local function TryWakeGuildScope()
   return true
 end
 
-local function ArmRealmWait()
-  if realmWaitPending then return end
+local function ArmGuildScopeWait()
+  if guildScopeWaitPending then return end
   if TryWakeGuildScope() then return end
-  realmWaitPending = true
+  guildScopeWaitPending = true
   local tries = 0
   local function tick()
     tries = tries + 1
     if TryWakeGuildScope() then
-      realmWaitPending = false
+      guildScopeWaitPending = false
       return
     end
     if tries >= 30 then
-      realmWaitPending = false
+      guildScopeWaitPending = false
       return
     end
     C_Timer.After(2, tick)
@@ -263,6 +330,8 @@ frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("CHAT_MSG_ADDON")
 frame:RegisterEvent("PLAYER_GUILD_UPDATE")
+-- GetGuildClubId requires clubs initialized (Forever ClubDocumentation).
+U.SafeRegisterEvent(frame, "INITIAL_CLUBS_LOADED")
 
 frame:SetScript("OnEvent", function(_, event, ...)
   if event == "ADDON_LOADED" then
@@ -335,19 +404,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "PLAYER_LOGIN" then
     GR:EnableModules()
     U.Print(string.format(U.L("LOADED"), GR.VERSION))
-  elseif event == "PLAYER_ENTERING_WORLD" then
+  elseif event == "PLAYER_ENTERING_WORLD" or event == "INITIAL_CLUBS_LOADED" then
     if not initialSyncDone then
-      if U.GuildScopeKey and U.GuildScopeKey() then
-        initialSyncDone = true
-        lastGuildKey = U.GuildScopeKey()
-        ScheduleGuildSync(4)
-        C_Timer.After(2, function()
-          if GR.Comm and GR.Comm.AnnounceVersion then
-            GR.Comm:AnnounceVersion()
-          end
-        end)
-      else
-        ArmRealmWait()
+      if not TryWakeGuildScope() then
+        ArmGuildScopeWait()
       end
     else
       TryWakeGuildScope()
@@ -356,23 +416,27 @@ frame:SetScript("OnEvent", function(_, event, ...)
     GR.Comm:OnAddonMessage(...)
   elseif event == "PLAYER_GUILD_UPDATE" then
     local key = U.GuildScopeKey()
-    if key == lastGuildKey then
-      if not key then ArmRealmWait() end
+    local oldKey = lastGuildKey
+    if key == oldKey then
+      -- Still waiting for club id while guilded.
+      if not key then ArmGuildScopeWait() end
       return
     end
-    local oldKey = lastGuildKey
     lastGuildKey = key
-    if not key and GR.Comm and GR.Comm.OnGuildLeft then
-      GR.Comm:OnGuildLeft()
-      ArmRealmWait()
-    elseif oldKey and GR.Comm and GR.Comm.PurgeByScope then
-      -- Drop queued ops stamped with the previous guild scope (foundation §3).
-      GR.Comm:PurgeByScope(oldKey)
-    end
-    if key then
-      OnGuildScopeReady(oldKey, key)
-    else
+    if not key then
+      -- Leave (including stale club API still returning an id): drop views + wire.
+      if GR.Comm and GR.Comm.OnGuildLeft then
+        GR.Comm:OnGuildLeft()
+      end
+      pendingScopeImport = nil
+      ArmGuildScopeWait()
       GR:SendMessage("GUILD_UPDATE")
+    else
+      -- Guild switch or first ready key: full reset of prior guild wire state.
+      if oldKey and GR.Comm and GR.Comm.OnGuildLeft then
+        GR.Comm:OnGuildLeft()
+      end
+      OnGuildScopeReady(oldKey, key)
     end
   end
 end)
@@ -425,6 +489,11 @@ SlashCmdList["ANGRYMURLOCS"] = function(msg)
     if ui and ui.RunGuildDataSync then
       ui:RunGuildDataSync()
     end
+    return
+  end
+
+  if lower == "import" then
+    GR.OfferScopeImport()
     return
   end
 

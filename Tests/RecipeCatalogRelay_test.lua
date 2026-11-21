@@ -403,6 +403,39 @@ do
     summary and tostring(summary.catalogs))
 end
 
+-- Same guild name, different club ids: no catalog bus cross-talk.
+do
+  local sim = Sim.New(90)
+  local seen = { Bob = 0, Carol = 0 }
+  local alice = sim:AddClient("Alice", {
+    guild = "Angry Murlocs", guildClubId = 301,
+    extraFiles = { "Modules/Professions.lua", "Modules/ProfRecipes.lua" },
+  })
+  local bob = sim:AddClient("Bob", {
+    guild = "Angry Murlocs", guildClubId = 301,
+    extraFiles = { "Modules/Professions.lua", "Modules/ProfRecipes.lua" },
+  })
+  local carol = sim:AddClient("Carol", {
+    guild = "Angry Murlocs", guildClubId = 302,
+    extraFiles = { "Modules/Professions.lua", "Modules/ProfRecipes.lua" },
+  })
+  local function wrap(c)
+    local orig = c.GR.Comm.OnAddonMessage
+    c.GR.Comm.OnAddonMessage = function(self, prefix, message, channel, sender)
+      seen[c.name] = (seen[c.name] or 0) + 1
+      return orig(self, prefix, message, channel, sender)
+    end
+  end
+  wrap(bob)
+  wrap(carol)
+  local scope = alice.GR.Util.GuildScopeKey()
+  check("club-bus: alice club scope", scope == "club:301", tostring(scope))
+  alice.GR.Comm:Send("PROFR|1|alch|1|1|1|1|1|1", "data", "prof", { scopeKey = scope })
+  sim:Run(5)
+  check("club-bus: same club receives", seen.Bob >= 1, seen.Bob)
+  check("club-bus: other club isolated", seen.Carol == 0, seen.Carol)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")

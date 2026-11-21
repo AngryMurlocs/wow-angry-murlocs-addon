@@ -61,7 +61,10 @@ Vorbereitung: zwei Gildenmitglieder A/B, gleicher bekannter Wanted-Eintrag, Kart
 
 ## 11. Gilden-/Realmwechsel und gemischte Versionen
 
-- [ ] Forever-Login / Reload: Wanted und Berufe erscheinen auch wenn der Realmname kurz leer war; kein neuer leerer Scope; nach kurzer Wartezeit Listen wie zuvor.
+- [ ] Forever-Login / Reload: Realm-APIs dauerhaft leer — Wanted/Berufe erscheinen nach Club-ID (`GetGuildClubId` / `INITIAL_CLUBS_LOADED`); kein Zwischen-Bucket `Realm::Gilde`; Listen nach `/reload` weiter da. Ingame-Befund: Club-ID nach Login und nach `/reload` für dieselbe Gilde stabil?
+- [ ] Gildenumbenennung: gleicher Club-Scope, Listen bleiben; Anzeigename aktualisiert.
+- [ ] Alte Scopes (`Realm::Gilde` / `::Gilde`): Popup oder `/am import` erst nach Bestätigung; andere Club-ID nie übernehmen.
+- [ ] Zwei Gildenmitglieder tauschen Wanted/Berufe; Charakter ohne Gilde und gleichnamige andere Club-ID erhalten nichts. Gildenwechsel bei laufender Übertragung: alte Queue/Fragmente nicht in neuem Bereich.
 - [ ] Charakter in Gilde B einloggen: Gilde-A-Wanted-Einträge und Berufe erscheinen **nicht**.
 - [ ] Zurück zu Gilde A: alte Einträge sind wieder da, nichts aus Gilde B ist hineingemischt.
 - [ ] 0.6.1-Client meldet einen Tod/Clear: 0.7+-Clients ändern nichts. `/am diag show` zählt `legacy_ignored`.

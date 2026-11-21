@@ -122,11 +122,23 @@ function Sim:Run(seconds)
   for _ = 1, steps do self:Step(0.05) end
 end
 
+local function SameGuildBus(a, b)
+  if not a or not b or not a.guild or not b.guild then return false end
+  -- Prefer club id when both sides have one (two same-named guilds stay separate).
+  if a.guildClubId and b.guildClubId then
+    return tostring(a.guildClubId) == tostring(b.guildClubId)
+  end
+  if a.guildClubId or b.guildClubId then
+    return false
+  end
+  return a.guild == b.guild
+end
+
 function Sim:Deliver(from, prefix, msg, channel)
   if not from.online then return end
   self.bus[#self.bus + 1] = { t = self.clock, from = from.name, msg = msg }
   for _, c in ipairs(self.clients) do
-    if c ~= from and c.online and c.guild and c.guild == from.guild then
+    if c ~= from and c.online and SameGuildBus(c, from) then
       if self.drop and self.drop(from, c, msg) then
         -- intentional loss: sender still counted on bus
       else
@@ -176,12 +188,20 @@ local function DefaultDB()
 end
 Sim.DefaultDB = DefaultDB
 
--- opts: { guild, db, extraFiles, env, noReplyPolicy }
+-- opts: { guild, guildClubId, db, extraFiles, env, noReplyPolicy }
 -- noReplyPolicy: skip MetaReplyPolicy so ProfRecipes uses legacy reply path.
+-- guildClubId: when set, installs C_Club.GetGuildClubId unless env already has C_Club,
+-- and bus delivery groups by club id (same name, different id = separate).
 function Sim:AddClient(name, opts)
   opts = opts or {}
   local sim = self
-  local c = { name = name, guild = opts.guild ~= false and (opts.guild or "Angry Murlocs") or nil, online = true, prints = {} }
+  local c = {
+    name = name,
+    guild = opts.guild ~= false and (opts.guild or "Angry Murlocs") or nil,
+    guildClubId = opts.guildClubId,
+    online = true,
+    prints = {},
+  }
   local env = setmetatable({}, { __index = _G })
   env._G = env
   -- isolate from any addon table the test file itself loaded into _G
@@ -221,7 +241,21 @@ function Sim:AddClient(name, opts)
     RegisterAddonMessagePrefix = function() return true end,
     SendAddonMessage = function(prefix, msg, channel) sim:Deliver(c, prefix, msg, channel) end,
   }
+  if opts.guildClubId ~= nil then
+    env.C_Club = {
+      GetGuildClubId = function()
+        return c.guild and c.guildClubId or nil
+      end,
+    }
+  end
   for k, v in pairs(opts.env or {}) do env[k] = v end
+  -- Keep c.guildClubId in sync if env supplies C_Club after opts.
+  if env.C_Club and type(env.C_Club.GetGuildClubId) == "function" and c.guildClubId == nil then
+    local id = env.C_Club.GetGuildClubId()
+    if id ~= nil and id ~= 0 and id ~= "0" then
+      c.guildClubId = id
+    end
+  end
 
   local function Load(path)
     local chunk = assert(loadfile(path))
@@ -272,7 +306,7 @@ function Sim:Reload(c)
   local idx
   for i, x in ipairs(self.clients) do if x == c then idx = i end end
   table.remove(self.clients, idx)
-  return self:AddClient(c.name, { guild = c.guild, db = db })
+  return self:AddClient(c.name, { guild = c.guild, guildClubId = c.guildClubId, db = db })
 end
 
 function Sim.Level(c, killer)

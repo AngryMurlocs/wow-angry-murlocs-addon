@@ -667,6 +667,10 @@ local function CurrentWantedScopeKey()
     local k = U.GuildScopeKey()
     if k then return k end
   end
+  -- Waiting for club id: do not fall back to realm::__none__ while guilded.
+  if U.PlayerGuildName and U.PlayerGuildName() and U.ClubApiPresent and U.ClubApiPresent() then
+    return nil
+  end
   local realm = U.RealmKey and U.RealmKey()
   if realm then return realm .. "::__none__" end
   return nil
@@ -2911,6 +2915,14 @@ function UI:OnEnable()
     RefreshAdminAccess()
     if UI:IsTabShown("general") then
       ScheduleGeneralPosRefresh()
+    end
+    if UI:IsTabShown("prof") or UI:IsTabShown("wanted") then
+      ScheduleProfViewRefresh()
+    end
+    if UI:IsTabShown("wanted") and UI.RefreshWanted then
+      UI:RefreshWanted()
+    elseif UI:IsTabShown("general") and UI.RefreshGeneral then
+      UI:RefreshGeneral()
     end
   end)
 

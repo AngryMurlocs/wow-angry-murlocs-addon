@@ -341,6 +341,331 @@ do
     and alice.GR.db.scopes[OTHER].wanted["OtherFoe-Realm"] ~= nil)
 end
 
+-- Club id path: permanent empty realm + immediate club id.
+do
+  local CLUB = "club:71037"
+  local OLD = "CAMWOWEU4Realm6PvP::Angry Murlocs"
+  local EMPTY = "::Angry Murlocs"
+  local sim = Sim.New(11)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    [OLD] = {
+      wanted = {
+        ["FoeA-Realm"] = { schema = 2, legacy = 5, origins = { alice = { n = 2, seq = 2, t = 1 } } },
+      },
+      wantedHidden = {
+        ["FoeA-Realm"] = { level = 5, t = 10 },
+      },
+      wantedSelf = {
+        ["alice"] = { seq = 3, kills = { ["foea"] = { n = 2, t = 1 } } },
+      },
+      prof = {
+        cache = {
+          ["Crafter-Realm"] = {
+            list = { { key = "alch", name = "Alchemy", skill = 100 } },
+            recipes = { alch = { ids = { 9, 8 }, complete = true, epoch = 4, rev = 2 } },
+            time = 50,
+          },
+        },
+        recipeSync = {
+          catalogVersions = {
+            ["Crafter-Realm"] = { alch = { epoch = 4, rev = 2 } },
+          },
+          profiles = {},
+          ownProfileRev = {},
+          progress = {},
+          inventoryRev = 0,
+        },
+      },
+      sync = {},
+    },
+    [EMPTY] = {
+      wanted = {
+        ["FoeA-Realm"] = { schema = 2, legacy = 5, origins = { bob = { n = 3, seq = 1, t = 2 } } },
+        ["FoeB-Realm"] = { schema = 2, legacy = 1, origins = {}, },
+      },
+      wantedHidden = {
+        ["FoeA-Realm"] = { level = 5, t = 20 },
+      },
+      wantedSelf = {},
+      prof = { cache = {} },
+      sync = {},
+    },
+  }
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    extraFiles = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/Professions.lua" },
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      GetRealmID = function() return 0 end,
+      UnitFullName = function(u)
+        if u == "player" then return "Alice", "Endstation" end
+        return nil
+      end,
+      C_Club = {
+        GetGuildClubId = function() return 71037 end,
+      },
+    },
+  })
+  local U = alice.GR.Util
+  check("club-imm: RealmKey nil", U.RealmKey() == nil)
+  check("club-imm: GuildScopeKey club", U.GuildScopeKey() == CLUB, tostring(U.GuildScopeKey()))
+  check("club-imm: GetScopeDB", U.GetScopeDB() ~= nil)
+  check("club-imm: unconfirmed wanted empty", Sim.Level(alice, "FoeA-Realm") == 0)
+  local cands = U.ListImportCandidates()
+  check("club-imm: two candidates", #cands == 2, #cands)
+  local ok = U.ImportScopes(cands, CLUB)
+  check("club-imm: import ok", ok == true)
+  -- max origin n for Alice/Bob: legacy 5 + max(2,3)=3 → level 8? Level = legacy + sum origins
+  -- MergeEntryInto max per origin: alice n=2, bob n=3, legacy max 5 → Level = 5+2+3 = 10
+  check("club-imm: merged wanted level", Sim.Level(alice, "FoeA-Realm") == 10, Sim.Level(alice, "FoeA-Realm"))
+  check("club-imm: second killer kept", Sim.Level(alice, "FoeB-Realm") == 1)
+  local scope = U.GetScopeDB()
+  local hide = scope.wantedHidden["FoeA-Realm"]
+  check("club-imm: hide level/t", hide and hide.level == 5 and hide.t == 20, hide and (hide.level .. "/" .. hide.t))
+  check("club-imm: originals kept", db.scopes[OLD].wanted["FoeA-Realm"] ~= nil
+    and db.scopes[EMPTY].wanted["FoeB-Realm"] ~= nil)
+  check("club-imm: recipes kept", scope.prof.cache["Crafter-Realm"].recipes.alch.epoch == 4)
+  check("club-imm: catalogVersions", scope.prof.recipeSync.catalogVersions["Crafter-Realm"].alch.rev == 2)
+  -- One-shot: clear dest hide, re-import must not restore it.
+  scope.wantedHidden["FoeA-Realm"] = nil
+  local ok2, err2 = U.ImportScope(OLD, CLUB)
+  check("club-imm: second import skipped", ok2 == false and err2 == "already", tostring(err2))
+  check("club-imm: hide stays cleared", scope.wantedHidden["FoeA-Realm"] == nil)
+  -- Next own kill increments.
+  local r = alice.Wanted:RecordOwnDeath("FoeA-Realm", "Hillsbrad")
+  check("club-imm: own kill ok", r and r.ok, r and tostring(r.ok))
+  check("club-imm: level after kill", Sim.Level(alice, "FoeA-Realm") == 11, Sim.Level(alice, "FoeA-Realm"))
+  -- Hide still applies at level 5 stamp; entry visible once level > hide.level.
+  check("club-imm: not hidden after level-up",
+    not alice.GR.WantedLogic.IsHidden({ hidden = { ["FoeA-Realm"] = { level = 5, t = 20 } }, wanted = scope.wanted },
+      "FoeA-Realm", scope.wanted["FoeA-Realm"]))
+  check("club-imm: display name", scope.guildDisplayName == "Angry Murlocs")
+  -- Rename: same club key.
+  alice.guild = "Angry Murlocs Renamed"
+  U.RefreshGuildDisplayName(scope)
+  check("club-rename: same key", U.GuildScopeKey() == CLUB)
+  check("club-rename: display updated", scope.guildDisplayName == "Angry Murlocs Renamed")
+  check("club-rename: wanted still there", Sim.Level(alice, "FoeA-Realm") == 11)
+end
+
+-- Realm present, club id later: no Realm::Guild writes/sync key before club.
+do
+  local CLUB = "club:99"
+  local REALM_GUILD = "GoodRealm::Angry Murlocs"
+  local sim = Sim.New(12)
+  local db = Sim.DefaultDB()
+  local clubId = nil
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    extraFiles = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/Professions.lua" },
+    env = {
+      GetNormalizedRealmName = function() return "GoodRealm" end,
+      GetRealmName = function() return "Good Realm" end,
+      C_Club = {
+        GetGuildClubId = function() return clubId end,
+      },
+    },
+  })
+  local U = alice.GR.Util
+  check("late-club: hold GuildScopeKey nil", U.GuildScopeKey() == nil)
+  check("late-club: GetScopeDB nil", U.GetScopeDB() == nil)
+  check("late-club: no Realm::Guild bucket", db.scopes[REALM_GUILD] == nil)
+  -- Simulate a write attempt while holding.
+  local scopeNil = U.GetScopeDB()
+  if scopeNil then
+    scopeNil.wanted = scopeNil.wanted or {}
+    scopeNil.wanted["ShouldNot"] = { schema = 2, legacy = 1, origins = {} }
+  end
+  check("late-club: still no Realm::Guild", db.scopes[REALM_GUILD] == nil)
+
+  clubId = 99
+  check("late-club: key is club", U.GuildScopeKey() == CLUB, tostring(U.GuildScopeKey()))
+  local scope = U.GetScopeDB()
+  check("late-club: club scope open", scope ~= nil)
+  check("late-club: still no Realm::Guild", db.scopes[REALM_GUILD] == nil)
+  check("late-club: display name", scope.guildDisplayName == "Angry Murlocs")
+end
+
+-- Unconfirmed same-name orphan stays out; other club never offered.
+do
+  local sim = Sim.New(13)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    ["OtherRealm::Angry Murlocs"] = {
+      wanted = { ["X-Realm"] = { schema = 2, legacy = 7, origins = {} } },
+      wantedHidden = {},
+      wantedSelf = {},
+      prof = { cache = {} },
+      sync = {},
+    },
+    ["club:1"] = {
+      wanted = { ["Y-Realm"] = { schema = 2, legacy = 3, origins = {} } },
+      wantedHidden = {},
+      wantedSelf = {},
+      prof = { cache = {} },
+      sync = {},
+      guildDisplayName = "Angry Murlocs",
+    },
+  }
+  db.scopeImported = { ["Already::Angry Murlocs"] = "club:1" }
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      C_Club = { GetGuildClubId = function() return 2 end },
+    },
+  })
+  local U = alice.GR.Util
+  check("sep: live key club:2", U.GuildScopeKey() == "club:2")
+  check("sep: unconfirmed not merged", Sim.Level(alice, "X-Realm") == 0)
+  check("sep: other club data not visible", Sim.Level(alice, "Y-Realm") == 0)
+  local cands = U.ListImportCandidates()
+  local hasOtherClub, hasImported = false, false
+  for i = 1, #cands do
+    if cands[i] == "club:1" then hasOtherClub = true end
+    if cands[i] == "Already::Angry Murlocs" then hasImported = true end
+  end
+  check("sep: candidates exclude other club", not hasOtherClub)
+  check("sep: candidates exclude imported", not hasImported)
+  check("sep: realm orphan listed", #cands == 1 and cands[1] == "OtherRealm::Angry Murlocs", table.concat(cands, ","))
+  local okClub = U.ImportScope("club:1", "club:2")
+  check("sep: refuse other club import", okClub == false)
+  -- Accept after guild switch aborts.
+  local pendingDest = "club:2"
+  alice.env.C_Club.GetGuildClubId = function() return 3 end
+  local okSwitch, errSwitch = U.ImportScope("OtherRealm::Angry Murlocs", pendingDest)
+  check("sep: dest_changed abort", okSwitch == false and errSwitch == "dest_changed", tostring(errSwitch))
+  check("sep: orphan untouched", db.scopes["OtherRealm::Angry Murlocs"].wanted["X-Realm"] ~= nil)
+end
+
+-- Hide merge: higher level wins; equal level → newer t. Bare true ignored.
+do
+  local sim = Sim.New(14)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    ["R::Angry Murlocs"] = {
+      wanted = {
+        ["H1-Realm"] = { schema = 2, legacy = 3, origins = {} },
+        ["H2-Realm"] = { schema = 2, legacy = 4, origins = {} },
+      },
+      wantedHidden = {
+        ["H1-Realm"] = { level = 2, t = 5 },
+        ["H2-Realm"] = { level = 4, t = 1 },
+        ["Bad-Realm"] = true,
+      },
+      wantedSelf = {},
+      prof = { cache = {} },
+      sync = {},
+    },
+  }
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      C_Club = { GetGuildClubId = function() return 5 end },
+    },
+  })
+  local U = alice.GR.Util
+  local dest = U.GetScopeDB()
+  dest.wantedHidden["H1-Realm"] = { level = 3, t = 1 }
+  dest.wantedHidden["H2-Realm"] = { level = 4, t = 9 }
+  U.ImportScope("R::Angry Murlocs", "club:5")
+  dest = U.GetScopeDB()
+  check("hide: higher level wins", dest.wantedHidden["H1-Realm"].level == 3)
+  check("hide: tie uses newer t", dest.wantedHidden["H2-Realm"].t == 9)
+  check("hide: bare true ignored", dest.wantedHidden["Bad-Realm"] == nil)
+  local e = dest.wanted["H1-Realm"]
+  -- Stamp hide at level 3; Level(e)=3 → hidden; bump legacy to reveal.
+  dest.wantedHidden["H1-Realm"] = { level = 3, t = 1 }
+  check("hide: at stamp level hidden", alice.GR.WantedLogic.IsHidden(
+    { hidden = dest.wantedHidden, wanted = dest.wanted }, "H1-Realm", e) == true)
+  e.legacy = 4
+  check("hide: level-up reveals", alice.GR.WantedLogic.IsHidden(
+    { hidden = dest.wantedHidden, wanted = dest.wanted }, "H1-Realm", e) == false)
+end
+
+-- Legacy client without C_Club still uses realm::guild immediately.
+do
+  local sim = Sim.New(15)
+  local alice = sim:AddClient("Alice", {
+    env = {
+      GetNormalizedRealmName = function() return "LegacyRealm" end,
+      GetRealmName = function() return "Legacy Realm" end,
+      -- no C_Club
+    },
+  })
+  local U = alice.GR.Util
+  check("legacy: no club api", U.ClubApiPresent() == false)
+  check("legacy: realm guild key", U.GuildScopeKey() == "LegacyRealm::Angry Murlocs", tostring(U.GuildScopeKey()))
+  check("legacy: GetScopeDB", U.GetScopeDB() ~= nil)
+end
+
+-- Leave with stale GetGuildClubId: no active key; GetScopeDB nil.
+do
+  local sim = Sim.New(16)
+  local clubId = 42
+  local alice = sim:AddClient("Alice", {
+    extraFiles = { "Modules/Wanted.lua", "Modules/WantedSync.lua", "Modules/Professions.lua" },
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      C_Club = { GetGuildClubId = function() return clubId end },
+    },
+  })
+  local U = alice.GR.Util
+  check("stale-leave: in guild key", U.GuildScopeKey() == "club:42")
+  local scope = U.GetScopeDB()
+  scope.wanted["Keep-Realm"] = { schema = 2, legacy = 2, origins = {} }
+  check("stale-leave: wanted while guilded", Sim.Level(alice, "Keep-Realm") == 2)
+  alice.guild = nil
+  clubId = 42 -- API still returns id after leave
+  check("stale-leave: GuildScopeKey nil", U.GuildScopeKey() == nil)
+  check("stale-leave: GetScopeDB nil", U.GetScopeDB() == nil)
+  check("stale-leave: view empty", Sim.Level(alice, "Keep-Realm") == 0)
+  check("stale-leave: SV bucket kept", alice.GR.db.scopes["club:42"].wanted["Keep-Realm"] ~= nil)
+end
+
+-- Atomic import: failed merge publishes nothing; live dest unchanged.
+do
+  local sim = Sim.New(17)
+  local db = Sim.DefaultDB()
+  db.scopes = {
+    ["Old::Angry Murlocs"] = {
+      wanted = { ["Z-Realm"] = { schema = 2, legacy = 1, origins = {} } },
+      wantedHidden = {},
+      wantedSelf = {},
+      prof = { cache = {} },
+      sync = {},
+    },
+  }
+  local alice = sim:AddClient("Alice", {
+    db = db,
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      C_Club = { GetGuildClubId = function() return 8 end },
+    },
+  })
+  local U = alice.GR.Util
+  local live = U.GetScopeDB()
+  live.wanted["Pre-Realm"] = { schema = 2, legacy = 9, origins = {} }
+  local logic = alice.GR.WantedLogic
+  local saved = logic.MergeEntryInto
+  logic.MergeEntryInto = function() error("boom") end
+  local ok, err = U.ImportScope("Old::Angry Murlocs", "club:8")
+  logic.MergeEntryInto = saved
+  check("atomic: merge_failed", ok == false and err == "merge_failed", tostring(err))
+  check("atomic: not marked imported", db.scopeImported == nil or db.scopeImported["Old::Angry Murlocs"] == nil)
+  live = U.GetScopeDB()
+  check("atomic: pre entry kept", live.wanted["Pre-Realm"] ~= nil and Sim.Level(alice, "Pre-Realm") == 9)
+  check("atomic: orphan not published", live.wanted["Z-Realm"] == nil)
+  check("atomic: source untouched", db.scopes["Old::Angry Murlocs"].wanted["Z-Realm"] ~= nil)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")

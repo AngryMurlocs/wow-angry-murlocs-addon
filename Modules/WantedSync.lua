@@ -300,6 +300,13 @@ end
 
 local function SendResponse(p)
   if not IsInGuild or not IsInGuild() then return end
+  local planned = p.scopeKey or (p.req and p.req.scopeKey)
+  local cur = U.GuildScopeKey and U.GuildScopeKey()
+  if not planned or not cur or planned ~= cur then
+    P.Forget(responder, p)
+    return
+  end
+  local sendOpts = { scopeKey = planned }
   local req = p.req
   local pageList, more, nT, nK, records = Logic.SyncPage(Wanted:State(), req.cursorT, req.cursorKey,
     SYNC_MAX_RECORDS, { skipOrigin = SkipOwnIfPrivate })
@@ -310,7 +317,7 @@ local function SendResponse(p)
   end
   local reqId = req.reqId
   local header = P.EncodeWSH(p.requester, reqId, records)
-  if not header or not Comm:Send(header, "ctrl", "sync") then
+  if not header or not Comm:Send(header, "ctrl", "sync", sendOpts) then
     P.Forget(responder, p)
     return
   end
@@ -324,15 +331,15 @@ local function SendResponse(p)
     local e = item.entry
     local hdr = P.EncodeWSEntry(reqId, item.key, e.legacy or 0, e.lastSeenTime or 0,
       e.lastSeenZone or "", e.lastSeenBy or "")
-    if hdr then Comm:Send(hdr, "data", "sync") end
+    if hdr then Comm:Send(hdr, "data", "sync", sendOpts) end
     for j = 1, #item.origins do
       local o = item.origins[j]
       local rec = P.EncodeWSOrigin(reqId, item.key, o.name or "?", o.n, o.seq or 1, o.t, o.zone or "")
-      if rec then Comm:Send(rec, "data", o.own and "death" or "sync") end
+      if rec then Comm:Send(rec, "data", o.own and "death" or "sync", sendOpts) end
     end
   end
   local tail = P.EncodeWSE(p.requester, reqId, records, more, nT, nK)
-  if tail then Comm:Send(tail, "data", "sync") end
+  if tail then Comm:Send(tail, "data", "sync", sendOpts) end
   if Wanted:Diag() then Wanted:Diag():Log("sync", "answered %s records=%d more=%s", p.requester, records, tostring(more)) end
 end
 
@@ -349,6 +356,8 @@ end
 
 local function OnSyncRequest(sender, req)
   if not IsInGuild or not IsInGuild() then return end
+  local scopeKey = U.GuildScopeKey and U.GuildScopeKey()
+  if not scopeKey then return end
   if req.target ~= "" and not U.SameCharacter(req.target, U.PlayerName()) then return end
   local _, _, _, _, records = Logic.SyncPage(Wanted:State(), req.cursorT, req.cursorKey,
     SYNC_MAX_RECORDS, { skipOrigin = SkipOwnIfPrivate })
@@ -361,12 +370,17 @@ local function OnSyncRequest(sender, req)
     -- Members without data answer last, only if nobody else did.
     delay = 5 + math.random() * 3
   end
-  local ok, why = P.OnRequest(responder, sender,
-    { reqId = req.reqId, cursorT = req.cursorT, cursorKey = req.cursorKey, target = "" },
+  local ok, a, b = P.OnRequest(responder, sender,
+    { reqId = req.reqId, cursorT = req.cursorT, cursorKey = req.cursorKey, target = "", scopeKey = scopeKey },
     U.Now(), U.PlayerName(), delay, req.target ~= "" and 2 or math.random())
   if not ok then
-    Wanted:Reject(why, "SR " .. tostring(sender))
+    Wanted:Reject(a, "SR " .. tostring(sender))
     return
+  end
+  -- Stamp planned scope on the pending slot (TakeDue returns this table).
+  local pk = a
+  if pk and responder.pending and responder.pending[pk] then
+    responder.pending[pk].scopeKey = scopeKey
   end
   if not responderTicker then
     responderTicker = C_Timer.NewTicker(0.1, ProcessDue)

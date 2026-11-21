@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Wanted and profession lists show again when the realm name stays empty (Forever); confirm to restore older lists for this guild
+
 ## 0.11.26
 
 - Wanted and professions no longer look empty when the realm name is missing at login
