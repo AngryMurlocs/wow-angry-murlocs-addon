@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.29
 
 - Outdoor Murloc yell after a click or key no longer spams addon-blocked errors in BugSack
 
