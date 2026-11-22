@@ -194,6 +194,14 @@ Client-Build notieren: `/dump GetBuildInfo()` → ________ · BugSack offen.
 - [ ] Pending Auto-Ruf: Stil auf **Aus** stellen → danach Klick/Taste schreit nicht den vorgemerkten Text.
 - [ ] In Instanz/Dungeon: Auto-Ruf kann ohne Extra-Klick gehen (HW-Regel gilt outdoor).
 
+## Bindings.xml TOC (Unreleased)
+
+Forever **komplett neu starten** (nicht nur `/reload`). BugSack/LUA_WARNING prüfen.
+
+- [ ] Keine neuen `Unrecognized XML: Binding` / Attribute / `header … more than once` für AngryMurlocs.
+- [ ] Esc → Tastaturbelegung → AddOns: beide AngryMurlocs-Aktionen sichtbar (Test yell + Stil wechseln).
+- [ ] Vorhandene Tasten: öffentlicher Testruf bzw. Rufstil-Wechsel funktionieren weiterhin.
+
 ## Death toast: Forever names + UTF-8 (Unreleased)
 
 Client-Build notieren: `/dump GetBuildInfo()` → ________ · beide Toast-Stile (Art + klassisch).
