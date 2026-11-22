@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.30
 
 - Fixed warnings when loading Murloc yell key bindings.
 
