@@ -1,6 +1,14 @@
 # AngryMurlocs – Discord-Anleitung (Auszug)
 
-**Version 0.11.26.**
+**Version 0.11.31.**
+
+## Berufe-Übersicht
+
+**Nutzen:** Unter **Berufe** siehst du Gildenmitglieder mit Fertigkeitsstufen, Online-Status, Sortierung und Suche.
+
+**Wo:** `/am` → **Berufe** (oder `/am prof`).
+
+**0.11.31:** Dieselbe Person erscheint in der Liste nicht mehr mehrfach (z. B. mit und ohne Realm-Zusatz). Nach dem Update einmal `/reload` oder neu einloggen — alte Doppelzeilen werden zusammengeführt.
 
 ## Todesmeldungen und Wanted
 

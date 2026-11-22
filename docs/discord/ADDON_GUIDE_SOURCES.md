@@ -2,11 +2,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| Datum | 2026-11-21 |
-| Quelle | AngryMurlocs Release 0.11.26 |
-| Basis | `v0.11.26` / main nach release: 0.11.26 |
-| Status | Tag `v0.11.26` gesetzt; Mirror → GitHub → CurseForge-Build |
-| Codebeleg | Leerer Realm → Scope: `Core/Util.lua` CleanRealm/RealmKey/GetScopeDB; Boot `AngryMurlocs.lua` ArmRealmWait; Murloc-Rufe HW-Yell `Core/Nerglish.lua`, Bindings; Wanted/Toast/Rezepte/Map Fixes aus 0.11.26-Changelog |
-| Tests | `luajit Tests/run_all.lua` (inkl. `PrivacyScope_test` empty-norm/boot-empty) |
-| Client | Forever: Login mit verzögertem Realm; Outdoor-Yell + Tastenbelegung |
-| Offene Punkte | CLIENT_CHECKLIST: leerer Realm am Login; Yell-Drossel / Idle im Spiel |
+| Datum | 2026-11-23 |
+| Quelle | AngryMurlocs Release 0.11.31 |
+| Basis | `v0.11.31` / main nach release: 0.11.31 |
+| Status | Tag `v0.11.31` gesetzt; Mirror → GitHub → CurseForge-Build |
+| Codebeleg | Berufe-Owner-Fold: `U.CharIdentity`, `Professions:PruneCharacterDuplicates` / `ResolveCacheOwner`; Katalog `ProfRecipes` CacheOwnerKey / MaxCatalogFloor; Changelog `## 0.11.31` |
+| Tests | `luajit Tests/run_all.lua` (inkl. `ProfOwnerFold_test`) |
+| Client | Forever: Berufe-Tab nach Update — keine Doppelzeilen |
+| Offene Punkte | CLIENT_CHECKLIST Berufe-Pagination; Ingame-Check Doppelnamen nach Reload |
