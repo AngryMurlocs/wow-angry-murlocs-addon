@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Fixed warnings when loading Murloc yell key bindings.
+
 ## 0.11.29
 
 - Outdoor Murloc yell after a click or key no longer spams addon-blocked errors in BugSack

@@ -6,7 +6,7 @@
     end
   </Binding>
   <!-- Cycle Murloc yell style: Off → Nerglish → Schmäh → Off. -->
-  <Binding name="ANGRYMURLOCS_CYCLE_STYLE" header="ANGRYMURLOCS" category="ADDONS">
+  <Binding name="ANGRYMURLOCS_CYCLE_STYLE" category="ADDONS">
     if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.CycleStyle then
       AngryMurlocs.Nerglish.CycleStyle()
     end

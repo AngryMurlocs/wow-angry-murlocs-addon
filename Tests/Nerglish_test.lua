@@ -230,6 +230,22 @@ if bf then bf:close() end
 check("Bindings.xml present", bxml:find("ANGRYMURLOCS_TEST_YELL", 1, true) and bxml:find("TestYell", 1, true))
 check("Bindings.xml fromInput", bxml:find("TestYell(nil, true)", 1, true) ~= nil)
 check("Bindings.xml cycle", bxml:find("ANGRYMURLOCS_CYCLE_STYLE", 1, true) and bxml:find("CycleStyle", 1, true))
+local headerCount = 0
+for _ in bxml:gmatch('header%s*=%s*"ANGRYMURLOCS"') do
+  headerCount = headerCount + 1
+end
+check("Bindings.xml header once", headerCount == 1, tostring(headerCount))
+local toc = io.open("AngryMurlocs.toc", "rb")
+local tocText = toc and toc:read("*a") or ""
+if toc then toc:close() end
+local tocListsBindings = false
+for line in tocText:gmatch("[^\r\n]+") do
+  if not line:match("^%s*#") and line:find("Bindings%.xml", 1) then
+    tocListsBindings = true
+    break
+  end
+end
+check("TOC omits Bindings.xml", not tocListsBindings)
 
 -- CycleStyle off → nerglish → schmaeh → off
 AngryMurlocs.db = { ui = { nerglishStyle = "off" } }
