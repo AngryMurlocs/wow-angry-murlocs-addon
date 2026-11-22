@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.31
 
 - Professions list no longer shows the same guildmate more than once
 
