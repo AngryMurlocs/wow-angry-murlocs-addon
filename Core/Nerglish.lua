@@ -313,9 +313,12 @@ function N.FlushPendingYell(now)
     N.ClearPendingYell()
     return false
   end
+  -- Send while HW context is still live; DisarmHw (Hide/script nil) after.
   local text = p.text
-  N.ClearPendingYell()
-  return SendYellNow(text)
+  state.pending = nil
+  local sent = SendYellNow(text)
+  DisarmHw()
+  return sent
 end
 
 local function OnHardware()

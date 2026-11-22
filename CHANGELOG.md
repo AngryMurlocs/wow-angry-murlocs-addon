@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Outdoor Murloc yell after a click or key no longer spams addon-blocked errors in BugSack
+
 ## 0.11.28
 
 - Death toasts keep full Forever names (first and last) and no longer cut letters in killer, pet, zone, or spell text

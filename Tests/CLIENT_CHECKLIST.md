@@ -188,7 +188,7 @@ Client-Build: `/dump GetBuildInfo()` → ________
 
 Client-Build notieren: `/dump GetBuildInfo()` → ________ · BugSack offen.
 
-- [ ] Stil Nerglish oder Schmäh; draußen Auto-Anlass (z. B. Gildenbeitritt): **kein** `ADDON_ACTION_BLOCKED` in BugSack. Nach dem nächsten Klick oder Tastendruck erscheint der Yell.
+- [ ] Stil Nerglish oder Schmäh; draußen Auto-Anlass (z. B. Gildenbeitritt): **kein** `ADDON_ACTION_BLOCKED` in BugSack. Nach dem nächsten Klick oder Tastendruck erscheint wirklich `/y` (nicht nur pending weg).
 - [ ] Options → Oberfläche → **Öffentlich testen (/y)**: ein Klick schreit sofort (auch draußen); Vorschau bei Stil **Aus** bleibt Nerglish; 2s-Cooldown.
 - [ ] Tastenbelegung „Öffentlich testen (/y)“: sofortiger Yell.
 - [ ] Pending Auto-Ruf: Stil auf **Aus** stellen → danach Klick/Taste schreit nicht den vorgemerkten Text.
