@@ -232,11 +232,59 @@ local function CatalogEpochBag()
   return bag
 end
 
+local function CacheOwnerKey(name)
+  if not name or name == "" then return nil end
+  local prof = GR:GetModule("Professions")
+  if prof and prof.ResolveCacheOwner then
+    local resolved = prof:ResolveCacheOwner(name)
+    if resolved then return resolved end
+  end
+  return U.NormalizeName(name)
+end
+
+-- Highest remembered (epoch,rev) across all catalogVersions keys with the same CharIdentity.
+local function MaxCatalogFloor(owner, profKey)
+  local bag = CatalogEpochBag()
+  if type(bag) ~= "table" or not owner or type(profKey) ~= "string" then return nil end
+  local id = U.CharIdentity and U.CharIdentity(owner)
+  local bestE, bestR = 0, 0
+  local found = false
+  for key, perProf in pairs(bag) do
+    if type(key) == "string" and type(perProf) == "table" then
+      local same = key == owner
+        or (id and U.CharIdentity(key) == id)
+        or (U.NormalizeName(key) == U.NormalizeName(owner))
+      if same then
+        local ver = perProf[profKey]
+        if type(ver) == "table" then
+          local e, r = tonumber(ver.epoch) or 0, tonumber(ver.rev) or 0
+          if not found or e > bestE or (e == bestE and r > bestR) then
+            bestE, bestR = e, r
+            found = true
+          end
+        end
+      end
+    end
+  end
+  if not found then return nil end
+  return { epoch = bestE, rev = bestR }
+end
+
 function ProfRecipes.RememberCatalogEpoch(owner, profKey, epoch, rev)
-  owner = U.NormalizeName(owner)
+  owner = CacheOwnerKey(owner) or U.NormalizeName(owner)
   if not owner or type(profKey) ~= "string" or profKey == "" then return end
   local bag = CatalogEpochBag()
   if not bag then return end
+  -- Raise floor from any alias keys, then store under resolved owner.
+  local floor = MaxCatalogFloor(owner, profKey)
+  epoch = tonumber(epoch) or 0
+  rev = tonumber(rev) or 0
+  if floor then
+    local fe, fr = tonumber(floor.epoch) or 0, tonumber(floor.rev) or 0
+    if fe > epoch or (fe == epoch and fr > rev) then
+      epoch, rev = fe, fr
+    end
+  end
   bag[owner] = bag[owner] or {}
   local prev = bag[owner][profKey]
   local pe, pr = 0, 0
@@ -244,10 +292,35 @@ function ProfRecipes.RememberCatalogEpoch(owner, profKey, epoch, rev)
     pe = tonumber(prev.epoch) or 0
     pr = tonumber(prev.rev) or 0
   end
-  epoch = tonumber(epoch) or 0
-  rev = tonumber(rev) or 0
   if epoch > pe or (epoch == pe and rev > pr) then
     bag[owner][profKey] = { epoch = epoch, rev = rev }
+  end
+  -- Collapse alias floors onto the resolved owner.
+  local id = U.CharIdentity and U.CharIdentity(owner)
+  if id then
+    local toDrop = {}
+    for key in pairs(bag) do
+      if type(key) == "string" and key ~= owner and U.CharIdentity(key) == id then
+        toDrop[#toDrop + 1] = key
+      end
+    end
+    for i = 1, #toDrop do
+      local lk = toDrop[i]
+      local per = bag[lk]
+      if type(per) == "table" then
+        for pk, ver in pairs(per) do
+          if type(pk) == "string" and type(ver) == "table" then
+            local cur = bag[owner][pk]
+            local ce, cr = tonumber(cur and cur.epoch) or 0, tonumber(cur and cur.rev) or 0
+            local ve, vr = tonumber(ver.epoch) or 0, tonumber(ver.rev) or 0
+            if ve > ce or (ve == ce and vr > cr) then
+              bag[owner][pk] = { epoch = ve, rev = vr }
+            end
+          end
+        end
+      end
+      bag[lk] = nil
+    end
   end
 end
 
@@ -255,9 +328,7 @@ function ProfRecipes.BumpCatalogEpochForUnlearn(owner, profKey, prevRec)
   local Logic = GR.RecipeSyncLogic
   local e0 = prevRec and tonumber(prevRec.epoch) or 0
   local r0 = prevRec and tonumber(prevRec.rev) or 0
-  local remembered = CatalogEpochBag()
-  remembered = remembered and remembered[U.NormalizeName(owner) or ""]
-  remembered = remembered and remembered[profKey]
+  local remembered = MaxCatalogFloor(owner, profKey)
   if remembered then
     e0 = math.max(e0, tonumber(remembered.epoch) or 0)
     r0 = math.max(r0, tonumber(remembered.rev) or 0)
@@ -426,7 +497,8 @@ end
 
 function ProfRecipes.GetEntry(playerName, profKey)
   if not playerName or not profKey then return nil end
-  local entry = Cache()[U.NormalizeName(playerName)]
+  local owner = CacheOwnerKey(playerName)
+  local entry = owner and Cache()[owner]
   if not entry or type(entry.recipes) ~= "table" then return nil end
   local canon = CanonProfKey(profKey)
   return entry.recipes[canon] or entry.recipes[profKey]
@@ -541,7 +613,8 @@ function ProfRecipes.ContentFingerprint(profKey, ids, complete, epoch)
 end
 
 local function SkillForPlayer(playerName, profKey)
-  local entry = Cache()[U.NormalizeName(playerName)]
+  local owner = CacheOwnerKey(playerName)
+  local entry = owner and Cache()[owner]
   if not entry or type(entry.list) ~= "table" then return nil, nil end
   for i = 1, #entry.list do
     local p = entry.list[i]
@@ -1959,7 +2032,8 @@ function ProfRecipes:RequestAll(profKey, force, opts)
     wireKey = canon
     local playerName = opts.playerName
     if playerName then
-      local entry = Cache()[U.NormalizeName(playerName)]
+      local owner = CacheOwnerKey(playerName)
+      local entry = owner and Cache()[owner]
       local prof = ProfMod()
       if prof and prof.WireRequestKey then
         wireKey = prof.WireRequestKey(entry, canon) or canon
@@ -2062,10 +2136,12 @@ function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
   if ProfRecipes.IsGathering(data.profKey) then return end
   provenance = provenance or "direct"
   local cache = Cache()
-  local entry = cache[sender]
+  local profMod = GR:GetModule("Professions")
+  local owner = (profMod and profMod.ResolveCacheOwner and profMod:ResolveCacheOwner(sender)) or sender
+  local entry = cache[owner]
   if not entry then
     entry = { list = {}, time = U.WallTime() }
-    cache[sender] = entry
+    cache[owner] = entry
   end
   -- Confirmed non-empty profession list: reject ownership for dropped professions.
   local active = ProfessionKeysFromList(entry.list)
@@ -2078,10 +2154,9 @@ function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
   if incomingEpoch < 0 then incomingEpoch = 0 end
   local incomingRev = tonumber(data.rev) or 0
   -- Floor from unlearn/relearn (or prior accept) even when the cache row was cleared.
+  -- Max across CharIdentity aliases so ResolveCacheOwner cannot bypass the floor.
   do
-    local bag = CatalogEpochBag()
-    local ownerKey = U.NormalizeName(sender)
-    local floor = bag and ownerKey and bag[ownerKey] and bag[ownerKey][data.profKey]
+    local floor = MaxCatalogFloor(owner, data.profKey)
     local Logic = GR.RecipeSyncLogic
     if floor and Logic and Logic.CompareVersion then
       if Logic.CompareVersion(floor, { epoch = incomingEpoch, rev = incomingRev }) > 0 then
@@ -2112,9 +2187,9 @@ function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
     prev.epoch = prevEpoch
     prev.recvAt = U.WallTime()
     ProfRecipes.InvalidateGuildRecipeIndex()
-    GR:SendMessage("PROF_RECIPES_CHANGED", sender, data.profKey)
+    GR:SendMessage("PROF_RECIPES_CHANGED", owner, data.profKey)
     if ProfRecipes.EnsureMetaForIds then
-      ProfRecipes.EnsureMetaForIds(data.ids, sender)
+      ProfRecipes.EnsureMetaForIds(data.ids, owner)
     end
     if ProfRecipes.EnsureCategoriesForIds then
       ProfRecipes.EnsureCategoriesForIds(data.ids)
@@ -2137,20 +2212,25 @@ function ProfRecipes:OnRecipeUpdate(sender, data, provenance)
     complete = true,
     epoch = incomingEpoch,
   }
-  ProfRecipes.RememberCatalogEpoch(sender, data.profKey, incomingEpoch, incomingRev)
+  ProfRecipes.RememberCatalogEpoch(owner, data.profKey, incomingEpoch, incomingRev)
   if emptyFallback and emptyFallback.canonKey == data.profKey then
     local open = catalogOpen
-    local senderKey = U.NormalizeName(sender)
+    local pend = emptyFallback.playerName
+    local sameOwner = pend and (
+      pend == owner
+      or pend == U.NormalizeName(owner)
+      or (U.CharIdentity(pend) ~= nil and U.CharIdentity(pend) == U.CharIdentity(owner))
+    )
     if open and open.profKey == data.profKey
-        and senderKey and emptyFallback.playerName == senderKey
-        and open.playerName == emptyFallback.playerName then
+        and sameOwner
+        and open.playerName == pend then
       ProfRecipes:CancelEmptyFallback()
     end
   end
   ProfRecipes.InvalidateGuildRecipeIndex()
-  GR:SendMessage("PROF_RECIPES_CHANGED", sender, data.profKey)
+  GR:SendMessage("PROF_RECIPES_CHANGED", owner, data.profKey)
   if ProfRecipes.EnsureMetaForIds then
-    ProfRecipes.EnsureMetaForIds(data.ids, sender)
+    ProfRecipes.EnsureMetaForIds(data.ids, owner)
   end
   if ProfRecipes.EnsureCategoriesForIds then
     ProfRecipes.EnsureCategoriesForIds(data.ids)
@@ -2521,10 +2601,11 @@ function ProfRecipes:OnEnable()
     ProfRecipes:OnRecipeUpdate(sender, data, provenance)
     if accept and recipeRefreshWhy == "requesting" and sess and data and data.profKey and data.complete then
       -- Count only after accept into cache (OnRecipeUpdate may reject).
-      local entry = Cache()[sender]
+      local owner = CacheOwnerKey(sender) or sender
+      local entry = Cache()[owner]
       local rec = entry and entry.recipes and entry.recipes[data.profKey]
       if rec and rec.complete then
-        NoteRefreshPair(sess, sender, data.profKey)
+        NoteRefreshPair(sess, owner, data.profKey)
         sess.lastRecv = U.Now()
       end
     end

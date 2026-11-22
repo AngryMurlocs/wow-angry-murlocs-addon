@@ -1,5 +1,9 @@
 # AngryMurlocs Changelog
 
+## 0.11.31
+
+- Professions list no longer shows the same guildmate more than once
+
 ## 0.11.30
 
 - Fixed warnings when loading Murloc yell key bindings.

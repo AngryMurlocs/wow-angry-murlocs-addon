@@ -87,6 +87,23 @@ local function CompactName(s)
   return string.lower(tostring(s)):gsub("[%s%-%']", "")
 end
 
+-- Stable owner fold for profession cache / list rows. Uses DisplayCharName
+-- (live-realm strip, Forever First-Last kept) then CompactName.
+-- Not CharKey: first-token fold would merge "Baba Bing" with "Baba Other".
+-- When RealmKey is missing: strip trailing -Token only if the left side has a
+-- space ("First Last-Realm"). Bare "Ingoo-Endstation" stays intact.
+function U.CharIdentity(name)
+  if not name or name == "" then return nil end
+  if U.RealmKey() then
+    return CompactName(U.DisplayCharName(name))
+  end
+  local left, suffix = tostring(name):match("^(.-)%-([^%-]+)$")
+  if left and left ~= "" and suffix and left:find("%s") then
+    return CompactName(left)
+  end
+  return CompactName(name)
+end
+
 -- Robust self check (Forever sender/realm formats vary).
 -- Handles Ingoo-Endstation (local) vs Ingoo Endstation-Realm (wire).
 function U.IsSelfName(name)
@@ -715,25 +732,77 @@ local function MergeRecipeMap(dstRecipes, srcRecipes)
   return dstRecipes
 end
 
+local function ProfListScore(list)
+  if type(list) ~= "table" then return 0, 0 end
+  local n, sum = 0, 0
+  for i = 1, #list do
+    local row = list[i]
+    if type(row) == "table" then
+      n = n + 1
+      sum = sum + (tonumber(row.skill) or 0)
+    end
+  end
+  return n, sum
+end
+
+local function FindProfCacheOwner(cache, name)
+  if type(cache) ~= "table" or type(name) ~= "string" then return nil end
+  if type(cache[name]) == "table" then return name end
+  local id = U.CharIdentity(name)
+  if not id then return nil end
+  for k, entry in pairs(cache) do
+    if type(k) == "string" and type(entry) == "table" and U.CharIdentity(k) == id then
+      return k
+    end
+  end
+  return nil
+end
+
 local function MergeProfCacheBag(dstCache, srcCache)
   if type(srcCache) ~= "table" then return end
   for owner, entry in pairs(srcCache) do
     if type(owner) == "string" and type(entry) == "table" then
-      local cur = dstCache[owner]
+      local destKey = FindProfCacheOwner(dstCache, owner) or owner
+      local cur = dstCache[destKey]
       if type(cur) ~= "table" then
-        dstCache[owner] = DeepCopyValue(entry)
+        dstCache[destKey] = DeepCopyValue(entry)
       else
         local st = tonumber(entry.time) or 0
         local ct = tonumber(cur.time) or 0
+        local sn, ss = ProfListScore(entry.list)
+        local cn, cs = ProfListScore(cur.list)
+        -- Never replace a filled list with an empty newer stub.
+        local takeList = (sn > 0) and (
+          cn == 0
+          or st > ct
+          or (st == ct and (sn > cn or (sn == cn and ss > cs)))
+        )
+        if takeList and entry.list ~= nil then
+          cur.list = DeepCopyValue(entry.list)
+        end
         if st > ct then
-          if entry.list ~= nil then
-            cur.list = DeepCopyValue(entry.list)
-          end
           cur.time = entry.time
+        end
+        if entry.classFile and not cur.classFile then
+          cur.classFile = entry.classFile
+        end
+        if type(entry.wireAlias) == "table" then
+          cur.wireAlias = cur.wireAlias or {}
+          for ck, wk in pairs(entry.wireAlias) do
+            if type(ck) == "string" and type(wk) == "string" and not cur.wireAlias[ck] then
+              cur.wireAlias[ck] = wk
+            end
+          end
         end
         -- Recipe catalogs: epoch/rev only; never dropped by a newer list timestamp.
         if type(entry.recipes) == "table" then
           cur.recipes = MergeRecipeMap(cur.recipes or {}, entry.recipes)
+        end
+        if type(cur.list) == "table" and #cur.list > 0 and type(cur.recipes) == "table" then
+          local recipesMod = GR:GetModule("ProfRecipes")
+          if recipesMod and recipesMod.PruneRecipesToProfessionList then
+            cur.recipes = recipesMod.PruneRecipesToProfessionList(cur.recipes, cur.list, destKey)
+          end
         end
       end
     end
