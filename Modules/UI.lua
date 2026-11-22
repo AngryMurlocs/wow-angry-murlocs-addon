@@ -2734,19 +2734,51 @@ function UI:RefreshList()
   local me = U.NormalizeName(U.PlayerName())
   local names = {}
   local totalCache = 0
+  local function profListScore(list)
+    if type(list) ~= "table" then return 0, 0 end
+    local n, sum = 0, 0
+    for i = 1, #list do
+      local row = list[i]
+      if type(row) == "table" then
+        n = n + 1
+        sum = sum + (tonumber(row.skill) or 0)
+      end
+    end
+    return n, sum
+  end
+  -- Defense: one row per CharIdentity if the cache still holds alias keys.
+  local bestById = {}
   for name, entry in pairs(cache) do
     totalCache = totalCache + 1
     if not (U.IsSelfName(name) and name ~= me) then
-      if UI.MatchesProfessionFilter(name, entry, {
-        text = filter,
-        profKey = profKeyFilter,
-        minSkill = profMinSkill,
-        activeOnly = profActiveOnly,
-        me = me,
-        isOnline = IsProfOnline,
-      }) then
-        names[#names + 1] = name
+      local id = (U.CharIdentity and U.CharIdentity(name)) or name
+      local prevName = bestById[id]
+      if not prevName then
+        bestById[id] = name
+      else
+        local prev = cache[prevName]
+        local pt, nt = tonumber(prev and prev.time) or 0, tonumber(entry and entry.time) or 0
+        local pn, ps = profListScore(prev and prev.list)
+        local nn, ns = profListScore(entry and entry.list)
+        if (me and name == me)
+            or nt > pt
+            or (nt == pt and (nn > pn or (nn == pn and ns > ps))) then
+          bestById[id] = name
+        end
       end
+    end
+  end
+  for _, name in pairs(bestById) do
+    local entry = cache[name]
+    if UI.MatchesProfessionFilter(name, entry, {
+      text = filter,
+      profKey = profKeyFilter,
+      minSkill = profMinSkill,
+      activeOnly = profActiveOnly,
+      me = me,
+      isOnline = IsProfOnline,
+    }) then
+      names[#names + 1] = name
     end
   end
   table.sort(names, function(a, b)

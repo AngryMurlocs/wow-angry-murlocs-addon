@@ -667,6 +667,121 @@ function Professions:GetAll()
   return Cache()
 end
 
+local function ProfListScore(list)
+  if type(list) ~= "table" then return 0, 0 end
+  local n, sum = 0, 0
+  for i = 1, #list do
+    local row = list[i]
+    if type(row) == "table" then
+      n = n + 1
+      sum = sum + (tonumber(row.skill) or 0)
+    end
+  end
+  return n, sum
+end
+
+local function MergeProfEntryInto(dst, src, ownerKey)
+  if type(dst) ~= "table" or type(src) ~= "table" then return end
+  local st = tonumber(src.time) or 0
+  local dt = tonumber(dst.time) or 0
+  local sn, ss = ProfListScore(src.list)
+  local dn, ds = ProfListScore(dst.list)
+  -- Never replace a filled list with an empty newer stub.
+  local takeList = (sn > 0) and (
+    dn == 0
+    or st > dt
+    or (st == dt and (sn > dn or (sn == dn and ss > ds)))
+  )
+  if takeList and src.list ~= nil then
+    dst.list = src.list
+  end
+  if st > dt then
+    dst.time = src.time
+    if src.raw ~= nil then dst.raw = src.raw end
+  elseif dst.raw == nil and src.raw ~= nil then
+    dst.raw = src.raw
+  end
+  if src.classFile and not dst.classFile then
+    dst.classFile = src.classFile
+  end
+  if type(src.recipes) == "table" then
+    dst.recipes = dst.recipes or {}
+    for pk, bag in pairs(src.recipes) do
+      if type(pk) == "string" and type(bag) == "table" then
+        local cur = dst.recipes[pk]
+        local ce, cr = tonumber(cur and cur.epoch) or 0, tonumber(cur and cur.rev) or 0
+        local ve, vr = tonumber(bag.epoch) or 0, tonumber(bag.rev) or 0
+        if not cur or ve > ce or (ve == ce and vr > cr) then
+          dst.recipes[pk] = bag
+        end
+      end
+    end
+  end
+  if type(src.wireAlias) == "table" then
+    dst.wireAlias = dst.wireAlias or {}
+    for ck, wk in pairs(src.wireAlias) do
+      if type(ck) == "string" and type(wk) == "string" and not dst.wireAlias[ck] then
+        dst.wireAlias[ck] = wk
+      end
+    end
+  end
+  if type(dst.list) == "table" and #dst.list > 0 and type(dst.recipes) == "table" then
+    local recipesMod = GR:GetModule("ProfRecipes")
+    if recipesMod and recipesMod.PruneRecipesToProfessionList then
+      dst.recipes = recipesMod.PruneRecipesToProfessionList(dst.recipes, dst.list, ownerKey)
+    end
+  end
+end
+
+-- Self-alias for cache fold: same CharIdentity only (not IsSelfName /
+-- FoldNameKey first-token, which merges Baba-Bing with Baba-Other).
+local function IsSelfCacheAlias(name, me)
+  if not me or not name then return false end
+  if name == me then return true end
+  local a, b = U.CharIdentity(me), U.CharIdentity(name)
+  return a ~= nil and a == b
+end
+
+local function MergeCatalogVersionsInto(winnerKey, loserKeys)
+  if not winnerKey or type(loserKeys) ~= "table" then return end
+  local scope = U.GetScopeDB()
+  local bag = scope and scope.prof and scope.prof.recipeSync and scope.prof.recipeSync.catalogVersions
+  if type(bag) ~= "table" then return end
+  bag[winnerKey] = bag[winnerKey] or {}
+  local win = bag[winnerKey]
+  for i = 1, #loserKeys do
+    local lk = loserKeys[i]
+    if lk and lk ~= winnerKey and type(bag[lk]) == "table" then
+      for pk, ver in pairs(bag[lk]) do
+        if type(pk) == "string" and type(ver) == "table" then
+          local cur = win[pk]
+          local ce, cr = tonumber(cur and cur.epoch) or 0, tonumber(cur and cur.rev) or 0
+          local ve, vr = tonumber(ver.epoch) or 0, tonumber(ver.rev) or 0
+          if ve > ce or (ve == ce and vr > cr) then
+            win[pk] = { epoch = ve, rev = vr }
+          end
+        end
+      end
+      bag[lk] = nil
+    end
+  end
+end
+
+-- Existing cache key for this character identity, or nil.
+function Professions:ResolveCacheOwner(name)
+  if not name or name == "" or not GR.db then return nil end
+  local cache = Cache()
+  if type(cache[name]) == "table" then return name end
+  local id = U.CharIdentity(name)
+  if not id then return nil end
+  for k, entry in pairs(cache) do
+    if type(k) == "string" and type(entry) == "table" and U.CharIdentity(k) == id then
+      return k
+    end
+  end
+  return nil
+end
+
 -- Drop remote stubs that are truly empty (no list and no complete recipe catalogs).
 function Professions:ClearEmptyRemoteStubs()
   if not GR.db then return end
@@ -682,34 +797,133 @@ function Professions:ClearEmptyRemoteStubs()
       end
     end
   end
-  Professions:PruneSelfDuplicates()
+  Professions:PruneCharacterDuplicates()
+end
+
+-- Fold alias keys (Name vs Name-Realm, Forever wire forms) into one owner each.
+function Professions:PruneCharacterDuplicates()
+  if not GR.db then return end
+  Professions:MigrateActiveScopeKeys()
+  local cache = Cache()
+  local me = U.NormalizeName(U.PlayerName())
+
+  local groups = {}
+  for name, entry in pairs(cache) do
+    if type(name) == "string" and type(entry) == "table" then
+      local id = U.CharIdentity(name) or ("\0" .. string.lower(name))
+      local g = groups[id]
+      if not g then
+        g = {}
+        groups[id] = g
+      end
+      g[#g + 1] = name
+    end
+  end
+
+  for _, keys in pairs(groups) do
+    -- Lone self-alias still moves onto the canonical me key.
+    if #keys == 1 then
+      local only = keys[1]
+      if me and only ~= me and IsSelfCacheAlias(only, me) then
+        local entry = cache[only]
+        if type(cache[me]) ~= "table" then
+          cache[me] = {
+            list = entry.list,
+            classFile = entry.classFile or U.PlayerClassFile(),
+            time = entry.time or U.WallTime(),
+            raw = entry.raw,
+            recipes = entry.recipes,
+            wireAlias = entry.wireAlias,
+          }
+        else
+          MergeProfEntryInto(cache[me], entry, me)
+        end
+        cache[only] = nil
+        MergeCatalogVersionsInto(me, { only })
+      end
+    elseif #keys > 1 then
+      local winner = keys[1]
+      for i = 2, #keys do
+        local k = keys[i]
+        if me and k == me then
+          winner = k
+        elseif not (me and winner == me) then
+          local a, b = cache[k], cache[winner]
+          local at, bt = tonumber(a and a.time) or 0, tonumber(b and b.time) or 0
+          local an, ascore = ProfListScore(a and a.list)
+          local bn, bscore = ProfListScore(b and b.list)
+          -- Prefer filled lists over empty newer stubs when picking the key.
+          if an == 0 and bn > 0 then
+            -- keep winner
+          elseif bn == 0 and an > 0 then
+            winner = k
+          elseif at > bt or (at == bt and (an > bn or (an == bn and ascore > bscore))) then
+            winner = k
+          elseif me and IsSelfCacheAlias(k, me) and cache[me] then
+            winner = me
+          end
+        end
+      end
+      if me then
+        for i = 1, #keys do
+          if IsSelfCacheAlias(keys[i], me) then
+            if type(cache[me]) == "table" or keys[i] == me then
+              winner = me
+            end
+            break
+          end
+        end
+      end
+      if me and winner ~= me then
+        local selfAlias = false
+        for i = 1, #keys do
+          if IsSelfCacheAlias(keys[i], me) then selfAlias = true break end
+        end
+        if selfAlias then
+          if type(cache[me]) ~= "table" then
+            cache[me] = {
+              list = cache[winner].list,
+              classFile = cache[winner].classFile or U.PlayerClassFile(),
+              time = cache[winner].time or U.WallTime(),
+              raw = cache[winner].raw,
+              recipes = cache[winner].recipes,
+              wireAlias = cache[winner].wireAlias,
+            }
+          end
+          winner = me
+        end
+      end
+      local winEntry = cache[winner]
+      if type(winEntry) ~= "table" then
+        winEntry = {
+          list = {},
+          time = U.WallTime(),
+          classFile = me and U.PlayerClassFile() or nil,
+        }
+        cache[winner] = winEntry
+      end
+      local losers = {}
+      for i = 1, #keys do
+        local k = keys[i]
+        if k ~= winner and type(cache[k]) == "table" then
+          losers[#losers + 1] = k
+          MergeProfEntryInto(winEntry, cache[k], winner)
+          cache[k] = nil
+        end
+      end
+      MergeCatalogVersionsInto(winner, losers)
+      if type(winEntry.list) == "table" and #winEntry.list > 0 and type(winEntry.recipes) == "table" then
+        local recipesMod = GR:GetModule("ProfRecipes")
+        if recipesMod and recipesMod.PruneRecipesToProfessionList then
+          winEntry.recipes = recipesMod.PruneRecipesToProfessionList(winEntry.recipes, winEntry.list, winner)
+        end
+      end
+    end
+  end
 end
 
 function Professions:PruneSelfDuplicates()
-  if not GR.db then return end
-  local cache = Cache()
-  local me = U.NormalizeName(U.PlayerName())
-  local canon = cache[me]
-  local toRemove = {}
-  for name, entry in pairs(cache) do
-    if name ~= me and U.IsSelfName(name) then
-      if (not canon or not canon.list or #canon.list == 0) and entry and entry.list and #entry.list > 0 then
-        cache[me] = {
-          list = entry.list,
-          classFile = entry.classFile or U.PlayerClassFile(),
-          time = entry.time or U.WallTime(),
-          raw = entry.raw,
-          recipes = entry.recipes,
-          wireAlias = entry.wireAlias,
-        }
-        canon = cache[me]
-      end
-      toRemove[#toRemove + 1] = name
-    end
-  end
-  for i = 1, #toRemove do
-    cache[toRemove[i]] = nil
-  end
+  return Professions:PruneCharacterDuplicates()
 end
 
 local lastProfReqSend = 0
@@ -724,7 +938,7 @@ function Professions:Broadcast(force)
   if not IsInGuild() then return end
   Professions:MigrateCache()
   Professions:MigrateActiveScopeKeys()
-  Professions:PruneSelfDuplicates()
+  Professions:PruneCharacterDuplicates()
   local list = CollectLocal()
   local classFile = U.PlayerClassFile()
   local encoded = Encode(list, classFile)
@@ -761,7 +975,8 @@ function Professions:ApplyClassFile(who, classFile)
   if not who or not classFile or classFile == "" then return false end
   local cache = Cache()
   if not cache then return false end
-  local entry = cache[who]
+  local owner = Professions:ResolveCacheOwner(who) or who
+  local entry = cache[owner]
   if not entry then
     local short = string.lower(U.ShortName(who) or "")
     for name, e in pairs(cache) do
@@ -785,7 +1000,7 @@ function Professions:OnEnable()
     if not Professions.enabled then return end
     Professions:MigrateCache()
     Professions:MigrateAllScopeKeys()
-    Professions:PruneSelfDuplicates()
+    Professions:PruneCharacterDuplicates()
   end)
 
   GR:BindMessage(self, "POS_CACHE_CHANGED", function(_, sender, data)
@@ -798,7 +1013,7 @@ function Professions:OnEnable()
 
   GR:BindMessage(self, "PROF_UPDATE", function(_, sender, rest)
     if U.IsSelfName(sender) then
-      Professions:PruneSelfDuplicates()
+      Professions:PruneCharacterDuplicates()
       return
     end
     Professions:MigrateActiveScopeKeys()
@@ -806,7 +1021,8 @@ function Professions:OnEnable()
     if #raw > 200 then raw = raw:sub(1, 200) end
     local list, classFile = Decode(raw)
     local cache = Cache()
-    local prev = cache[sender]
+    local owner = Professions:ResolveCacheOwner(sender) or sender
+    local prev = cache[owner]
     if #list == 0 then
       if raw ~= "" then
         GR.db.prof._decodeMiss = (GR.db.prof._decodeMiss or 0) + 1
@@ -816,14 +1032,15 @@ function Professions:OnEnable()
         prev.time = U.WallTime()
         if classFile then prev.classFile = classFile end
         RememberWireAliasesFromRaw(prev, raw)
-        GR:SendMessage("PROF_CACHE_CHANGED", sender)
+        Professions:PruneCharacterDuplicates()
+        GR:SendMessage("PROF_CACHE_CHANGED", owner)
         return
       end
     end
     local recipes = prev and prev.recipes
     local recipesMod = GR:GetModule("ProfRecipes")
     if recipesMod and recipesMod.PruneRecipesToProfessionList then
-      recipes = recipesMod.PruneRecipesToProfessionList(recipes, list, sender)
+      recipes = recipesMod.PruneRecipesToProfessionList(recipes, list, owner)
     end
     local entry = {
       list = list,
@@ -839,8 +1056,13 @@ function Professions:OnEnable()
     for i = 1, #rawKeys do
       RememberWireAlias(entry, rawKeys[i])
     end
-    cache[sender] = entry
-    GR:SendMessage("PROF_CACHE_CHANGED", sender)
+    cache[owner] = entry
+    if owner ~= sender and cache[sender] and cache[sender] ~= entry then
+      MergeProfEntryInto(entry, cache[sender], owner)
+      cache[sender] = nil
+    end
+    Professions:PruneCharacterDuplicates()
+    GR:SendMessage("PROF_CACHE_CHANGED", owner)
   end)
 
   GR:BindMessage(self, "PROF_REQUEST", function()
