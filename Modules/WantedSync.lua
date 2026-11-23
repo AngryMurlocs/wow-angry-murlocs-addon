@@ -208,6 +208,14 @@ local function HeaderKey(reqId, killer)
   return tostring(reqId) .. "|" .. tostring(killer)
 end
 
+local function ResolveKillerKey(killer)
+  local state = Wanted:State()
+  if state and state.wanted and U.ResolveKeyedName then
+    return U.ResolveKeyedName(state.wanted, killer)
+  end
+  return killer
+end
+
 local function OnRecord(sender, data)
   if data.reqId == sync.reqId and (sync.state == "receiving" or sync.state == "waiting")
       and (not sync.responder or sync.responder == sender) then
@@ -215,6 +223,7 @@ local function OnRecord(sender, data)
     ArmTimeout(SYNC_IDLE_TIMEOUT, OnSyncTimeout)
   end
   local now = Wanted:Now()
+  local killer = ResolveKillerKey(data.killer)
   if data.kind == "E" then
     local hdr = {
       legacy = data.legacy,
@@ -222,49 +231,51 @@ local function OnRecord(sender, data)
       seenZone = data.seenZone,
       seenBy = U.NormalizeName(data.seenBy),
     }
-    local changed = Logic.MergeEntryHeader(Wanted:State(), cfg, data.killer, hdr, now)
+    local changed = Logic.MergeEntryHeader(Wanted:State(), cfg, killer, hdr, now)
     if changed then
       Wanted:ScheduleRefresh()
-    elseif not Wanted:State().wanted[data.killer] then
+    elseif not Wanted:State().wanted[killer] then
       -- Legacy 0 header before any origin: keep sight until MergeOrigin creates the entry.
-      pendingHeaders[HeaderKey(data.reqId, data.killer)] = hdr
+      pendingHeaders[HeaderKey(data.reqId, killer)] = hdr
     end
     return
   end
-  local r = Logic.MergeOrigin(Wanted:State(), cfg, data.killer, data.origin, data, now, {
+  local r = Logic.MergeOrigin(Wanted:State(), cfg, killer, data.origin, data, now, {
     direct = U.SameCharacter(data.origin, sender),
     via = sender,
     selfKey = Wanted:SelfKey(),
     selfState = Wanted:SelfState(),
   })
   if r.ok then
-    local pk = HeaderKey(data.reqId, data.killer)
-    local pending = pendingHeaders[pk]
+    local pk = HeaderKey(data.reqId, killer)
+    local pending = pendingHeaders[pk] or pendingHeaders[HeaderKey(data.reqId, data.killer)]
     if pending then
       pendingHeaders[pk] = nil
-      if Logic.MergeEntryHeader(Wanted:State(), cfg, data.killer, pending, now) then
+      pendingHeaders[HeaderKey(data.reqId, data.killer)] = nil
+      if Logic.MergeEntryHeader(Wanted:State(), cfg, killer, pending, now) then
         -- sight applied onto the new entry
       end
     end
     Wanted:ScheduleRefresh()
   elseif r.reason ~= "dup" then
-    Wanted:Reject(r.reason, "WS " .. tostring(data.killer))
+    Wanted:Reject(r.reason, "WS " .. tostring(killer))
   end
 end
 
 local function OnLiveKill(sender, data)
-  local r = Logic.MergeOrigin(Wanted:State(), cfg, data.killer, data.origin, data, Wanted:Now(), {
+  local killer = ResolveKillerKey(data.killer)
+  local r = Logic.MergeOrigin(Wanted:State(), cfg, killer, data.origin, data, Wanted:Now(), {
     direct = true,
     via = sender,
     selfKey = Wanted:SelfKey(),
     selfState = Wanted:SelfState(),
   })
   if not r.ok then
-    if r.reason ~= "dup" then Wanted:Reject(r.reason, "WK " .. tostring(data.killer)) end
+    if r.reason ~= "dup" then Wanted:Reject(r.reason, "WK " .. tostring(killer)) end
     return
   end
   Wanted:ScheduleRefresh()
-  GR:SendMessage("WANTED_KILL", data.killer, data.origin, r.level, "direct")
+  GR:SendMessage("WANTED_KILL", killer, data.origin, r.level, "direct")
 end
 
 -- Login: re-announce our own newest victim counters so members who were offline
@@ -274,7 +285,7 @@ local ANNOUNCE_MAX = 20
 function Wanted:AnnounceOwn()
   if not GR.db.privacy.shareDeath or not IsInGuild or not IsInGuild() then return 0 end
   local selfKey = self:SelfKey()
-  local me = U.ShortName(U.PlayerName())
+  local me = U.NormalizeName(U.PlayerName()) or U.PlayerName()
   local list = {}
   for key, e in pairs(self:State().wanted) do
     local o = e.origins and e.origins[selfKey]

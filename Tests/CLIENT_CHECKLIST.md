@@ -64,6 +64,9 @@ Vorbereitung: zwei Gildenmitglieder A/B, gleicher bekannter Wanted-Eintrag, Kart
 - [ ] Forever-Login / Reload: Realm-APIs dauerhaft leer — Wanted/Berufe erscheinen nach Club-ID (`GetGuildClubId` / `INITIAL_CLUBS_LOADED`); kein Zwischen-Bucket `Realm::Gilde`; Listen nach `/reload` weiter da. Ingame-Befund: Club-ID nach Login und nach `/reload` für dieselbe Gilde stabil?
 - [ ] Gildenumbenennung: gleicher Club-Scope, Listen bleiben; Anzeigename aktualisiert.
 - [ ] Belegter Altbereich `CAMWOWEU4Realm6PvP::Angry Murlocs`: nach Login/Reload ohne Popup in `club:<id>` übernommen; kein zweiter Import. `::Angry Murlocs` ohne Herkunftsbeleg bleibt liegen. Login/Gildenwechsel: kein Import-Popup. Andere Club-ID nie übernehmen.
+- [ ] Leerer Realm + zwei Mitglieder mit gleichem Vornamen (z. B. `Vorname-NachnameA` / `Vorname-NachnameB`): Level-up / Tod des anderen kommt an (nicht als eigenes Echo verworfen). Build und gesehene Namensformen notieren.
+- [ ] Wanted: alter Eintrag (Import aus belegtem Altbereich) — Sichtung aktualisiert denselben Eintrag; weiterer Kill erhöht die Stufe. Nach `/reload` mit leerem Realm unverändert.
+- [ ] Berufe: alter Rezeptkatalog desselben Charakters unter heutigem Namen (ohne Legacy-Suffix) öffnen und ein Update empfangen; zwei gleichnamige Vornamen mit anderem Nachnamen bleiben getrennte Besitzer.
 - [ ] Zwei Gildenmitglieder tauschen Wanted/Berufe; Charakter ohne Gilde und gleichnamige andere Club-ID erhalten nichts. Gildenwechsel bei laufender Übertragung: alte Queue/Fragmente nicht in neuem Bereich.
 - [ ] Charakter in Gilde B einloggen: Gilde-A-Wanted-Einträge und Berufe erscheinen **nicht**.
 - [ ] Zurück zu Gilde A: alte Einträge sind wieder da, nichts aus Gilde B ist hineingemischt.

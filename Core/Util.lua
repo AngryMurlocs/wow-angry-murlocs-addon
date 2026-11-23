@@ -81,55 +81,83 @@ local function FoldNameKey(name)
   return s
 end
 
--- Strip spaces/hyphens/apostrophes for Forever name-format compares.
+-- Strip spaces/hyphens/apostrophes (display helpers / legacy compares only).
+-- Not used for CharIdentity: Lina-Roth and Linar-Oth both mash to linaroth.
 local function CompactName(s)
   if not s or s == "" then return nil end
   return string.lower(tostring(s)):gsub("[%s%-%']", "")
 end
 
--- Stable owner fold for profession cache / list rows. Uses DisplayCharName
--- (live-realm strip, Forever First-Last kept) then CompactName.
--- Not CharKey: first-token fold would merge "Baba Bing" with "Baba Other".
--- When RealmKey is missing: strip trailing -Token only if the left side has a
--- space ("First Last-Realm"). Bare "Ingoo-Endstation" stays intact.
+--- Historical realm suffix from VERIFIED_SCOPE_IMPORTS for the *live* club only.
+--- Nil when GuildScopeKey is missing, not a club, or club id is not in the map.
+--- scopeImported alone never activates this (guild switch / pending club).
+function U.VerifiedLegacyRealmSuffix()
+  local scopeKey = U.GuildScopeKey and U.GuildScopeKey()
+  if not scopeKey or not U.IsClubScopeKey(scopeKey) then return nil end
+  local clubId = U.ClubIdFromScopeKey(scopeKey)
+  if not clubId then return nil end
+  local map = U.VERIFIED_SCOPE_IMPORTS or {}
+  for legacyKey, expectedClub in pairs(map) do
+    if expectedClub == clubId and type(legacyKey) == "string" then
+      local realm = legacyKey:match("^([^:]+)::")
+      realm = CleanRealm(realm)
+      if realm then return realm end
+    end
+  end
+  return nil
+end
+
+-- Drop a proven realm suffix (live RealmKey, club-gated legacy, or wire
+-- "First Last-Token" when RealmKey is empty). Bare Forever First-Last kept.
+local function StripProvenRealmSuffix(full)
+  if not full or full == "" then return full end
+  local left, suffix = tostring(full):match("^(.-)%-([^%-]+)$")
+  if not left or left == "" or not suffix then return full end
+  local clean = CleanRealm(suffix)
+  if not clean then return full end
+  local cleanL = string.lower(clean)
+  local live = U.RealmKey and U.RealmKey()
+  if live and cleanL == string.lower(live) then return left end
+  local legacy = U.VerifiedLegacyRealmSuffix and U.VerifiedLegacyRealmSuffix()
+  if legacy and cleanL == string.lower(legacy) then return left end
+  if not live and left:find("%s") then return left end
+  return full
+end
+
+-- Token identity: lower tokens joined with "|". Preserves name boundaries
+-- (Lina-Roth ≠ Linar-Oth; Ingoo-Endstation == Ingoo Endstation after strip).
+local function TokenIdentity(name)
+  if not name or name == "" then return nil end
+  local base = StripProvenRealmSuffix(name)
+  local parts = {}
+  for tok in tostring(base):gmatch("[^%s%-']+") do
+    if tok ~= "" then parts[#parts + 1] = string.lower(tok) end
+  end
+  if #parts == 0 then return nil end
+  return table.concat(parts, "|")
+end
+
+-- Stable owner / character fold. Boundary-safe (not CompactName mash).
 function U.CharIdentity(name)
   if not name or name == "" then return nil end
-  if U.RealmKey() then
-    return CompactName(U.DisplayCharName(name))
-  end
-  local left, suffix = tostring(name):match("^(.-)%-([^%-]+)$")
-  if left and left ~= "" and suffix and left:find("%s") then
-    return CompactName(left)
-  end
-  return CompactName(name)
+  return TokenIdentity(name)
 end
 
 -- Robust self check (Forever sender/realm formats vary).
--- Handles Ingoo-Endstation (local) vs Ingoo Endstation-Realm (wire).
+-- Full CharIdentity only — first-token fold would treat Mani-Stein as Mani-Mond.
 function U.IsSelfName(name)
   if not name or name == "" then return false end
   local meRaw = U.PlayerName()
   local me = U.NormalizeName(meRaw)
   if me and name == me then return true end
   if me and string.lower(name) == string.lower(me) then return true end
-
-  local meShort = FoldNameKey(me)
-  local themShort = FoldNameKey(name)
-  if meShort and themShort and meShort == themShort then return true end
-
+  local meId = U.CharIdentity(me)
+  local themId = U.CharIdentity(name)
+  if meId and themId and meId == themId then return true end
   local unit = UnitName("player")
-  if unit and FoldNameKey(unit) == themShort then return true end
-
-  local meFullC = CompactName(me)
-  local meShortC = CompactName(U.ShortName(me))
-  local themShortC = CompactName(U.ShortName(name))
-  local themFullC = CompactName(name)
-  if meFullC and themShortC and meFullC == themShortC then return true end
-  if meShortC and themShortC and meShortC == themShortC then return true end
-  if meFullC and themFullC and meFullC == themFullC then return true end
-  -- themShort is local-name+false-realm mashed (ingooendstation) matching meFullC
-  if meShortC and themShortC and themShortC:sub(1, #meShortC) == meShortC and meFullC == themShortC then
-    return true
+  if unit then
+    local unitId = U.CharIdentity(unit)
+    if unitId and themId and unitId == themId then return true end
   end
   return false
 end
@@ -224,19 +252,43 @@ function U.ClampTs(ts, now)
   return ts
 end
 
--- Character identity inside one realm+guild scope. Character names contain no
--- spaces or hyphens, so the first token survives Forever's varying
--- "Name-Realm" / "Name Realm-Realm" sender formats.
+-- Character identity key inside one guild scope (boundary-safe CharIdentity).
 function U.CharKey(name)
-  if type(name) ~= "string" then return nil end
-  local first = name:match("^[^%s%-]+")
-  if not first or first == "" then return nil end
-  return string.lower(first)
+  return U.CharIdentity(name)
 end
 
 function U.SameCharacter(a, b)
   local ka, kb = U.CharKey(a), U.CharKey(b)
   return ka ~= nil and ka == kb
+end
+
+-- Prefer a stable map key when folding aliases (no legacy/live realm suffix).
+local function PreferCharMapKey(a, b)
+  local legacy = U.VerifiedLegacyRealmSuffix()
+  local live = U.RealmKey()
+  local function score(k)
+    local s = 0
+    if legacy and k:find("-" .. legacy, 1, true) then s = s - 100 end
+    if live and k:find("-" .. live, 1, true) then s = s - 50 end
+    s = s - #k
+    return s
+  end
+  if score(a) >= score(b) then return a end
+  return b
+end
+
+--- Resolve name to an existing key in map with the same CharIdentity, else name.
+function U.ResolveKeyedName(map, name)
+  if type(name) ~= "string" or name == "" then return name end
+  if type(map) == "table" and map[name] ~= nil then return name end
+  local id = U.CharIdentity(name)
+  if not id or type(map) ~= "table" then return name end
+  for k, v in pairs(map) do
+    if type(k) == "string" and v ~= nil and U.CharIdentity(k) == id then
+      return k
+    end
+  end
+  return name
 end
 
 -- Highest character level the client allows (Forever may go above 80).
@@ -558,6 +610,7 @@ function U.GetScopeDB()
     end
     U.EnsureScopeTable(scope)
     U.RefreshGuildDisplayName(scope)
+    U.FoldScopeCharacterKeys(scope)
     return scope
   end
   -- In guild but waiting for club id: no Realm::Guild / empty invent.
@@ -712,6 +765,123 @@ local function MergeWantedSelfBag(dst, src)
           end
         end
       end
+    end
+  end
+end
+
+-- Fold killer keys inside one wantedSelf bag (keys are opponents).
+local function FoldSelfKillKeys(kills)
+  if type(kills) ~= "table" then return end
+  local groups = {}
+  for kk, rec in pairs(kills) do
+    if type(kk) == "string" and type(rec) == "table" then
+      local id = U.CharIdentity(kk) or ("\0" .. string.lower(kk))
+      local g = groups[id]
+      if not g then
+        groups[id] = { key = kk, rec = rec }
+      else
+        local sn = tonumber(rec.n) or 0
+        local st = tonumber(rec.t) or 0
+        local mn = tonumber(g.rec.n) or 0
+        local mt = tonumber(g.rec.t) or 0
+        g.rec = { n = math.max(mn, sn), t = math.max(mt, st) }
+        g.key = PreferCharMapKey(g.key, kk)
+      end
+    end
+  end
+  wipe(kills)
+  for _, g in pairs(groups) do
+    kills[string.lower(g.key)] = g.rec
+  end
+end
+
+local function MergeOneHidden(a, b)
+  if type(a) ~= "table" then return b end
+  if type(b) ~= "table" then return a end
+  local al, at = tonumber(a.level) or 0, tonumber(a.t) or 0
+  local bl, bt = tonumber(b.level) or 0, tonumber(b.t) or 0
+  if bl > al or (bl == al and bt > at) then
+    return { level = bl, t = bt }
+  end
+  return { level = al, t = at }
+end
+
+local function MergeOneSelfBag(a, b)
+  local hold = { bag = { seq = 0, kills = {} } }
+  if type(a) == "table" then MergeWantedSelfBag(hold, { bag = a }) end
+  if type(b) == "table" then MergeWantedSelfBag(hold, { bag = b }) end
+  FoldSelfKillKeys(hold.bag.kills)
+  return hold.bag
+end
+
+--- Merge wanted / wantedHidden / wantedSelf keys that share CharIdentity.
+--- wanted → MergeEntryInto; hidden → level/t max; self → MergeWantedSelfBag.
+--- Idempotent. Killer keys inside wantedSelf bags also fold by identity.
+function U.FoldScopeCharacterKeys(scope)
+  if type(scope) ~= "table" then return end
+  local logic = GR.WantedLogic
+  if type(scope.wanted) == "table" and logic and logic.MergeEntryInto then
+    local groups = {}
+    for k, v in pairs(scope.wanted) do
+      if type(k) == "string" and type(v) == "table" then
+        if logic.MigrateEntryV2 then logic.MigrateEntryV2(v) end
+        local id = U.CharIdentity(k) or ("\0" .. string.lower(k))
+        local g = groups[id]
+        if not g then
+          groups[id] = { key = k, entry = v }
+        else
+          g.entry = logic.MergeEntryInto(g.entry, v)
+          g.key = PreferCharMapKey(g.key, k)
+        end
+      end
+    end
+    wipe(scope.wanted)
+    for _, g in pairs(groups) do
+      scope.wanted[g.key] = g.entry
+    end
+  end
+  if type(scope.wantedHidden) == "table" then
+    local groups = {}
+    for k, h in pairs(scope.wantedHidden) do
+      if type(k) == "string" and type(h) == "table" then
+        local id = U.CharIdentity(k) or ("\0" .. string.lower(k))
+        local g = groups[id]
+        if not g then
+          groups[id] = { key = k, h = h }
+        else
+          g.h = MergeOneHidden(g.h, h)
+          g.key = PreferCharMapKey(g.key, k)
+        end
+      end
+    end
+    wipe(scope.wantedHidden)
+    for _, g in pairs(groups) do
+      scope.wantedHidden[g.key] = g.h
+    end
+  end
+  if type(scope.wantedSelf) == "table" then
+    local groups = {}
+    for k, bag in pairs(scope.wantedSelf) do
+      if type(k) == "string" and type(bag) == "table" then
+        FoldSelfKillKeys(bag.kills)
+        -- Bag keys are CharIdentity strings (or legacy first-token); group by id.
+        local id = k
+        if not string.find(k, "|", 1, true) then
+          id = U.CharIdentity(k) or k
+        end
+        local g = groups[id]
+        if not g then
+          groups[id] = { key = id, bag = DeepCopyValue(bag) }
+          FoldSelfKillKeys(groups[id].bag.kills)
+        else
+          g.bag = MergeOneSelfBag(g.bag, bag)
+        end
+      end
+    end
+    wipe(scope.wantedSelf)
+    for id, g in pairs(groups) do
+      FoldSelfKillKeys(g.bag.kills)
+      scope.wantedSelf[id] = g.bag
     end
   end
 end
@@ -883,6 +1053,7 @@ function U.ImportScope(srcKey, expectedDestKey)
   if not pcall(MergeScopeInto, draft, src) then
     return false, "merge_failed"
   end
+  U.FoldScopeCharacterKeys(draft)
   -- Re-check membership/dest before publish (guild may have changed mid-merge).
   local liveKey = U.GuildScopeKey()
   if not liveKey or liveKey ~= destKey then

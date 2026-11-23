@@ -369,6 +369,226 @@ do
   check("sight-header: complete", SyncState(carol):find("complete") ~= nil, SyncState(carol))
 end
 
+local OLD_SCOPE = "CAMWOWEU4Realm6PvP::Angry Murlocs"
+local CLUB = "215871062"
+local LEGACY_REALM = "CAMWOWEU4Realm6PvP"
+local LEGACY_ROK = "Rok-" .. LEGACY_REALM
+
+local function EmptyRealmOpts(name)
+  return {
+    guild = "Angry Murlocs",
+    guildClubId = CLUB,
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      UnitFullName = function(unit)
+        if unit == "player" then return name, "" end
+        return nil
+      end,
+    },
+  }
+end
+
+local function LevelAny(c, name)
+  local U = c.GR.Util
+  local scope = U.GetScopeDB()
+  if not scope or not scope.wanted then return 0 end
+  local key = U.ResolveKeyedName(scope.wanted, name)
+  local e = scope.wanted[key]
+  return e and c.GR.WantedLogic.Level(e) or 0
+end
+
+-- Imported Rok legacy: sight before next kill; level 2; sync + empty-realm reload.
+do
+  local sim = Sim.New(70)
+  local alice = sim:AddClient("Alice", EmptyRealmOpts("Alice"))
+  local bob = sim:AddClient("Bob", EmptyRealmOpts("Bob"))
+  local U = alice.GR.Util
+  check("rok: RealmKey nil", U.RealmKey() == nil)
+  check("rok: club", U.GuildScopeKey() == "club:" .. CLUB)
+  local db = alice.GR.db
+  db.scopes[OLD_SCOPE] = {
+    wanted = {
+      [LEGACY_ROK] = {
+        schema = 2,
+        legacy = 0,
+        origins = {
+          ["alice"] = { name = "Alice", n = 1, seq = 1, t = sim:Wall() - 100, zone = "Hillsbrad", direct = true, own = true },
+        },
+        count = 1,
+        lastKillTime = sim:Wall() - 100,
+        lastVictim = "Alice",
+        lastZone = "Hillsbrad",
+        lastSeenTime = 0,
+        lastSeenZone = "",
+        lastSeenBy = "",
+        changedAt = sim:Wall() - 100,
+      },
+    },
+    wantedHidden = {},
+    wantedSelf = {},
+    prof = { cache = {} },
+  }
+  -- Origin key must match current CharKey("Alice") after identity change.
+  local vk = alice.GR.WantedLogic.CharKey("Alice")
+  db.scopes[OLD_SCOPE].wanted[LEGACY_ROK].origins = {
+    [vk] = { name = "Alice", n = 1, seq = 1, t = sim:Wall() - 100, zone = "Hillsbrad", direct = true, own = true },
+  }
+  local ok, err = U.ImportScope(OLD_SCOPE, "club:" .. CLUB)
+  check("rok: import", ok == true, tostring(err))
+  local scope = U.GetScopeDB()
+  local key = U.ResolveKeyedName(scope.wanted, "Rok")
+  check("rok: folded key", key ~= nil and LevelAny(alice, "Rok") == 1, key)
+  local seenOk = alice.Wanted:ApplySighting("Rok", "Hillsbrad", "Bob", sim:Wall(), 1434, 0.4, 0.5)
+  check("rok: sight before kill", seenOk == true)
+  local e = scope.wanted[key] or scope.wanted[U.ResolveKeyedName(scope.wanted, "Rok")]
+  key = U.ResolveKeyedName(alice.Wanted:State().wanted, "Rok")
+  e = alice.Wanted:State().wanted[key]
+  check("rok: sight time set", e and (e.lastSeenTime or 0) > 0, e and e.lastSeenTime)
+  sim:Run(15)
+  local r2 = alice.Wanted:RecordOwnDeath("Rok", "Hillsbrad")
+  check("rok: second kill", r2 and r2.ok and r2.level == 2, r2 and r2.reason)
+  sim:Run(3)
+  check("rok: bob level 2", LevelAny(bob, "Rok") == 2, LevelAny(bob, "Rok"))
+  bob.Wanted:RequestSync("full")
+  sim:Run(40)
+  check("rok: after sync still 2", LevelAny(bob, "Rok") == 2)
+  bob = sim:Reload(bob)
+  check("rok: reload RealmKey nil", bob.GR.Util.RealmKey() == nil)
+  check("rok: reload club", bob.GR.Util.GuildScopeKey() == "club:" .. CLUB)
+  check("rok: after reload 2", LevelAny(bob, "Rok") == 2)
+end
+
+-- Two victims same first name → two origin counters (direct + announce + sync).
+do
+  local sim = Sim.New(71)
+  local mond = sim:AddClient("Mani-Mond", EmptyRealmOpts("Mani-Mond"))
+  local stein = sim:AddClient("Mani-Stein", EmptyRealmOpts("Mani-Stein"))
+  local carol = sim:AddClient("Carol", EmptyRealmOpts("Carol"))
+  local K = "FoeX"
+  local r1 = mond.Wanted:RecordOwnDeath(K, "ZoneA")
+  check("dual: mond recorded", r1 and r1.ok and r1.level == 1)
+  sim:Run(3)
+  local r2 = stein.Wanted:RecordOwnDeath(K, "ZoneB")
+  check("dual: stein recorded", r2 and r2.ok)
+  sim:Run(3)
+  check("dual: level 2 on mond", LevelAny(mond, K) == 2, LevelAny(mond, K))
+  check("dual: level 2 on carol", LevelAny(carol, K) == 2, LevelAny(carol, K))
+  local e = mond.Wanted:State().wanted[K] or mond.Wanted:State().wanted[mond.GR.Util.ResolveKeyedName(mond.Wanted:State().wanted, K)]
+  local origins = e and e.origins or {}
+  local nOrig = 0
+  for _ in pairs(origins) do nOrig = nOrig + 1 end
+  check("dual: two origins", nOrig == 2, tostring(nOrig))
+  -- Login re-announce idempotent.
+  local before = LevelAny(carol, K)
+  check("dual: announce count", mond.Wanted:AnnounceOwn() >= 1)
+  sim:Run(5)
+  check("dual: after announce still 2", LevelAny(carol, K) == before)
+  carol.Wanted:RequestSync("full")
+  sim:Run(40)
+  check("dual: after sync 2", LevelAny(carol, K) == 2)
+end
+
+-- Old v2 direct with shortened origin must not merge into a specific namesake.
+do
+  local sim = Sim.New(72)
+  local carol = sim:AddClient("Carol", EmptyRealmOpts("Carol"))
+  local P = carol.GR.Protocol
+  local wall = sim:Wall()
+  local prefix = carol.GR.PREFIX or "GildenRadar"
+  -- Short origin "Mani" while both Mani-Mond and Mani-Stein exist as peers conceptually.
+  carol.GR.Comm:OnAddonMessage(prefix, P.EncodeWK({
+    killer = "ShortFoe", origin = "Mani", n = 1, seq = 1, t = wall, zone = "A",
+  }), "GUILD", "Mani-Mond")
+  sim:Run(1)
+  local e = carol.Wanted:State().wanted["ShortFoe"]
+  check("v2short: entry level 1", e and carol.GR.WantedLogic.Level(e) == 1)
+  local vkShort = carol.GR.WantedLogic.CharKey("Mani")
+  local vkMond = carol.GR.WantedLogic.CharKey("Mani-Mond")
+  check("v2short: short key != mond", vkShort ~= vkMond, tostring(vkShort) .. "/" .. tostring(vkMond))
+  check("v2short: origin under short key", e and e.origins[vkShort] ~= nil)
+  check("v2short: not under mond key", e and e.origins[vkMond] == nil)
+end
+
+-- Relayed WS origin uses same identity rules as direct.
+do
+  local sim = Sim.New(73)
+  local carol = sim:AddClient("Carol", EmptyRealmOpts("Carol"))
+  local P = carol.GR.Protocol
+  local wall = sim:Wall()
+  local prefix = carol.GR.PREFIX or "GildenRadar"
+  local reqId = "rel1"
+  carol.GR.Comm:OnAddonMessage(prefix, P.EncodeWSH("Carol", reqId, 2), "GUILD", "Alice")
+  carol.GR.Comm:OnAddonMessage(prefix,
+    P.EncodeWSEntry(reqId, "RelayFoe", 0, 0, "", ""), "GUILD", "Alice")
+  carol.GR.Comm:OnAddonMessage(prefix,
+    P.EncodeWSOrigin(reqId, "RelayFoe", "Mani-Mond", 1, 1, wall, "A"), "GUILD", "Alice")
+  carol.GR.Comm:OnAddonMessage(prefix,
+    P.EncodeWSOrigin(reqId, "RelayFoe", "Mani-Stein", 1, 1, wall, "B"), "GUILD", "Alice")
+  carol.GR.Comm:OnAddonMessage(prefix, P.EncodeWSE("Carol", reqId, 3, false, 0, ""), "GUILD", "Alice")
+  sim:Run(2)
+  check("relay: level 2", LevelAny(carol, "RelayFoe") == 2, LevelAny(carol, "RelayFoe"))
+  local e = carol.Wanted:State().wanted["RelayFoe"]
+  local nOrig = 0
+  for _ in pairs(e and e.origins or {}) do nOrig = nOrig + 1 end
+  check("relay: two origins", nOrig == 2, tostring(nOrig))
+end
+
+-- Split store fold: hidden, seq, kills survive double load.
+do
+  local sim = Sim.New(74)
+  local alice = sim:AddClient("Alice", EmptyRealmOpts("Alice"))
+  local U = alice.GR.Util
+  local scope = U.GetScopeDB()
+  local vk = alice.GR.WantedLogic.CharKey("Alice")
+  local t0 = sim:Wall() - 50
+  scope.wanted[LEGACY_ROK] = {
+    schema = 2, legacy = 0,
+    origins = { [vk] = { name = "Alice", n = 2, seq = 5, t = t0, zone = "Z", direct = true, own = true } },
+    count = 2, lastKillTime = t0, lastVictim = "Alice", lastZone = "Z",
+    lastSeenTime = t0 + 1, lastSeenZone = "Z", lastSeenBy = "Bob", changedAt = t0,
+  }
+  scope.wanted["Rok"] = {
+    schema = 2, legacy = 0,
+    origins = { [vk] = { name = "Alice", n = 1, seq = 2, t = t0 - 10, zone = "Y", direct = true, own = true } },
+    count = 1, lastKillTime = t0 - 10, lastVictim = "Alice", lastZone = "Y",
+    lastSeenTime = 0, lastSeenZone = "", lastSeenBy = "", changedAt = t0 - 10,
+  }
+  scope.wantedHidden[LEGACY_ROK] = { level = 2, t = t0 }
+  scope.wantedHidden["Rok"] = { level = 1, t = t0 - 5 }
+  scope.wantedSelf[vk] = {
+    seq = 5,
+    kills = {
+      [string.lower(LEGACY_ROK)] = { n = 2, t = t0 },
+      ["rok"] = { n = 1, t = t0 - 10 },
+    },
+  }
+  U.FoldScopeCharacterKeys(scope)
+  local key = U.ResolveKeyedName(scope.wanted, "Rok")
+  check("split: one wanted entry", (function()
+    local n = 0 for _ in pairs(scope.wanted) do n = n + 1 end return n == 1
+  end)())
+  check("split: max n=2", LevelAny(alice, "Rok") == 2)
+  check("split: hidden kept", scope.wantedHidden[key] and scope.wantedHidden[key].level == 2)
+  check("split: self seq", scope.wantedSelf[vk] and scope.wantedSelf[vk].seq == 5)
+  local kills = scope.wantedSelf[vk].kills
+  local kn = 0
+  for _ in pairs(kills) do kn = kn + 1 end
+  check("split: one killer bag", kn == 1, tostring(kn))
+  local _, krec = next(kills)
+  check("split: kill n=2", krec and krec.n == 2)
+  -- Double load idempotent.
+  U.FoldScopeCharacterKeys(scope)
+  U.FoldScopeCharacterKeys(scope)
+  check("split: still level 2", LevelAny(alice, "Rok") == 2)
+  check("split: still seq 5", scope.wantedSelf[vk].seq == 5)
+  alice = sim:Reload(alice)
+  check("split: reload empty realm", alice.GR.Util.RealmKey() == nil)
+  check("split: after reload level 2", LevelAny(alice, "Rok") == 2)
+  alice = sim:Reload(alice)
+  check("split: second reload level 2", LevelAny(alice, "Rok") == 2)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")

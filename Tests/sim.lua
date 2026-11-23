@@ -137,6 +137,10 @@ end
 function Sim:Deliver(from, prefix, msg, channel)
   if not from.online then return end
   self.bus[#self.bus + 1] = { t = self.clock, from = from.name, msg = msg }
+  -- Wire sender: append live realm only when the sender client has one.
+  -- Empty-realm Forever names (Mani-Mond) must not become Mani-Mond-Realm.
+  local realm = from.GR and from.GR.Util and from.GR.Util.RealmKey and from.GR.Util.RealmKey()
+  local wireSender = realm and (from.name .. "-" .. realm) or from.name
   for _, c in ipairs(self.clients) do
     if c ~= from and c.online and SameGuildBus(c, from) then
       if self.drop and self.drop(from, c, msg) then
@@ -144,7 +148,7 @@ function Sim:Deliver(from, prefix, msg, channel)
       else
         self:Schedule(self.latency, function()
           if c.online then
-            c.GR.Comm:OnAddonMessage(prefix, msg, channel, from.name .. "-Realm")
+            c.GR.Comm:OnAddonMessage(prefix, msg, channel, wireSender)
           end
         end)
       end
@@ -293,6 +297,14 @@ function Sim:AddClient(name, opts)
     if mod.OnEnable then mod:OnEnable() end
   end
 
+  -- Remember create opts so Reload can restore env stubs / extra modules.
+  c.reloadOpts = {
+    guild = opts.guild ~= false and (opts.guild or "Angry Murlocs") or false,
+    guildClubId = opts.guildClubId,
+    env = opts.env,
+    extraFiles = opts.extraFiles,
+    noReplyPolicy = opts.noReplyPolicy,
+  }
   c.env, c.GR = env, GR
   c.Wanted = GR:GetModule("Wanted")
   self.clients[#self.clients + 1] = c
@@ -300,13 +312,26 @@ function Sim:AddClient(name, opts)
 end
 
 -- Simulated /reload: same SavedVariables, fresh code state.
-function Sim:Reload(c)
+-- Preserves env stubs (e.g. empty realm) and extraFiles from the original AddClient.
+-- opts may override env / extraFiles / guildClubId.
+function Sim:Reload(c, opts)
+  opts = opts or {}
   c.online = false
   local db = DeepCopy(c.GR.db)
   local idx
   for i, x in ipairs(self.clients) do if x == c then idx = i end end
   table.remove(self.clients, idx)
-  return self:AddClient(c.name, { guild = c.guild, guildClubId = c.guildClubId, db = db })
+  local prev = c.reloadOpts or {}
+  local guild = prev.guild
+  if opts.guild ~= nil then guild = opts.guild end
+  return self:AddClient(c.name, {
+    guild = guild,
+    guildClubId = opts.guildClubId ~= nil and opts.guildClubId or prev.guildClubId or c.guildClubId,
+    db = db,
+    env = opts.env ~= nil and opts.env or prev.env,
+    extraFiles = opts.extraFiles ~= nil and opts.extraFiles or prev.extraFiles,
+    noReplyPolicy = opts.noReplyPolicy ~= nil and opts.noReplyPolicy or prev.noReplyPolicy,
+  })
 end
 
 function Sim.Level(c, killer)

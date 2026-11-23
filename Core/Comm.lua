@@ -522,11 +522,24 @@ function Comm:HasOpenFrag()
   return false
 end
 
+-- WK origin must match the wire sender. Full CharIdentity match, or legacy
+-- single-token short origin equal to the sender's first name token only
+-- (do not upgrade "Mani" to Mani-Mond / Mani-Stein).
+local function OriginMatchesSender(origin, sender)
+  if U.SameCharacter(origin, sender) then return true end
+  if type(origin) ~= "string" or type(sender) ~= "string" then return false end
+  if origin:find("[%s%-]") then return false end
+  local first = sender:match("^[^%s%-]+") or sender
+  local oid = U.CharIdentity(origin)
+  local fid = U.CharIdentity(first)
+  return oid ~= nil and oid == fid
+end
+
 local function DispatchV2(tag, rest, sender)
   local data, why
   if tag == "WK" then
     data, why = P.DecodeWK(rest)
-    if data and not U.SameCharacter(data.origin, sender) then
+    if data and not OriginMatchesSender(data.origin, sender) then
       data, why = nil, "origin_mismatch"
     end
     if data then data.killer = U.NormalizeName(data.killer) end

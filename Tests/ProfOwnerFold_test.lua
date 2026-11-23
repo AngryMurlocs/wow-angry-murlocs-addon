@@ -45,17 +45,23 @@ local function SkillOf(entry, key)
   return nil
 end
 
--- CharIdentity folds live-realm suffix; keeps distinct surnames apart.
+-- CharIdentity folds live-realm suffix; keeps distinct surnames / boundaries apart.
 do
   local sim = Sim.New(90)
   local alice = MakeClient(sim, "Alice")
   local U = alice.GR.Util
   check("identity Alice", U.CharIdentity("Alice") == "alice")
   check("identity Alice-Realm", U.CharIdentity("Alice-Realm") == "alice")
-  check("identity Baba Bing-Realm", U.CharIdentity("Baba Bing-Realm") == "bababing")
-  check("identity Baba Bing", U.CharIdentity("Baba Bing") == "bababing")
+  check("identity Baba Bing-Realm", U.CharIdentity("Baba Bing-Realm") == "baba|bing")
+  check("identity Baba Bing", U.CharIdentity("Baba Bing") == "baba|bing")
   check("identity Baba Other distinct",
     U.CharIdentity("Baba Bing") ~= U.CharIdentity("Baba Other"))
+  check("boundary Lina-Roth != Linar-Oth",
+    U.CharIdentity("Lina-Roth") ~= U.CharIdentity("Linar-Oth"),
+    tostring(U.CharIdentity("Lina-Roth")) .. "/" .. tostring(U.CharIdentity("Linar-Oth")))
+  check("boundary Ingoo-Endstation == Ingoo Endstation-Realm",
+    U.CharIdentity("Ingoo-Endstation") == U.CharIdentity("Ingoo Endstation-Realm"),
+    tostring(U.CharIdentity("Ingoo-Endstation")) .. "/" .. tostring(U.CharIdentity("Ingoo Endstation-Realm")))
 end
 
 -- Prune: Alice + Alice-Realm + empty classFile stub → one owner, best skills.
@@ -275,10 +281,14 @@ do
   })
   local P = alice.GR:GetModule("Professions")
   local U = alice.GR.Util
-  check("empty-realm identity Baba Bing", U.CharIdentity("Baba Bing") == "bababing")
-  check("empty-realm identity Baba Bing-Realm", U.CharIdentity("Baba Bing-Realm") == "bababing")
+  check("empty-realm identity Baba Bing", U.CharIdentity("Baba Bing") == "baba|bing")
+  check("empty-realm identity Baba Bing-Realm", U.CharIdentity("Baba Bing-Realm") == "baba|bing")
   check("empty-realm Ingoo-Endstation kept",
-    U.CharIdentity("Ingoo-Endstation") == "ingooendstation")
+    U.CharIdentity("Ingoo-Endstation") == "ingoo|endstation")
+  check("empty-realm Ingoo wire equals Forever",
+    U.CharIdentity("Ingoo-Endstation") == U.CharIdentity("Ingoo Endstation-Realm"))
+  check("empty-realm Lina != Linar",
+    U.CharIdentity("Lina-Roth") ~= U.CharIdentity("Linar-Oth"))
   check("empty-realm Baba Other distinct",
     U.CharIdentity("Baba Bing") ~= U.CharIdentity("Baba Other"))
   local scope = U.GetScopeDB()
@@ -393,6 +403,139 @@ do
   }, "relay")
   entry = owner and scope.prof.cache[P:ResolveCacheOwner("Eve") or owner]
   check("tail not resurrected", entry and (not entry.recipes or entry.recipes.tail == nil))
+end
+
+local OLD_SCOPE = "CAMWOWEU4Realm6PvP::Angry Murlocs"
+local CLUB = "215871062"
+local LEGACY_REALM = "CAMWOWEU4Realm6PvP"
+
+local function EmptyRealmClubOpts(extra)
+  local env = {
+    Enum = { SendAddonMessageResult = RESULT },
+    C_ChatInfo = {
+      RegisterAddonMessagePrefix = function() return true end,
+      SendAddonMessage = function() return RESULT.Success end,
+    },
+    GetNormalizedRealmName = function() return "" end,
+    GetRealmName = function() return "" end,
+  }
+  if extra then for k, v in pairs(extra) do env[k] = v end end
+  return {
+    guild = "Angry Murlocs",
+    guildClubId = CLUB,
+    extraFiles = { "Modules/Professions.lua", "Modules/ProfRecipes.lua" },
+    env = env,
+  }
+end
+
+-- Verified legacy Tara catalog reachable as Tara; Mond/Stein stay apart.
+do
+  local sim = Sim.New(110)
+  local alice = sim:AddClient("Alice", EmptyRealmClubOpts())
+  local P = alice.GR:GetModule("Professions")
+  local R = alice.GR:GetModule("ProfRecipes")
+  local U = alice.GR.Util
+  check("tara: RealmKey nil", U.RealmKey() == nil)
+  check("tara: club scope", U.GuildScopeKey() == "club:" .. CLUB, tostring(U.GuildScopeKey()))
+  check("tara: legacy strip on", U.VerifiedLegacyRealmSuffix() == LEGACY_REALM,
+    tostring(U.VerifiedLegacyRealmSuffix()))
+  local legacyOwner = "Tara-" .. LEGACY_REALM
+  check("tara: identity folds", U.CharIdentity(legacyOwner) == U.CharIdentity("Tara"),
+    tostring(U.CharIdentity(legacyOwner)))
+  local db = alice.GR.db
+  db.scopes[OLD_SCOPE] = {
+    wanted = {}, wantedHidden = {}, wantedSelf = {},
+    prof = {
+      cache = {
+        [legacyOwner] = {
+          list = { { key = "alch", skill = 300 } },
+          time = 50,
+          recipes = {
+            alch = {
+              ids = { 101, 102, 103 },
+              rev = 2,
+              complete = true,
+              epoch = 3,
+              scanAt = 50,
+              recvAt = 50,
+            },
+          },
+        },
+      },
+    },
+  }
+  local ok, err = U.ImportScope(OLD_SCOPE, "club:" .. CLUB)
+  check("tara: import ok", ok == true, tostring(err))
+  P:PruneCharacterDuplicates()
+  local scope = U.GetScopeDB()
+  local owner = P:ResolveCacheOwner("Tara") or P:ResolveCacheOwner(legacyOwner)
+  check("tara: resolved owner", owner ~= nil, tostring(owner))
+  local entry = R.GetEntry("Tara", "alch")
+  check("tara: GetEntry finds catalog", entry and entry.complete and entry.ids and #entry.ids == 3,
+    entry and tostring(#(entry.ids or {})))
+  alice.GR:SendMessage("PROF_UPDATE", "Tara", "alch:310+cook:1")
+  P:PruneCharacterDuplicates()
+  owner = P:ResolveCacheOwner("Tara")
+  check("tara: update same owner", owner and SkillOf(scope.prof.cache[owner], "alch") == 310,
+    tostring(owner and SkillOf(scope.prof.cache[owner], "alch")))
+  -- Control: Tara-Mond / Tara-Stein distinct.
+  scope.prof.cache["Tara-Mond"] = { list = { { key = "alch", skill = 10 } }, time = 1 }
+  scope.prof.cache["Tara-Stein"] = { list = { { key = "alch", skill = 20 } }, time = 1 }
+  P:PruneCharacterDuplicates()
+  check("tara: Mond != Stein identity",
+    U.CharIdentity("Tara-Mond") ~= U.CharIdentity("Tara-Stein"))
+  check("tara: Mond owner distinct",
+    P:ResolveCacheOwner("Tara-Mond") ~= P:ResolveCacheOwner("Tara-Stein"))
+  -- Reload keeps empty realm + modules.
+  alice = sim:Reload(alice)
+  check("tara: reload RealmKey nil", alice.GR.Util.RealmKey() == nil)
+  check("tara: reload club", alice.GR.Util.GuildScopeKey() == "club:" .. CLUB)
+  R = alice.GR:GetModule("ProfRecipes")
+  entry = R.GetEntry("Tara", "alch")
+  check("tara: after reload catalog", entry and entry.ids and #entry.ids == 3)
+end
+
+-- Negatives: scopeImported alone must not enable legacy strip.
+do
+  local sim = Sim.New(111)
+  local alice = sim:AddClient("Alice", EmptyRealmClubOpts({
+    -- other club
+  }))
+  alice.guildClubId = "999"
+  alice.env.C_Club.GetGuildClubId = function() return "999" end
+  local U = alice.GR.Util
+  alice.GR.db.scopeImported = { [OLD_SCOPE] = "club:" .. CLUB }
+  check("neg-switch: no legacy suffix", U.VerifiedLegacyRealmSuffix() == nil,
+    tostring(U.VerifiedLegacyRealmSuffix()))
+  check("neg-switch: Tara legacy stays distinct",
+    U.CharIdentity("Tara-" .. LEGACY_REALM) ~= U.CharIdentity("Tara"))
+end
+
+do
+  local sim = Sim.New(112)
+  local alice = sim:AddClient("Alice", {
+    guild = "Angry Murlocs",
+    guildClubId = CLUB,
+    extraFiles = { "Modules/Professions.lua", "Modules/ProfRecipes.lua" },
+    env = {
+      Enum = { SendAddonMessageResult = RESULT },
+      C_ChatInfo = {
+        RegisterAddonMessagePrefix = function() return true end,
+        SendAddonMessage = function() return RESULT.Success end,
+      },
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+    },
+  })
+  -- Club id pending.
+  alice.env.C_Club.GetGuildClubId = function() return nil end
+  alice.guildClubId = nil
+  local U = alice.GR.Util
+  alice.GR.db.scopeImported = { [OLD_SCOPE] = "club:" .. CLUB }
+  check("neg-pending: GuildScopeKey nil", U.GuildScopeKey() == nil)
+  check("neg-pending: no legacy suffix", U.VerifiedLegacyRealmSuffix() == nil)
+  check("neg-pending: Tara legacy distinct",
+    U.CharIdentity("Tara-" .. LEGACY_REALM) ~= U.CharIdentity("Tara"))
 end
 
 print(string.format("\n%d failures", fails))

@@ -274,6 +274,40 @@ do
   check("switch: new send ok", ok == true)
 end
 
+-- Empty realm: same first name sibling must not be treated as self (LVL delivery).
+do
+  local sim = Sim.New(21)
+  local delivered = {}
+  local mani = sim:AddClient("Mani-Mond", {
+    guild = "Angry Murlocs",
+    guildClubId = "215871062",
+    env = {
+      GetNormalizedRealmName = function() return "" end,
+      GetRealmName = function() return "" end,
+      UnitFullName = function(unit)
+        if unit == "player" then return "Mani-Mond", "" end
+        return nil
+      end,
+    },
+  })
+  check("sibling: RealmKey nil", mani.GR.Util.RealmKey() == nil)
+  check("sibling: not self Mani-Stein", mani.GR.Util.IsSelfName("Mani-Stein") == false)
+  check("sibling: is self full", mani.GR.Util.IsSelfName("Mani-Mond") == true)
+  mani.GR:RegisterMessage("LVL_UPDATE", function(_, sender, level)
+    delivered[#delivered + 1] = { sender = sender, level = level }
+  end)
+  local prefix = mani.GR.PREFIX or "GildenRadar"
+  mani.GR.Comm:OnAddonMessage(prefix, "LVL|42", "GUILD", "Mani-Stein")
+  mani.GR.Comm:OnAddonMessage(prefix, "LVL|43", "GUILD", "Mani-Mond")
+  mani.GR.Comm:OnAddonMessage(prefix, "LVL|44", "GUILD", "Other-Member")
+  check("sibling: two foreign deliveries", #delivered == 2, tostring(#delivered))
+  local senders = {}
+  for i = 1, #delivered do senders[delivered[i].sender] = delivered[i].level end
+  check("sibling: got Mani-Stein", senders["Mani-Stein"] == 42)
+  check("sibling: got Other-Member", senders["Other-Member"] == 44)
+  check("sibling: no self echo", senders["Mani-Mond"] == nil)
+end
+
 print(string.format("\n%d failures", fails))
 if fails > 0 then
   error(fails .. " test failures")
