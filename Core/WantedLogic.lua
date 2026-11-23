@@ -74,19 +74,47 @@ function WantedLogic.RankFromLevel(level)
   return { level = level, key = key, minLevel = minLevel }
 end
 
--- Same rule as U.CharKey (kept local so this file stays standalone).
+-- Boundary-safe identity (same rule as U.CharKey / U.CharIdentity).
+-- Prefer Util when loaded; standalone fallback keeps name-part boundaries
+-- (Lina-Roth ≠ Linar-Oth) and wire "First Last-Token" space heuristic.
+local function TokenIdentity(name)
+  if type(name) ~= "string" or name == "" then return nil end
+  local left, suffix = name:match("^(.-)%-([^%-]+)$")
+  local base = name
+  if left and left ~= "" and suffix and left:find("%s") then
+    base = left
+  end
+  local parts = {}
+  for tok in base:gmatch("[^%s%-']+") do
+    if tok ~= "" then parts[#parts + 1] = string.lower(tok) end
+  end
+  if #parts == 0 then return nil end
+  return table.concat(parts, "|")
+end
+
 local function CharKey(name)
-  if type(name) ~= "string" then return nil end
-  local first = name:match("^[^%s%-]+")
-  if not first or first == "" then return nil end
-  return string.lower(first)
+  local util = GR.Util
+  if util and util.CharKey then
+    return util.CharKey(name)
+  end
+  return TokenIdentity(name)
 end
 WantedLogic.CharKey = CharKey
 
+-- Origin display / wire label: keep Forever first+last; strip only a known realm.
 local function Short(name)
   if not name then return "" end
-  return tostring(name):match("^[^%-]+") or tostring(name)
+  local util = GR.Util
+  if util and util.DisplayCharName then
+    return util.DisplayCharName(name)
+  end
+  local left, suffix = tostring(name):match("^(.-)%-([^%-]+)$")
+  if left and left ~= "" and suffix and left:find("%s") then
+    return left
+  end
+  return tostring(name)
 end
+WantedLogic.Short = Short
 
 function WantedLogic.NewEntry()
   return {

@@ -45,23 +45,29 @@ do
   local r = L.RecordOwnDeath(s, cfg, me, "Enemy-Realm", "Victim-Realm", "Hillsbrad", 1000)
   check("A1 recorded", r.ok and r.isNew)
   check("A1 level 1", s.wanted["Enemy-Realm"].count == 1)
-  check("A1 event id origin:seq", r.eventId == "victim:1")
+  -- Boundary-safe CharKey: Victim-Realm tokens stay distinct from short "Victim".
+  check("A1 event id origin:seq", r.eventId == "victim|realm:1", tostring(r.eventId))
 end
 
--- Acceptance 2: identical event via live, catch-up relay and reload -> still one kill
+-- Acceptance 2: identical event via live, Forever wire form, and reload -> still one kill.
+-- Short "Victim" alone is ambiguous and must NOT fold into Victim-Realm.
 do
   local victimState, me = NewState(), {}
   local r = L.RecordOwnDeath(victimState, cfg, me, "Enemy-Realm", "Victim-Realm", "Z", 1000)
   local peer = NewState()
   local rec = { n = r.n, seq = r.seq, t = r.t, zone = r.zone }
   local live = L.MergeOrigin(peer, cfg, "Enemy-Realm", "Victim-Realm", rec, 1001, { direct = true, via = "Victim-Realm" })
-  local relay = L.MergeOrigin(peer, cfg, "Enemy-Realm", "Victim", rec, 1002, { direct = false, via = "Other-Realm" })
+  local wire = L.MergeOrigin(peer, cfg, "Enemy-Realm", "Victim Realm-Realm", rec, 1002, { direct = false, via = "Other-Realm" })
+  local short = L.MergeOrigin(peer, cfg, "Enemy-Realm", "Victim", rec, 1003, { direct = false, via = "Other-Realm" })
   local reloaded = Clone(peer)
   local again = L.MergeOrigin(reloaded, cfg, "Enemy-Realm", "Victim Realm-Realm", rec, 2000, { direct = true })
   check("A2 live merged", live.ok and live.added == 1)
-  check("A2 relay dup", not relay.ok and relay.reason == "dup")
+  check("A2 wire Forever form dup", not wire.ok and wire.reason == "dup")
+  check("A2 short origin stays separate", short.ok and short.added == 1, short and short.reason)
   check("A2 reload dup", not again.ok and again.reason == "dup")
-  check("A2 level 1", reloaded.wanted["Enemy-Realm"].count == 1)
+  -- Short "Victim" adds a second ambiguous origin → level 2; full forms share one.
+  check("A2 level with short separate", reloaded.wanted["Enemy-Realm"].count == 2,
+    tostring(reloaded.wanted["Enemy-Realm"].count))
 end
 
 -- Acceptance 3: two different deaths after pair CD -> two kills
@@ -129,8 +135,9 @@ do
   local s = NewState()
   local fut = L.MergeOrigin(s, cfg, "K", "V", { n = 1, seq = 1, t = 99999 }, 1000, {})
   check("future ts rejected", not fut.ok and fut.reason == "future_ts")
-  local self = L.MergeOrigin(s, cfg, "Same-Realm", "Same", { n = 1, seq = 1, t = 10 }, 1000, {})
-  check("self kill rejected", not self.ok and self.reason == "self_kill")
+  -- Same character in Forever vs hyphenated realm wire form (space heuristic).
+  local self = L.MergeOrigin(s, cfg, "Same Realm-Realm", "Same-Realm", { n = 1, seq = 1, t = 10 }, 1000, {})
+  check("self kill rejected", not self.ok and self.reason == "self_kill", self and self.reason)
   check("no entry created on reject", s.wanted.K == nil)
   local hdr = L.MergeEntryHeader(s, cfg, "Nobody", { legacy = 0, seenT = 50 }, 1000)
   check("header w/o legacy creates nothing", not hdr and s.wanted.Nobody == nil)

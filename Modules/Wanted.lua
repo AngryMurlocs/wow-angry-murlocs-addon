@@ -68,7 +68,12 @@ end
 
 function Wanted:NormalizeKiller(name)
   if not name or name == "" then return nil end
-  return U.NormalizeName(name)
+  local key = U.NormalizeName(name)
+  local state = self:State()
+  if state and state.wanted and U.ResolveKeyedName then
+    key = U.ResolveKeyedName(state.wanted, key)
+  end
+  return key
 end
 
 function Wanted:PlayerZone()
@@ -186,10 +191,12 @@ function Wanted:RecordOwnDeath(killer, zone)
   end
   if self:Diag() then self:Diag():Log("wanted", "own %s n=%d seq=%d", key, r.n, r.seq) end
   self:ScheduleRefresh()
-  GR:SendMessage("WANTED_KILL", key, U.ShortName(me), r.level, "own")
+  -- Full origin on wire so same-first-name victims stay distinct for v2 peers.
+  local originWire = U.NormalizeName(me) or me
+  GR:SendMessage("WANTED_KILL", key, originWire, r.level, "own")
   if GR.db.privacy.shareDeath then
     local payload = P.EncodeWK({
-      killer = key, origin = U.ShortName(me), n = r.n, seq = r.seq, t = r.t, zone = r.zone,
+      killer = key, origin = originWire, n = r.n, seq = r.seq, t = r.t, zone = r.zone,
     })
     if payload then Comm:Send(payload, "kill", "death") end
   else
