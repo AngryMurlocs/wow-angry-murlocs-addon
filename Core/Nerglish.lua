@@ -325,6 +325,23 @@ local function OnHardware()
   N.FlushPendingYell()
 end
 
+-- Keyboard only OOC when Propagate API exists. Never DisarmHw here (mouse stays).
+local function SyncHwKeyboard()
+  local f = hwFrame
+  if not f then return end
+  local shown = f.IsShown and f:IsShown()
+  local inCombat = type(InCombatLockdown) == "function" and InCombatLockdown()
+  local canKb = shown and not inCombat and f.SetPropagateKeyboardInput ~= nil
+  if canKb then
+    f:SetPropagateKeyboardInput(true)
+    f:EnableKeyboard(true)
+    f:SetScript("OnKeyDown", OnHardware)
+  else
+    f:SetScript("OnKeyDown", nil)
+    f:EnableKeyboard(false)
+  end
+end
+
 local function EnsureHwFrame()
   if hwFrame or type(CreateFrame) ~= "function" then return hwFrame end
   local ok, frame = pcall(CreateFrame, "Frame", nil, UIParent)
@@ -333,18 +350,20 @@ local function EnsureHwFrame()
   if hwFrame.SetFrameStrata then hwFrame:SetFrameStrata("TOOLTIP") end
   if hwFrame.SetAllPoints and UIParent then hwFrame:SetAllPoints(UIParent) end
   hwFrame:Hide()
+  hwFrame:SetScript("OnEvent", function()
+    SyncHwKeyboard()
+  end)
+  local U = GR.Util
+  if U and U.SafeRegisterEvent then
+    U.SafeRegisterEvent(hwFrame, "PLAYER_REGEN_DISABLED")
+    U.SafeRegisterEvent(hwFrame, "PLAYER_REGEN_ENABLED")
+  end
   return hwFrame
 end
 
 local function ArmHw()
   local f = EnsureHwFrame()
   if not f then return end
-  f:SetScript("OnKeyDown", function(self)
-    if self.SetPropagateKeyboardInput then
-      pcall(self.SetPropagateKeyboardInput, self, true)
-    end
-    OnHardware()
-  end)
   f:SetScript("OnMouseDown", function()
     OnHardware()
   end)
@@ -354,10 +373,10 @@ local function ArmHw()
       OnHardware()
     end)
   end
-  f:EnableKeyboard(true)
   f:EnableMouse(true)
+  -- Show before Sync: EnsureHwFrame starts hidden; Sync checks IsShown.
   f:Show()
-  if f.EnableKeyboard then f:EnableKeyboard(true) end
+  SyncHwKeyboard()
 end
 
 --- Yell text. fromInput=true: send now (button/keybind). Else outdoor queues one pending slot.
