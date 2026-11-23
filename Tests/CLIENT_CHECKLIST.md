@@ -206,7 +206,6 @@ Forever **komplett neu starten** (nicht nur `/reload`). BugSack/LUA_WARNING prü
 - [ ] Keine neuen `Unrecognized XML: Binding` / Attribute / `header … more than once` für AngryMurlocs.
 - [ ] Esc → Tastaturbelegung → AddOns: Test yell, Stil wechseln, **Schmäh · Auto**, **Schmäh · Azeroth Auto**, plus 5 Kategorien (Raid / Dungeon / Open World / Gasthaus / Stadt) sichtbar.
 - [ ] Vorhandene Tasten: öffentlicher Testruf bzw. Rufstil-Wechsel funktionieren weiterhin.
-- [ ] Mausrad: Zeile in AddOns-Bindings anklicken → Rad drehen (kein Addon-Default; Zoom ggf. vorher freimachen oder Modifier nutzen).
 - [ ] Schmäh · Auto outdoor: sofort `/y` (Keybind = Hardware), Kategorie passt zum Ort (Raid/Dungeon/Rest/Stadt/Welt).
 
 ## Death toast: Forever names + UTF-8 (Unreleased)
