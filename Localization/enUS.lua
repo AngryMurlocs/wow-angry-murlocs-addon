@@ -410,6 +410,13 @@ L["NERGLISH_STYLE_SET"] = "Murloc yells: %s"
 BINDING_HEADER_ANGRYMURLOCS = "AngryMurlocs"
 BINDING_NAME_ANGRYMURLOCS_TEST_YELL = "Public test yell (/y)"
 BINDING_NAME_ANGRYMURLOCS_CYCLE_STYLE = "Cycle yell style (Off / Nerglish / Schmäh)"
+BINDING_NAME_ANGRYMURLOCS_JOKE_AUTO = "Schmäh · Auto (/y)"
+BINDING_NAME_ANGRYMURLOCS_AZEROTH_AUTO = "Schmäh · Azeroth Auto (/y)"
+BINDING_NAME_ANGRYMURLOCS_JOKE_RAID = "Schmäh · Raid (/y)"
+BINDING_NAME_ANGRYMURLOCS_JOKE_DUNGEON = "Schmäh · Dungeon (/y)"
+BINDING_NAME_ANGRYMURLOCS_JOKE_WORLD = "Schmäh · Open World (/y)"
+BINDING_NAME_ANGRYMURLOCS_JOKE_INN = "Schmäh · Inn (/y)"
+BINDING_NAME_ANGRYMURLOCS_JOKE_TOWN = "Schmäh · Town & daily life (/y)"
 
 -- Frozen English copy for U.L fallback (deDE mutates AngryMurlocsLocale in place).
 AngryMurlocsLocaleEN = {}

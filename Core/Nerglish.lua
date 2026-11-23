@@ -75,11 +75,59 @@ local PREFIX_PURE = {
 
 local IDLE_KINDS = { "idle_hunger", "idle_schmaeh", "idle_dumb", "idle_lazy" }
 
+-- Stable order for shuffle-bag refill (pairs() order is undefined).
+local POOL_KINDS = {
+  "lvl", "lvl_m", "lvl60", "death", "death_repeat", "sight", "wanted_kill",
+  "pvp", "guild_join", "loot", "achievement", "guild_goal",
+  "idle_hunger", "idle_schmaeh", "idle_dumb", "idle_lazy", "legend",
+}
+
+local JOKE_POOL_SIZE = 100
+local JOKE_PREFIX = "NERGLISH_JOKE_"
+
+-- Disjoint partition of NERGLISH_JOKE_1..100 for category keybinds.
+local JOKE_CATEGORIES = {
+  raid = { 52, 76, 77, 79, 82, 84, 86, 87, 89, 90, 91, 92, 96, 98, 100 },
+  dungeon = { 57, 65, 78, 80, 81, 85, 93, 94, 95, 99 },
+  world = { 17, 26, 29, 31, 33, 37, 41, 45, 49, 51, 58, 62, 66, 71, 74, 97 },
+  inn = { 3, 7, 9, 14, 15, 21, 22, 24, 27, 28, 30, 32, 34, 42, 43, 46, 50, 54, 56, 61, 63, 64, 68, 70, 73, 75 },
+  town = { 1, 2, 4, 5, 6, 8, 10, 11, 12, 13, 16, 18, 19, 20, 23, 25, 35, 36, 38, 39, 40, 44, 47, 48, 53, 55, 59, 60, 67, 69, 72, 83, 88 },
+}
+
+local JOKE_CATEGORY_IDS = { "raid", "dungeon", "world", "inn", "town" }
+
+local AZEROTH_POOL_SIZE = 100
+local AZEROTH_PREFIX = "NERGLISH_AZEROTH_"
+
+local function IdRange(a, b)
+  local t = {}
+  for i = a, b do
+    t[#t + 1] = i
+  end
+  return t
+end
+
+-- Contiguous partition of NERGLISH_AZEROTH_1..100 (user packs).
+local AZEROTH_CATEGORIES = {
+  raid = IdRange(1, 20),
+  dungeon = IdRange(21, 40),
+  world = IdRange(41, 60),
+  inn = IdRange(61, 80),
+  town = IdRange(81, 100),
+}
+
 local state = {
   lastReactAt = 0,
   hourStamps = {},
   lastVariant = {},
   lastTestAt = 0,
+  lastJokeAt = 0,
+  -- style → array of { kind=, index= }; drawn until empty then reshuffled.
+  testBags = {},
+  -- category → index bag for JokeYell
+  jokeBags = {},
+  -- category → index bag for AzerothJokeYell
+  azerothBags = {},
   -- Outdoor auto-yell waiting for next click/key: { text=, at= } or nil.
   pending = nil,
 }
@@ -111,8 +159,12 @@ end
 function N.ResetForTest()
   state.lastReactAt = 0
   state.lastTestAt = 0
+  state.lastJokeAt = 0
   ClearTable(state.hourStamps)
   ClearTable(state.lastVariant)
+  ClearTable(state.testBags)
+  ClearTable(state.jokeBags)
+  ClearTable(state.azerothBags)
   N.ClearPendingYell()
 end
 
@@ -284,6 +336,43 @@ local function InInstance()
   return inInst and true or false
 end
 
+local function InstanceType()
+  if type(IsInInstance) ~= "function" then return nil end
+  local ok, inInst, instType = pcall(IsInInstance)
+  if not ok or not inInst then return nil end
+  if type(instType) == "string" and instType ~= "" and instType ~= "none" then
+    return instType
+  end
+  return nil
+end
+
+local function PlayerIsResting()
+  if type(IsResting) ~= "function" then return false end
+  local ok, resting = pcall(IsResting)
+  return ok and resting and true or false
+end
+
+local function PlayerOnCityMap()
+  if type(C_Map) ~= "table" then return false end
+  if type(C_Map.GetBestMapForUnit) ~= "function" or type(C_Map.IsCityMap) ~= "function" then
+    return false
+  end
+  local okMap, mapId = pcall(C_Map.GetBestMapForUnit, "player")
+  if not okMap or type(mapId) ~= "number" then return false end
+  local okCity, isCity = pcall(C_Map.IsCityMap, mapId)
+  return okCity and isCity and true or false
+end
+
+--- Context → joke category. Priority: raid > dungeon > inn(rest) > town(city) > world.
+function N.ResolveJokeCategory()
+  local inst = InstanceType()
+  if inst == "raid" then return "raid" end
+  if inst == "party" then return "dungeon" end
+  if PlayerIsResting() then return "inn" end
+  if PlayerOnCityMap() then return "town" end
+  return "world"
+end
+
 local function SendYellNow(text)
   if not C_ChatInfo or type(C_ChatInfo.SendChatMessage) ~= "function" then
     return false
@@ -414,6 +503,115 @@ local function PickLegend(style)
   return PickLine("legend", style)
 end
 
+local function ResolveLine(kind, style, index)
+  local size = POOL_SIZE[kind]
+  local map = PrefixMap(style)
+  local prefix = map and map[kind]
+  if not size or not prefix or type(index) ~= "number" then return nil, nil, nil end
+  if index < 1 or index > size then return nil, nil, nil end
+  local key = prefix .. tostring(index)
+  local text = L(key)
+  if type(text) ~= "string" or text == "" or text == key then
+    return nil, nil, nil
+  end
+  if text:find("{", 1, true) then return nil, nil, nil end
+  return text, kind, index
+end
+
+local function ShuffleInPlace(t)
+  for i = #t, 2, -1 do
+    local r = Clamp01(N._Random())
+    local j = math.floor(r * i) + 1
+    t[i], t[j] = t[j], t[i]
+  end
+end
+
+local function FillStyleBag()
+  local bag = {}
+  for _, kind in ipairs(POOL_KINDS) do
+    local size = POOL_SIZE[kind]
+    if size then
+      for i = 1, size do
+        bag[#bag + 1] = { kind = kind, index = i }
+      end
+    end
+  end
+  ShuffleInPlace(bag)
+  return bag
+end
+
+local function DrawStyleLine(style)
+  local bag = state.testBags[style]
+  if not bag or #bag == 0 then
+    bag = FillStyleBag()
+    state.testBags[style] = bag
+  end
+  while #bag > 0 do
+    local entry = table.remove(bag)
+    local text, poolId, index = ResolveLine(entry.kind, style, entry.index)
+    if text then return text, poolId, index end
+  end
+  return nil, nil, nil
+end
+
+local function FillJokeBag(category)
+  local ids = JOKE_CATEGORIES[category]
+  if type(ids) ~= "table" then return nil end
+  local bag = {}
+  for i = 1, #ids do
+    bag[#bag + 1] = ids[i]
+  end
+  ShuffleInPlace(bag)
+  return bag
+end
+
+local function DrawJokeLine(category)
+  local bag = state.jokeBags[category]
+  if not bag or #bag == 0 then
+    bag = FillJokeBag(category)
+    if not bag then return nil, nil, nil end
+    state.jokeBags[category] = bag
+  end
+  while #bag > 0 do
+    local index = table.remove(bag)
+    local key = JOKE_PREFIX .. tostring(index)
+    local text = L(key)
+    if type(text) == "string" and text ~= "" and text ~= key and not text:find("{", 1, true) then
+      return text, category, index
+    end
+  end
+  return nil, nil, nil
+end
+
+local function FillAzerothBag(category)
+  local ids = AZEROTH_CATEGORIES[category]
+  if type(ids) ~= "table" then return nil end
+  local bag = {}
+  for i = 1, #ids do
+    bag[#bag + 1] = ids[i]
+  end
+  ShuffleInPlace(bag)
+  return bag
+end
+
+local function DrawAzerothLine(category)
+  local bag = state.azerothBags[category]
+  if not bag or #bag == 0 then
+    bag = FillAzerothBag(category)
+    if not bag then return nil, nil, nil end
+    state.azerothBags[category] = bag
+  end
+  while #bag > 0 do
+    local index = table.remove(bag)
+    local key = AZEROTH_PREFIX .. tostring(index)
+    local text = L(key)
+    if type(text) == "string" and text ~= "" and text ~= key and not text:find("{", 1, true) then
+      return text, category, index
+    end
+  end
+  return nil, nil, nil
+end
+
 local function AfterPick(now, style, poolId, index, text, bookLimits)
   N.Yell(text, false, now)
   if bookLimits then
@@ -466,7 +664,7 @@ function N.TryIdle(now)
 end
 
 --- Forced test yell. Bypasses auto limits; 2s click throttle. Off → preview nerglish.
---- fromInput=true: send immediately (Options button / keybind hardware path).
+--- Shuffle-bag over all style pools (~120). fromInput=true: Options / keybind path.
 function N.TestYell(now, fromInput)
   now = tonumber(now)
   if not now then
@@ -477,12 +675,64 @@ function N.TestYell(now, fromInput)
   end
   local style = N.GetStyle()
   if style == "off" then style = "nerglish" end
-  local text, poolId, index = PickLegend(style)
+  local text, poolId, index = DrawStyleLine(style)
   if not text then return nil end
   N.Yell(text, fromInput and true or false, now)
   state.lastTestAt = now
   if poolId and index then
     state.lastVariant[VariantKey(style, poolId)] = index
+  end
+  return text
+end
+
+--- Curated Wiener-Schmäh jokes by category keybind. Own bag per category; ignores yell style.
+--- category: raid | dungeon | world | inn | town | auto. fromInput=true: keybind hardware path.
+function N.JokeYell(now, fromInput, category)
+  now = tonumber(now)
+  if not now then
+    now = NowFallback()
+  end
+  if type(category) ~= "string" then
+    return nil
+  end
+  if category == "auto" then
+    category = N.ResolveJokeCategory()
+  end
+  if not JOKE_CATEGORIES[category] then
+    return nil
+  end
+  if state.lastJokeAt > 0 and (now - state.lastJokeAt) < TEST_CD then
+    return nil
+  end
+  local text, poolId, index = DrawJokeLine(category)
+  if not text then return nil end
+  N.Yell(text, fromInput and true or false, now)
+  state.lastJokeAt = now
+  if poolId and index then
+    state.lastVariant[VariantKey("joke", poolId)] = index
+  end
+  return text
+end
+
+--- Azeroth Schmäh pack; Auto picks category from context. Shares JokeYell throttle.
+function N.AzerothJokeYell(now, fromInput)
+  now = tonumber(now)
+  if not now then
+    now = NowFallback()
+  end
+  local category = N.ResolveJokeCategory()
+  if not AZEROTH_CATEGORIES[category] then
+    return nil
+  end
+  if state.lastJokeAt > 0 and (now - state.lastJokeAt) < TEST_CD then
+    return nil
+  end
+  local text, poolId, index = DrawAzerothLine(category)
+  if not text then return nil end
+  N.Yell(text, fromInput and true or false, now)
+  state.lastJokeAt = now
+  if poolId and index then
+    state.lastVariant[VariantKey("azeroth", poolId)] = index
   end
   return text
 end
@@ -494,6 +744,14 @@ N.MAX_PER_HOUR = MAX_PER_HOUR
 N.TEST_CD = TEST_CD
 N.PENDING_TTL = PENDING_TTL
 N.POOL_SIZE = POOL_SIZE
+N.POOL_KINDS = POOL_KINDS
+N.JOKE_POOL_SIZE = JOKE_POOL_SIZE
+N.JOKE_PREFIX = JOKE_PREFIX
+N.JOKE_CATEGORIES = JOKE_CATEGORIES
+N.JOKE_CATEGORY_IDS = JOKE_CATEGORY_IDS
+N.AZEROTH_POOL_SIZE = AZEROTH_POOL_SIZE
+N.AZEROTH_PREFIX = AZEROTH_PREFIX
+N.AZEROTH_CATEGORIES = AZEROTH_CATEGORIES
 N.PREFIX_SCHMAEH = PREFIX_SCHMAEH
 N.PREFIX_PURE = PREFIX_PURE
 N.IDLE_KINDS = IDLE_KINDS

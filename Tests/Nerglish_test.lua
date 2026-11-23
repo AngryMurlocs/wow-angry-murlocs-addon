@@ -67,11 +67,41 @@ N._Random = function() return 0 end
 local ty = N.TestYell(200, true)
 check("TestYell off text", type(ty) == "string" and ty ~= "")
 check("TestYell off YELL", yelled[1] and yelled[1].channel == "YELL")
-check("TestYell off pure", ty == AngryMurlocsLocale["NERGLISH_PURE_LEGEND_1"]
-  or (type(ty) == "string" and not ty:find("Oida", 1, true)))
+-- Off previews nerglish; shuffle-bag may draw any pure pool (not only legend).
+check("TestYell off pure", type(ty) == "string" and not ty:find("Oida", 1, true)
+  and not ty:find("Teamfähig", 1, true), tostring(ty))
 check("style still off", N.GetStyle() == "off")
 check("TestYell throttle", N.TestYell(201, true) == nil)
 check("TestYell after CD", N.TestYell(200 + N.TEST_CD, true) ~= nil)
+
+-- Shuffle-bag: many TestYell draws can leave legend pool (not only legends).
+AngryMurlocs.db.ui.nerglishStyle = "schmaeh"
+N.ResetForTest()
+N._Random = function() return 0.37 end
+local seenKinds = {}
+local legendOnly = true
+for i = 1, 40 do
+  local t = N.TestYell(10000 + i * N.TEST_CD, true)
+  check("TestYell bag " .. i, type(t) == "string" and t ~= "")
+  if type(t) == "string" then
+    local isLegend = false
+    for li = 1, 12 do
+      if t == AngryMurlocsLocale["NERGLISH_LEGEND_" .. li]
+        or t == AngryMurlocsLocaleEN["NERGLISH_LEGEND_" .. li] then
+        isLegend = true
+        break
+      end
+    end
+    if not isLegend then legendOnly = false end
+    seenKinds[#seenKinds + 1] = t
+  end
+end
+check("TestYell bag not legend-only", legendOnly == false)
+local uniq = {}
+for _, t in ipairs(seenKinds) do uniq[t] = true end
+local uniqN = 0
+for _ in pairs(uniq) do uniqN = uniqN + 1 end
+check("TestYell bag variety", uniqN >= 10, tostring(uniqN))
 
 AngryMurlocs.db.ui.nerglishStyle = "schmaeh"
 N.ResetForTest()
@@ -246,6 +276,238 @@ for line in tocText:gmatch("[^\r\n]+") do
   end
 end
 check("TOC omits Bindings.xml", not tocListsBindings)
+local jokeBindNames = {
+  "ANGRYMURLOCS_JOKE_AUTO",
+  "ANGRYMURLOCS_JOKE_RAID",
+  "ANGRYMURLOCS_JOKE_DUNGEON",
+  "ANGRYMURLOCS_JOKE_WORLD",
+  "ANGRYMURLOCS_JOKE_INN",
+  "ANGRYMURLOCS_JOKE_TOWN",
+}
+local jokeBindCats = { "auto", "raid", "dungeon", "world", "inn", "town" }
+for i, bn in ipairs(jokeBindNames) do
+  local cat = jokeBindCats[i]
+  check("Bindings.xml " .. bn, bxml:find(bn, 1, true)
+    and bxml:find('JokeYell(nil, true, "' .. cat .. '")', 1, true) ~= nil)
+end
+check("Bindings.xml no legacy JOKE_YELL", bxml:find("ANGRYMURLOCS_JOKE_YELL", 1, true) == nil)
+check("Bindings.xml AZEROTH_AUTO", bxml:find("ANGRYMURLOCS_AZEROTH_AUTO", 1, true)
+  and bxml:find("AzerothJokeYell(nil, true)", 1, true) ~= nil)
+
+-- Joke pool 1..100 present in active locale (deDE after load above) and EN copy.
+local jokeMissing = 0
+for i = 1, N.JOKE_POOL_SIZE do
+  local key = N.JOKE_PREFIX .. tostring(i)
+  local de = AngryMurlocsLocale[key]
+  local en = AngryMurlocsLocaleEN[key]
+  if type(de) ~= "string" or de == "" or de:find("{", 1, true) then
+    jokeMissing = jokeMissing + 1
+    print("FAIL joke de " .. key)
+  end
+  if type(en) ~= "string" or en == "" or en:find("{", 1, true) then
+    jokeMissing = jokeMissing + 1
+    print("FAIL joke en " .. key)
+  end
+end
+check("joke pool size", N.JOKE_POOL_SIZE == 100)
+check("joke pool ok", jokeMissing == 0, tostring(jokeMissing))
+
+-- Category partition: sum 100, disjoint, valid ids 1..100.
+local seenJoke = {}
+local catSum = 0
+local catDup = 0
+local catBad = 0
+for _, cat in ipairs(N.JOKE_CATEGORY_IDS) do
+  local ids = N.JOKE_CATEGORIES[cat]
+  check("joke cat " .. cat, type(ids) == "table" and #ids > 0)
+  if type(ids) == "table" then
+    catSum = catSum + #ids
+    for _, idx in ipairs(ids) do
+      if type(idx) ~= "number" or idx < 1 or idx > N.JOKE_POOL_SIZE then
+        catBad = catBad + 1
+      elseif seenJoke[idx] then
+        catDup = catDup + 1
+      else
+        seenJoke[idx] = cat
+      end
+    end
+  end
+end
+check("joke cats sum 100", catSum == 100, tostring(catSum))
+check("joke cats no dup", catDup == 0, tostring(catDup))
+check("joke cats ids ok", catBad == 0, tostring(catBad))
+local missingCat = 0
+for i = 1, N.JOKE_POOL_SIZE do
+  if not seenJoke[i] then missingCat = missingCat + 1 end
+end
+check("joke cats cover all", missingCat == 0, tostring(missingCat))
+
+check("BINDING_JOKE_AUTO de", BINDING_NAME_ANGRYMURLOCS_JOKE_AUTO == "Schmäh · Auto (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_JOKE_AUTO))
+check("BINDING_AZEROTH_AUTO de", BINDING_NAME_ANGRYMURLOCS_AZEROTH_AUTO == "Schmäh · Azeroth Auto (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_AZEROTH_AUTO))
+check("BINDING_JOKE_RAID de", BINDING_NAME_ANGRYMURLOCS_JOKE_RAID == "Schmäh · Raid (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_JOKE_RAID))
+check("BINDING_JOKE_DUNGEON de", BINDING_NAME_ANGRYMURLOCS_JOKE_DUNGEON == "Schmäh · Dungeon (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_JOKE_DUNGEON))
+check("BINDING_JOKE_WORLD de", BINDING_NAME_ANGRYMURLOCS_JOKE_WORLD == "Schmäh · Open World (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_JOKE_WORLD))
+check("BINDING_JOKE_INN de", BINDING_NAME_ANGRYMURLOCS_JOKE_INN == "Schmäh · Gasthaus (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_JOKE_INN))
+check("BINDING_JOKE_TOWN de", BINDING_NAME_ANGRYMURLOCS_JOKE_TOWN == "Schmäh · Stadt & Alltag (/y)", tostring(BINDING_NAME_ANGRYMURLOCS_JOKE_TOWN))
+
+-- Dungeon wording tweaks (#95 Tank, #99 Gruppenleiter).
+local j95 = AngryMurlocsLocale["NERGLISH_JOKE_95"]
+local j99 = AngryMurlocsLocale["NERGLISH_JOKE_99"]
+check("joke 95 Tank", type(j95) == "string" and j95:find("Tank", 1, true) and not j95:find("Main-Tank", 1, true), tostring(j95))
+check("joke 99 Gruppenleiter", type(j99) == "string" and j99:find("Gruppenleiter", 1, true) and not j99:find("Raidlead", 1, true), tostring(j99))
+check("joke 95 EN tank", type(AngryMurlocsLocaleEN["NERGLISH_JOKE_95"]) == "string"
+  and AngryMurlocsLocaleEN["NERGLISH_JOKE_95"]:find("tank", 1, true)
+  and not AngryMurlocsLocaleEN["NERGLISH_JOKE_95"]:find("main tank", 1, true))
+check("joke 99 EN group leader", type(AngryMurlocsLocaleEN["NERGLISH_JOKE_99"]) == "string"
+  and AngryMurlocsLocaleEN["NERGLISH_JOKE_99"]:find("group leader", 1, true))
+
+-- ResolveJokeCategory priority: raid > dungeon > inn > town > world.
+local savedIsInInstance = _G.IsInInstance
+local savedIsResting = _G.IsResting
+local savedCMap = _G.C_Map
+_G.IsResting = function() return false end
+_G.C_Map = {
+  GetBestMapForUnit = function() return 1 end,
+  IsCityMap = function() return false end,
+}
+_G.IsInInstance = function() return true, "raid" end
+check("resolve raid", N.ResolveJokeCategory() == "raid")
+_G.IsInInstance = function() return true, "party" end
+check("resolve dungeon", N.ResolveJokeCategory() == "dungeon")
+_G.IsInInstance = function() return false, "none" end
+_G.IsResting = function() return true end
+check("resolve inn", N.ResolveJokeCategory() == "inn")
+_G.IsResting = function() return false end
+_G.C_Map.IsCityMap = function() return true end
+check("resolve town", N.ResolveJokeCategory() == "town")
+_G.C_Map.IsCityMap = function() return false end
+check("resolve world", N.ResolveJokeCategory() == "world")
+-- Resting beats city map.
+_G.IsResting = function() return true end
+_G.C_Map.IsCityMap = function() return true end
+check("resolve resting over city", N.ResolveJokeCategory() == "inn")
+_G.IsInInstance = savedIsInInstance
+_G.IsResting = savedIsResting
+_G.C_Map = savedCMap
+
+-- JokeYell(category): style off ok; shared throttle; stays in category texts.
+AngryMurlocs.db.ui.nerglishStyle = "off"
+N.ResetForTest()
+yelled = {}
+N._Random = function() return 0.41 end
+check("JokeYell needs category", N.JokeYell(90000, true) == nil)
+local j1 = N.JokeYell(90000, true, "dungeon")
+check("JokeYell dungeon text", type(j1) == "string" and j1 ~= "")
+check("JokeYell dungeon YELL", yelled[1] and yelled[1].channel == "YELL")
+-- Drawn line must belong to dungeon set.
+local dungeonSet = {}
+for _, idx in ipairs(N.JOKE_CATEGORIES.dungeon) do
+  dungeonSet[AngryMurlocsLocale[N.JOKE_PREFIX .. idx]] = true
+  dungeonSet[AngryMurlocsLocaleEN[N.JOKE_PREFIX .. idx]] = true
+end
+check("JokeYell dungeon in pool", dungeonSet[j1] == true, tostring(j1))
+check("JokeYell shared throttle", N.JokeYell(90001, true, "raid") == nil)
+local j2 = N.JokeYell(90000 + N.TEST_CD, true, "dungeon")
+check("JokeYell after CD", type(j2) == "string" and j2 ~= "")
+check("JokeYell bag distinct", j1 ~= j2, tostring(j1) .. " | " .. tostring(j2))
+check("JokeYell dungeon2 in pool", dungeonSet[j2] == true, tostring(j2))
+-- Independent of TestYell throttle.
+check("JokeYell vs TestYell throttle", type(N.TestYell(90000 + N.TEST_CD, true)) == "string")
+
+-- JokeYell auto uses ResolveJokeCategory pool (raid instance → raid jokes).
+N.ResetForTest()
+yelled = {}
+_G.IsInInstance = function() return true, "raid" end
+_G.IsResting = function() return false end
+_G.C_Map = {
+  GetBestMapForUnit = function() return 1 end,
+  IsCityMap = function() return false end,
+}
+N._Random = function() return 0.41 end
+local ja = N.JokeYell(95000, true, "auto")
+local raidSet = {}
+for _, idx in ipairs(N.JOKE_CATEGORIES.raid) do
+  raidSet[AngryMurlocsLocale[N.JOKE_PREFIX .. idx]] = true
+  raidSet[AngryMurlocsLocaleEN[N.JOKE_PREFIX .. idx]] = true
+end
+check("JokeYell auto raid text", type(ja) == "string" and raidSet[ja] == true, tostring(ja))
+_G.IsInInstance = savedIsInInstance
+_G.IsResting = savedIsResting
+_G.C_Map = savedCMap
+
+-- Azeroth pack 1..100 + contiguous categories + Auto yell.
+local azMissing = 0
+for i = 1, N.AZEROTH_POOL_SIZE do
+  local key = N.AZEROTH_PREFIX .. tostring(i)
+  local de = AngryMurlocsLocale[key]
+  local en = AngryMurlocsLocaleEN[key]
+  if type(de) ~= "string" or de == "" or de:find("{", 1, true) then
+    azMissing = azMissing + 1
+    print("FAIL azeroth de " .. key)
+  end
+  if type(en) ~= "string" or en == "" or en:find("{", 1, true) then
+    azMissing = azMissing + 1
+    print("FAIL azeroth en " .. key)
+  end
+end
+check("azeroth pool size", N.AZEROTH_POOL_SIZE == 100)
+check("azeroth pool ok", azMissing == 0, tostring(azMissing))
+local seenAz = {}
+local azSum = 0
+local azDup = 0
+local azBad = 0
+for _, cat in ipairs(N.JOKE_CATEGORY_IDS) do
+  local ids = N.AZEROTH_CATEGORIES[cat]
+  check("azeroth cat " .. cat, type(ids) == "table" and #ids > 0)
+  if type(ids) == "table" then
+    azSum = azSum + #ids
+    for _, idx in ipairs(ids) do
+      if type(idx) ~= "number" or idx < 1 or idx > N.AZEROTH_POOL_SIZE then
+        azBad = azBad + 1
+      elseif seenAz[idx] then
+        azDup = azDup + 1
+      else
+        seenAz[idx] = cat
+      end
+    end
+  end
+end
+check("azeroth cats sum 100", azSum == 100, tostring(azSum))
+check("azeroth cats no dup", azDup == 0, tostring(azDup))
+check("azeroth cats ids ok", azBad == 0, tostring(azBad))
+local azMissCat = 0
+for i = 1, N.AZEROTH_POOL_SIZE do
+  if not seenAz[i] then azMissCat = azMissCat + 1 end
+end
+check("azeroth cats cover all", azMissCat == 0, tostring(azMissCat))
+check("azeroth raid range", #N.AZEROTH_CATEGORIES.raid == 20 and N.AZEROTH_CATEGORIES.raid[1] == 1
+  and N.AZEROTH_CATEGORIES.raid[20] == 20)
+check("azeroth dungeon range", #N.AZEROTH_CATEGORIES.dungeon == 20 and N.AZEROTH_CATEGORIES.dungeon[1] == 21
+  and N.AZEROTH_CATEGORIES.dungeon[20] == 40)
+
+N.ResetForTest()
+yelled = {}
+_G.IsInInstance = function() return true, "raid" end
+_G.IsResting = function() return false end
+_G.C_Map = {
+  GetBestMapForUnit = function() return 1 end,
+  IsCityMap = function() return false end,
+}
+N._Random = function() return 0.41 end
+local az1 = N.AzerothJokeYell(96000, true)
+local azRaidSet = {}
+for _, idx in ipairs(N.AZEROTH_CATEGORIES.raid) do
+  azRaidSet[AngryMurlocsLocale[N.AZEROTH_PREFIX .. idx]] = true
+  azRaidSet[AngryMurlocsLocaleEN[N.AZEROTH_PREFIX .. idx]] = true
+end
+check("AzerothJokeYell raid text", type(az1) == "string" and azRaidSet[az1] == true, tostring(az1))
+check("AzerothJokeYell shared throttle", N.AzerothJokeYell(96001, true) == nil)
+check("Azeroth vs Wiener shared throttle", N.JokeYell(96001, true, "raid") == nil)
+local az2 = N.AzerothJokeYell(96000 + N.TEST_CD, true)
+check("AzerothJokeYell after CD", type(az2) == "string" and azRaidSet[az2] == true, tostring(az2))
+_G.IsInInstance = savedIsInInstance
+_G.IsResting = savedIsResting
+_G.C_Map = savedCMap
 
 -- CycleStyle off → nerglish → schmaeh → off
 AngryMurlocs.db = { ui = { nerglishStyle = "off" } }
