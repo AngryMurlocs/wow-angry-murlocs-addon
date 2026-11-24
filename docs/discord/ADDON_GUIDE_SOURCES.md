@@ -2,11 +2,11 @@
 
 | Feld | Wert |
 | --- | --- |
-| Datum | 2026-11-23 |
-| Quelle | AngryMurlocs Release 0.11.31 |
-| Basis | `v0.11.31` / main nach release: 0.11.31 |
-| Status | Tag `v0.11.31` gesetzt; Mirror → GitHub → CurseForge-Build |
-| Codebeleg | Berufe-Owner-Fold: `U.CharIdentity`, `Professions:PruneCharacterDuplicates` / `ResolveCacheOwner`; Katalog `ProfRecipes` CacheOwnerKey / MaxCatalogFloor; Changelog `## 0.11.31` |
-| Tests | `luajit Tests/run_all.lua` (inkl. `ProfOwnerFold_test`) |
-| Client | Forever: Berufe-Tab nach Update — keine Doppelzeilen |
-| Offene Punkte | CLIENT_CHECKLIST Berufe-Pagination; Ingame-Check Doppelnamen nach Reload |
+| Datum | 2026-11-24 |
+| Quelle | AngryMurlocs Release 0.11.33 |
+| Basis | `release/0.11.33` / nach Tag `v0.11.33` |
+| Status | Release-Vorbereitung; Tag folgt nach Merge + Go |
+| Codebeleg | HW-Keyboard: `SyncHwKeyboard` in `Core/Nerglish.lua`; Joke: `JokeYell` / `AzerothJokeYell` / `Bindings.xml`; Changelog `## 0.11.33` |
+| Tests | `luajit Tests/run_all.lua` + `luajit Tests/Version_test.lua release` |
+| Client | Forever: Bindings neu starten; Outdoor pending Yell Klick/Taste; Schmäh Auto Keybinds |
+| Offene Punkte | CLIENT_CHECKLIST Nerglish HW + Bindings Abschnitte |
