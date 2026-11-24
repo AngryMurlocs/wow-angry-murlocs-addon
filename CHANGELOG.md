@@ -1,6 +1,6 @@
 # AngryMurlocs Changelog
 
-## Unreleased
+## 0.11.33
 
 - Outdoor Murloc yell no longer spams addon-blocked errors when you press a key in combat
 - Outdoor pending Murloc yell no longer flushes when you scroll the mouse wheel

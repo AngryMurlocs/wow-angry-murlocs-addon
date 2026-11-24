@@ -1,6 +1,6 @@
 # AngryMurlocs – Discord-Anleitung (Auszug)
 
-**Version 0.11.31.**
+**Version 0.11.33.**
 
 ## Berufe-Übersicht
 
@@ -26,10 +26,14 @@
 
 **Wo:** `/am` → Einstellungen → **Oberfläche** → **Murloc-Rufe**
 - **Aus** (Standard) / **Nerglish** (klassische Laute) / **Schmäh** (österreichische Mischung)
-- **Öffentlich testen (/y)** — Spieler in der Nähe hören mit; bei Aus testest du Nerglish; Test schreit sofort
-- Tasten: Esc → **Tastaturbelegung** → AddOns → **AngryMurlocs** → Öffentlich testen (/y) bzw. Rufstil wechseln (Aus / Nerglish / Schmäh)
+- **Öffentlich testen (/y)** — Spieler in der Nähe hören mit; bei Aus testest du Nerglish; Test schreit sofort und mixt alle Zeilen
+- Tasten: Esc → **Tastaturbelegung** → AddOns → **AngryMurlocs**
+  - Öffentlich testen (/y) · Rufstil wechseln (Aus / Nerglish / Schmäh)
+  - **Schmäh · Auto** / **Schmäh · Azeroth Auto** — Kontext (Raid / Dungeon / Gasthaus / Stadt / Welt), unabhängig vom Rufstil
+  - Kategorien: Raid, Dungeon, Open World, Gasthaus, Stadt & Alltag
+  - Nach neuer Bindings-Liste: Client **neu starten** (nicht nur `/reload`), dann Taste zuweisen
 
-**Grenze:** Selten (Chance + Abklingzeit, max. wenige pro Stunde). Nur Yell in Hörweite, kein Gilden-Chat. Draußen wartet der automatische Ruf auf Klick oder Taste (kein Addon-Block); der öffentliche Test bleibt sofort.
+**Grenze:** Selten (Chance + Abklingzeit, max. wenige pro Stunde). Nur Yell in Hörweite, kein Gilden-Chat. Draußen wartet der automatische Ruf auf **Klick oder Taste** (kein Mausrad; kein Addon-Block im Kampf durch Tasten); Test und Schmäh-Keybinds schreien sofort.
 
 ## Rezepte in Unterkategorien
 
