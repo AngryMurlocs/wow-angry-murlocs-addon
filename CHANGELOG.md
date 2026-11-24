@@ -4,6 +4,11 @@
 
 - Outdoor Murloc yell no longer spams addon-blocked errors when you press a key in combat
 - Outdoor pending Murloc yell no longer flushes when you scroll the mouse wheel
+- Public Murloc test yell mixes all lines (not only legends)
+- Wiener Schmäh keybinds by category: Raid, Dungeon, Open World, Inn, Town (Esc → Key Bindings → AddOns)
+- Extra Schmäh · Auto keybind picks Raid / Dungeon / Inn / Town / World from where you are
+- Schmäh · Azeroth Auto keybind yells Azeroth jokes by where you are (same categories)
+- Wiener Schmäh jokes rewritten (same categories)
 
 ## 0.11.32
 

@@ -11,4 +11,41 @@
       AngryMurlocs.Nerglish.CycleStyle()
     end
   </Binding>
+  <!-- Wiener Schmäh jokes by category (/y). Ignores Off / Nerglish / Schmäh style. -->
+  <Binding name="ANGRYMURLOCS_JOKE_AUTO" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.JokeYell then
+      AngryMurlocs.Nerglish.JokeYell(nil, true, "auto")
+    end
+  </Binding>
+  <!-- Azeroth Schmäh pack; Auto picks category from context. -->
+  <Binding name="ANGRYMURLOCS_AZEROTH_AUTO" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.AzerothJokeYell then
+      AngryMurlocs.Nerglish.AzerothJokeYell(nil, true)
+    end
+  </Binding>
+  <Binding name="ANGRYMURLOCS_JOKE_RAID" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.JokeYell then
+      AngryMurlocs.Nerglish.JokeYell(nil, true, "raid")
+    end
+  </Binding>
+  <Binding name="ANGRYMURLOCS_JOKE_DUNGEON" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.JokeYell then
+      AngryMurlocs.Nerglish.JokeYell(nil, true, "dungeon")
+    end
+  </Binding>
+  <Binding name="ANGRYMURLOCS_JOKE_WORLD" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.JokeYell then
+      AngryMurlocs.Nerglish.JokeYell(nil, true, "world")
+    end
+  </Binding>
+  <Binding name="ANGRYMURLOCS_JOKE_INN" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.JokeYell then
+      AngryMurlocs.Nerglish.JokeYell(nil, true, "inn")
+    end
+  </Binding>
+  <Binding name="ANGRYMURLOCS_JOKE_TOWN" category="ADDONS">
+    if AngryMurlocs and AngryMurlocs.Nerglish and AngryMurlocs.Nerglish.JokeYell then
+      AngryMurlocs.Nerglish.JokeYell(nil, true, "town")
+    end
+  </Binding>
 </Bindings>

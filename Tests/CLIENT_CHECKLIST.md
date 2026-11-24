@@ -204,8 +204,9 @@ Client-Build notieren: `/dump GetBuildInfo()` → ________ · BugSack offen.
 Forever **komplett neu starten** (nicht nur `/reload`). BugSack/LUA_WARNING prüfen.
 
 - [ ] Keine neuen `Unrecognized XML: Binding` / Attribute / `header … more than once` für AngryMurlocs.
-- [ ] Esc → Tastaturbelegung → AddOns: beide AngryMurlocs-Aktionen sichtbar (Test yell + Stil wechseln).
+- [ ] Esc → Tastaturbelegung → AddOns: Test yell, Stil wechseln, **Schmäh · Auto**, **Schmäh · Azeroth Auto**, plus 5 Kategorien (Raid / Dungeon / Open World / Gasthaus / Stadt) sichtbar.
 - [ ] Vorhandene Tasten: öffentlicher Testruf bzw. Rufstil-Wechsel funktionieren weiterhin.
+- [ ] Schmäh · Auto outdoor: sofort `/y` (Keybind = Hardware), Kategorie passt zum Ort (Raid/Dungeon/Rest/Stadt/Welt).
 
 ## Death toast: Forever names + UTF-8 (Unreleased)
 
