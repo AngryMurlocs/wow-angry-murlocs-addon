@@ -1,5 +1,10 @@
 # AngryMurlocs Changelog
 
+## Unreleased
+
+- Outdoor Murloc yell no longer spams addon-blocked errors when you press a key in combat
+- Outdoor pending Murloc yell no longer flushes when you scroll the mouse wheel
+
 ## 0.11.32
 
 - Guildmates with the same first name are no longer treated as you when the realm name is empty; older Wanted sightings/kills and recipe lists for a known character stay under today’s name
