@@ -99,12 +99,8 @@ local function DisarmHw()
   hwFrame:Hide()
   hwFrame:EnableKeyboard(false)
   hwFrame:EnableMouse(false)
-  if hwFrame.EnableMouseWheel then hwFrame:EnableMouseWheel(false) end
   hwFrame:SetScript("OnKeyDown", nil)
   hwFrame:SetScript("OnMouseDown", nil)
-  if hwFrame.SetScript then
-    hwFrame:SetScript("OnMouseWheel", nil)
-  end
 end
 
 function N.ClearPendingYell()
@@ -367,12 +363,6 @@ local function ArmHw()
   f:SetScript("OnMouseDown", function()
     OnHardware()
   end)
-  if f.EnableMouseWheel then
-    f:EnableMouseWheel(true)
-    f:SetScript("OnMouseWheel", function()
-      OnHardware()
-    end)
-  end
   f:EnableMouse(true)
   -- Show before Sync: EnsureHwFrame starts hidden; Sync checks IsShown.
   f:Show()
